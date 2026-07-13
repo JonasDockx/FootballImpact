@@ -1,5 +1,7 @@
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\CreditRule.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\FlatCreditRule.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\LinkFunction.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\LogisticLinkFunction.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\DataLoader.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\MatchProcessor.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\PlayerTally.java
@@ -8,3 +10,5 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\mo
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\MatchEvent.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\Player.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\Team.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\CsvWriter.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\Leaderboard.java

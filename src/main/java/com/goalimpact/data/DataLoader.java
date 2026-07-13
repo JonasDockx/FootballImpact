@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -36,6 +37,7 @@ public class DataLoader {
                 JsonObject obj = element.getAsJsonObject();
 
                 long matchId = obj.get("match_id").getAsLong();
+                LocalDate date = LocalDate.parse(obj.get("match_date").getAsString());
 
                 JsonObject homeObj = obj.getAsJsonObject("home_team");
                 Team home = new Team(
@@ -50,7 +52,7 @@ public class DataLoader {
                 int homeScore = obj.get("home_score").getAsInt();
                 int awayScore = obj.get("away_score").getAsInt();
 
-                matches.add(new Match(matchId, home, away, homeScore, awayScore));
+                matches.add(new Match(matchId, date, home, away, homeScore, awayScore));
             }
         }
         return matches;

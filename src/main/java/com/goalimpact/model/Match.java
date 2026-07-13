@@ -1,4 +1,6 @@
 package com.goalimpact.model;
 
-public record Match(long matchId, Team home, Team away, int homeScore, int awayScore) {
+import java.time.LocalDate;
+
+public record Match(long matchId, LocalDate date, Team home, Team away, int homeScore, int awayScore) {
 }
