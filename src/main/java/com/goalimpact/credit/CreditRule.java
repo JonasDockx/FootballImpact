@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.Set;
 
 public interface CreditRule {
-    // Given the on-pitch players of both teams for one goal,
-    // return each affected player's value chage.
-    Map<Player, Double> credit(Set<Player> scoringOnPitch, Set<Player> concedingOnPitch);
+    // Given the on-pitch players of both teams for one goal, and the frozen
+    // pre-match ratings, return each affected player's value change.
+    Map<Player, Double> credit(Set<Player> scoringOnPitch, Set<Player> concedingOnPitch, RatingLookup ratings);
 }

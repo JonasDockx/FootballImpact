@@ -1,6 +1,7 @@
 package com.goalimpact.engine;
 
 import com.goalimpact.credit.CreditRule;
+import com.goalimpact.credit.RatingLookup;
 import com.goalimpact.model.MatchEvent;
 import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
@@ -14,14 +15,29 @@ import java.util.Set;
 public class MatchProcessor {
     
     private final CreditRule creditRule;
+    private final double kFactor;
 
-    public MatchProcessor(CreditRule creditRule) {
+    public MatchProcessor(CreditRule creditRule, double kFactor) {
+        if (kFactor <= 0) {
+            throw new IllegalArgumentException("update factor K must be positive, was " + kFactor);
+        }
         this.creditRule = creditRule;
+        this.kFactor = kFactor;
     }
 
     public void process(List<MatchEvent> events, Map<Long, PlayerTally> tallies) {
+        // Rating period: freeze every player's rating at its pre-match value.
+        // Every goal in this match is judged against these frozen ratings;
+        // update apply only at the final whistle.
+        Map<Long, Double> frozen = new HashMap<>();
+        for (Map.Entry<Long, PlayerTally> entry : tallies.entrySet()) {
+            frozen.put(entry.getKey(), entry.getValue().rawTotal());
+        }
+        RatingLookup preMatch = id -> frozen.getOrDefault(id, 0.0);
+
         Map<Long, Set<Player>> onPitch = new HashMap<>(); // teamId -> players currently on
         Map<Long, Integer> enterTime = new HashMap<>(); // playerId -> stint start (seconds)
+        Map<Long, Double> matchResiduals = new HashMap<>(); // playerId -> summed residuals
 
         int lastTime = 0;
 
@@ -61,15 +77,19 @@ public class MatchProcessor {
                         }
                     }
 
-                    Map<Player, Double> deltas = creditRule.credit(scoringOnPitch, concedingOnPitch);
+                    Map<Player, Double> deltas = creditRule.credit(scoringOnPitch, concedingOnPitch, preMatch);
                     for (Map.Entry<Player, Double> d : deltas.entrySet()) {
-                        tallies.get(d.getKey().id()).addValue(d.getValue());
+                        matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
                     }
                 }
             }
         }
 
-        // Final whistle: close out everyone still on the pitch
+        // Final whistle: apply one rating update per player...
+        for(Map.Entry<Long, Double> entry : matchResiduals.entrySet()) {
+            tallies.get(entry.getKey()).addValue(kFactor * entry.getValue());
+        }
+        // ...and close out on-pitch time for everyone still on the pitch.
         for (Map.Entry<Long, Integer> entry : enterTime.entrySet()) {
             tallies.get(entry.getKey()).addSeconds(lastTime - entry.getValue());
         }

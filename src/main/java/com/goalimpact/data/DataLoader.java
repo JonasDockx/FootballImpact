@@ -1,5 +1,6 @@
 package com.goalimpact.data;
 
+import com.goalimpact.model.CompetitionSeason;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
 import com.goalimpact.model.Player;
@@ -25,7 +26,26 @@ public class DataLoader {
         this.dataDir = dataDir;
     }
 
-    public List<Match> loadMatches(int competitionId, int seasonId) throws IOException {
+    public List<CompetitionSeason> loadCompetitions() throws IOException {
+        Path file = dataDir.resolve("competitions.json");
+
+        List<CompetitionSeason> competitions = new ArrayList<>();
+        try (Reader reader = Files.newBufferedReader(file)) {
+            JsonArray array = JsonParser.parseReader(reader).getAsJsonArray();
+            for (JsonElement element : array) {
+                JsonObject obj = element.getAsJsonObject();
+                competitions.add(new CompetitionSeason(
+                    obj.get("competition_id").getAsInt(),
+                    obj.get("season_id").getAsInt(),
+                    obj.get("competition_name").getAsString(),
+                    obj.get("season_name").getAsString(),
+                    obj.get("competition_gender").getAsString()));
+            }
+        }
+        return competitions;
+    }
+
+    public List<Match> loadMatches(int competitionId, int seasonId) throws IOException {        
         Path file = dataDir.resolve("matches")
                             .resolve(String.valueOf(competitionId))
                             .resolve(seasonId + ".json");
@@ -56,6 +76,12 @@ public class DataLoader {
             }
         }
         return matches;
+    }
+
+    // The open dataset occasionally lists a match whose events file is not
+    // shipped. Callers use this to skip those instead of crashing mid-replay.
+    public boolean hasEvents(long matchId) {
+        return Files.exists(dataDir.resolve("events").resolve(matchId + ".json"));
     }
 
     public List<MatchEvent> loadEvents(long matchId) throws IOException {

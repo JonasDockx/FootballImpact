@@ -2,10 +2,13 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\cr
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\FlatCreditRule.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\LinkFunction.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\LogisticLinkFunction.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\RatingLookup.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\ResidualCreditRule.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\DataLoader.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\MatchProcessor.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\PlayerTally.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\Main.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\CompetitionSeason.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\Match.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\MatchEvent.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\Player.java
