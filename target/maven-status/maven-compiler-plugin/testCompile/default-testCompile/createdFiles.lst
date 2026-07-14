@@ -1,5 +1,6 @@
+com\goalimpact\engine\SmoothFadeScheduleTest.class
+com\goalimpact\engine\PredictionQualityTest.class
+com\goalimpact\engine\MatchProcessorTest.class
 com\goalimpact\data\DataLoaderTest.class
 com\goalimpact\credit\LogisticLinkFunctionTest.class
 com\goalimpact\credit\ResidualCreditRuleTest.class
-com\goalimpact\engine\PredictionQualityTest.class
-com\goalimpact\engine\MatchProcessorTest.class

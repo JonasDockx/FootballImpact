@@ -80,9 +80,17 @@ learning rate that shrinks with exposure (Kalman/TrueSkill-style uncertainty).
 
 **Design note:** revisits the "start at 0, uniform K" cold-start decision from
 the rule C grill — deliberately chosen for simplicity then, deliberately
-superseded when this lands. Needs its own mini-grill (decay schedule, floor,
-whether uncertainty also widens after inactivity). Committed to pursuing after
-the log-loss baseline exists.
+superseded when this lands.
+
+**Mini-grill done (2026-07-14), decisions in
+[ADR 0006](../docs/adr/0006-exposure-based-update-factor.md):** deterministic
+schedule `K(m) = K0·H/(H+m)` on career minutes, floor as a fraction of K0, no
+inactivity widening (our patchwork data can't tell "injured" from "uncovered
+league"), exposure frozen at kickoff, strength untouched, conservation given up
+(glossary *Value* updated), schedule behind its own seam with explicit
+uncertainty state as the named upgrade path. Ship gate: beat the best uniform-K
+log-loss in one coarse (k, K0, H, floor-fraction) grid with the uniform
+baseline embedded as floor-fraction = 100%. Ready to implement.
 
 **Calibration anchors from the real Goalimpact** (Übersteiger interview, see
 item 3): ~100 recorded games ≈ "relatively reliable" (their Pogba example),
