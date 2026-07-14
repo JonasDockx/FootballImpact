@@ -18,7 +18,7 @@ class ResidualCreditRuleTest {
 
     private final CreditRule rule = new ResidualCreditRule(new LogisticLinkFunction(1.0));
 
-    // Players 1-11 are the scoring side side, 12-23 are the conceding side, in all tests
+    // Players 1-11 are the scoring side, 12-23 are the conceding side, in all tests
     private static Player player(long id) {
         return new Player(id, "Player " + id);
     }

@@ -28,7 +28,7 @@ public class MatchProcessor {
     public void process(List<MatchEvent> events, Map<Long, PlayerTally> tallies) {
         // Rating period: freeze every player's rating at its pre-match value.
         // Every goal in this match is judged against these frozen ratings;
-        // update apply only at the final whistle.
+        // update applies only at the final whistle.
         Map<Long, Double> frozen = new HashMap<>();
         for (Map.Entry<Long, PlayerTally> entry : tallies.entrySet()) {
             frozen.put(entry.getKey(), entry.getValue().rating());

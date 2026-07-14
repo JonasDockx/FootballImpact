@@ -63,7 +63,7 @@ class MatchProcessorTest {
 
     @Test
     void ratingsAreFrozenWithinMatch() {
-        // Two identical goals in one match. Against all forzen all-zero ratings each
+        // Two identical goals in one match. Against all frozen all-zero ratings each
         // is worth exactly 0.5, so each scorer ends on exactly 1.0. If the first
         // goal's residual leaked into the second goal's expectation, the second
         // would be worth less than 0.5 and this total would be below 1.0.
