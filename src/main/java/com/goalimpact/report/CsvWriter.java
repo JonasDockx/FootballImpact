@@ -15,14 +15,14 @@ import java.util.Locale;
 public class CsvWriter {
     public void write(Path file, Collection<PlayerTally> tallies) throws IOException {
         List<PlayerTally> all = new ArrayList<>(tallies);
-        all.sort(Comparator.comparingDouble(PlayerTally::per90).reversed());
+        all.sort(Comparator.comparingDouble(PlayerTally::rating).reversed());
 
         try (Writer writer = Files.newBufferedWriter(file)) {
-            writer.write("player,team,minutes,raw_total,per90\n");
+            writer.write("player,team,minutes,rating\n");
             for (PlayerTally pt : all) {
-                writer.write(String.format(Locale.ROOT, "%s,%s,%.1f,%.1f,%.2f",
+                writer.write(String.format(Locale.ROOT, "%s,%s,%.1f,%.2f",
                     escape(pt.player().name()), escape(pt.team().name()),
-                    pt.minutes(), pt.rawTotal(), pt.per90()));
+                    pt.minutes(), pt.rating()));
                 writer.write("\n");
             }
         }

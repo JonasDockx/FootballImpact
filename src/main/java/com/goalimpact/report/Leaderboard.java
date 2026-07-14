@@ -8,33 +8,21 @@ import java.util.List;
 import java.util.Locale;
 
 public class Leaderboard {
-    
-    private final double minMinutes;
-
-    public Leaderboard(double minMinutes) {
-        this.minMinutes = minMinutes;
-    }
 
     public void print(Collection<PlayerTally> tallies, int topN) {
-        List<PlayerTally> qualified = new ArrayList<>();
-        for (PlayerTally pt : tallies) {
-            if (pt.minutes() >= minMinutes) {
-                qualified.add(pt);
-            }
-        }
-        qualified.sort(Comparator.comparingDouble(PlayerTally::per90).reversed());
+        List<PlayerTally> ranked = new ArrayList<>(tallies);
+        ranked.sort(Comparator.comparingDouble(PlayerTally::rating).reversed());
 
-        System.out.printf("Goalimpact leaderboard (min %.0f minutes, %d qualified)%n%n",
-            minMinutes, qualified.size());
-        System.out.printf("%-4s %-26s %-14s %6s %6s %7s%n",
-            "#", "Player", "Team", "Min", "Raw", "Per90");
-        
+        System.out.printf("GoalImpact leaderboard (%d players)%n%n", ranked.size());
+        System.out.printf("%-4s %-28s %-24s %7s %8s%n",
+            "#", "Player", "Team", "Min", "Rating");
+
         int rank = 1;
-        for (PlayerTally pt : qualified) {
+        for (PlayerTally pt : ranked) {
             if (rank > topN) break;
-            System.out.printf(Locale.US, "%-4d %-26s %-14s %6.0f %6.1f %7.2f%n",
+            System.out.printf(Locale.US, "%-4d %-28s %-24s %7.0f %8.2f%n",
                 rank, pt.player().name(), pt.team().name(),
-                pt.minutes(), pt.rawTotal(), pt.per90());
+                pt.minutes(), pt.rating());
             rank++;
         }
     }

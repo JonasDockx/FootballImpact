@@ -3,11 +3,14 @@ package com.goalimpact.engine;
 import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
 
+// A player's running state across the whole replay: the accumulated
+// GoalImpact rating, plus total on-pitch time (kept for reporting only -
+// minutes no longer normalize the rating).
 public class PlayerTally {
-    
+
     private final Player player;
-    private final Team team;
-    private double rawTotal;
+    private Team team; // latest team seen: players change teams over a career
+    private double rating;
     private long seconds;
 
     public PlayerTally(Player player, Team team) {
@@ -15,16 +18,12 @@ public class PlayerTally {
         this.team = team;
     }
 
-    public void addValue(double delta) { this.rawTotal += delta; }
+    public void applyUpdate(double delta) { this.rating += delta; }
     public void addSeconds(long s) { this.seconds += s; }
+    public void playsFor(Team team) { this.team = team; }
 
     public Player player() { return player; }
     public Team team() { return team; }
-    public double rawTotal() {return rawTotal; }
+    public double rating() { return rating; }
     public double minutes() { return seconds / 60.0; }
-
-    public double per90() {
-        if (seconds == 00) return 0.0;
-        return rawTotal / (seconds / 5400.0); // 5400 seconds = 90 minutes
-    }
 }

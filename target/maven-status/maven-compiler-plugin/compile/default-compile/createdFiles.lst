@@ -1,4 +1,5 @@
 com\goalimpact\data\DataLoader.class
+com\goalimpact\engine\PredictionQuality.class
 com\goalimpact\model\Player.class
 com\goalimpact\credit\CreditRule.class
 com\goalimpact\engine\PlayerTally.class

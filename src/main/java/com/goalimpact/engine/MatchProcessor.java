@@ -31,7 +31,7 @@ public class MatchProcessor {
         // update apply only at the final whistle.
         Map<Long, Double> frozen = new HashMap<>();
         for (Map.Entry<Long, PlayerTally> entry : tallies.entrySet()) {
-            frozen.put(entry.getKey(), entry.getValue().rawTotal());
+            frozen.put(entry.getKey(), entry.getValue().rating());
         }
         RatingLookup preMatch = id -> frozen.getOrDefault(id, 0.0);
 
@@ -51,7 +51,8 @@ public class MatchProcessor {
                     for (Player p : s.players()) {
                         set.add(p);
                         enterTime.put(p.id(), t);
-                        tallies.computeIfAbsent(p.id(), k -> new PlayerTally(p, s.team()));
+                        tallies.computeIfAbsent(p.id(), k -> new PlayerTally(p, s.team()))
+                            .playsFor(s.team());
                     }
                 }
                 case MatchEvent.Substitution sub -> {
@@ -60,7 +61,8 @@ public class MatchProcessor {
 
                     onPitch.get(sub.team().id()).add(sub.playerOn());
                     enterTime.put(sub.playerOn().id(), t);
-                    tallies.computeIfAbsent(sub.playerOn().id(), k -> new PlayerTally(sub.playerOn(), sub.team()));
+                    tallies.computeIfAbsent(sub.playerOn().id(), k -> new PlayerTally(sub.playerOn(), sub.team()))
+                        .playsFor(sub.team());
                 }
                 case MatchEvent.RedCard rc -> {
                     onPitch.get(rc.team().id()).remove(rc.player());
@@ -87,7 +89,7 @@ public class MatchProcessor {
 
         // Final whistle: apply one rating update per player...
         for(Map.Entry<Long, Double> entry : matchResiduals.entrySet()) {
-            tallies.get(entry.getKey()).addValue(kFactor * entry.getValue());
+            tallies.get(entry.getKey()).applyUpdate(kFactor * entry.getValue());
         }
         // ...and close out on-pitch time for everyone still on the pitch.
         for (Map.Entry<Long, Integer> entry : enterTime.entrySet()) {

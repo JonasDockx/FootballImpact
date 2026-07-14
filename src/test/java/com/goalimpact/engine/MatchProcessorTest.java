@@ -41,7 +41,7 @@ class MatchProcessorTest {
     }
 
     private static double rating(Map<Long, PlayerTally> tallies, long id) {
-        return tallies.get(id).rawTotal();
+        return tallies.get(id).rating();
     }
 
     @Test

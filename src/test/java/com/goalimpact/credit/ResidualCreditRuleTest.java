@@ -3,7 +3,9 @@ package com.goalimpact.credit;
 import com.goalimpact.model.Player;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -101,4 +103,25 @@ class ResidualCreditRuleTest {
 
         assertEquals(0.5, deltas.get(player(1)), 1e-9);
     }
+
+    @Test
+    void reportsEachGoalsExpectedProbabilityToItsObserver() {
+        List<Double> seen = new ArrayList<>();
+        CreditRule observed =
+            new ResidualCreditRule(new LogisticLinkFunction(1.0), seen::add);
+
+        observed.credit(players(1, 2, 3), players(12, 13, 14), ALL_ZERO);
+
+        assertEquals(1, seen.size());
+        assertEquals(0.5, seen.get(0), 1e-9);
+    }
+
+    @Test
+    void observerlessConstructorStillWorks() {
+        Map<Player, Double> deltas =
+            rule.credit(players(1, 2, 3), players(12, 13, 14), ALL_ZERO);
+
+        assertEquals(6, deltas.size());
+    }
+
 }
