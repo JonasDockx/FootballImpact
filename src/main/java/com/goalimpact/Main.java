@@ -15,13 +15,13 @@ import com.goalimpact.report.Leaderboard;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.function.DoubleConsumer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 public class Main {
-
     // The two empirical knobs of rule C (see ADR 0005), grid-searched below:
     // k - link gain: how strongly a rating gap moves the expected outcome
     // K - update factor: how much of a match's residual enters the rating
@@ -64,36 +64,26 @@ public class Main {
         for (double gain : LINK_GAINS) {
             for (double kFactor : K_FACTORS) {
                 PredictionQuality quality = new PredictionQuality();
-                MatchProcessor processor = new MatchProcessor(
-                    new ResidualCreditRule(new LogisticLinkFunction(gain), quality::observe),
-                    kFactor);
-                Map<Long, PlayerTally> tallies = new HashMap<>();
-                for (List<MatchEvent> events : replays) {
-                    processor.process(events, tallies);
-                }
+                replay(replays, gain, kFactor, quality::observe);
+                double loss = quality.meanLogLoss();
                 System.out.printf(Locale.US, "%8.2f %8.2f %10.4f%n",
-                    gain, kFactor, quality.meanLogLoss());
-                if (quality.meanLogLoss() < bestLoss) {
-                    bestLoss = quality.meanLogLoss();
+                    gain, kFactor, loss);
+                if (loss < bestLoss) {
+                    bestLoss = loss;
                     bestGain = gain;
                     bestKFactor = kFactor;
                 }
-                if (bestLoss == Double.MAX_VALUE) {
-                    throw new IllegalStateException("grid search saw no goals - cannot pick knobs.");
-                }
             }
+        }
+        if (bestLoss == Double.MAX_VALUE) {
+            throw new IllegalStateException("grid search saw no goals - cannot pick knobs.");
         }
         System.out.printf(Locale.US,
             "%nBest: k=%.2f K=%.2f (logloss %.4f vs 0.6931 baseline)%n%n",
             bestGain, bestKFactor, bestLoss);
 
         // Final replay with the winning knobs; reports come from this one.
-        MatchProcessor processor = new MatchProcessor(
-            new ResidualCreditRule(new LogisticLinkFunction(bestGain)), bestKFactor);
-        Map<Long, PlayerTally> tallies = new HashMap<>();
-        for (List<MatchEvent> events : replays) {
-            processor.process(events, tallies);
-        }
+        Map<Long, PlayerTally> tallies = replay(replays, bestGain, bestKFactor, p -> {});
 
         new Leaderboard().print(tallies.values(), 20);
 
@@ -102,4 +92,17 @@ public class Main {
         System.out.println();
         System.out.println("Full results written to " + csv.toAbsolutePath());
     }
+
+    // One full chronological replay of all matches with the given knobs;
+    // returns the resulting tallies, pObserver hears every goal's expected P.
+    private static Map<Long, PlayerTally> replay(List<List<MatchEvent>> replays,
+        double linkGain, double kFactor, DoubleConsumer pObserver) {
+            MatchProcessor processor = new MatchProcessor(
+                new ResidualCreditRule(new LogisticLinkFunction(linkGain), pObserver), kFactor);
+            Map<Long, PlayerTally> tallies = new HashMap<>();
+            for (List<MatchEvent> events : replays) {
+                processor.process(events, tallies);
+            }
+            return tallies;
+        }
 }
