@@ -109,6 +109,38 @@ points: world class >160 (~200 players worldwide), Bundesliga average 135,
 2. Bundesliga average 116–118, all-time top (Pogba, 2017) 200. Low priority —
 presentation only, after the model itself stabilizes.
 
+## 9. Cross-division calibration (rating islands within one gender pool)
+
+**Why:** A league whose players only play each other is a zero-sum island: its
+average rating is pinned at ~0 even if its true level is far below the top
+division. Calibration flows only through **bridges** — cross-division cup ties,
+promotion/relegation, player transfers, international duty. Each bridge match
+moves zero-sum rating mass between pools; the deficit then redistributes through
+the pool's internal matches. The real Goalimpact demonstrates this works (2.
+Bundesliga avg 116–118 vs 1. Bundesliga 135) given enough bridge data.
+
+**Rules of thumb when adding data:** (1) never add a division without its
+bridges (cups and/or transfer flow) — a bridgeless league floats at a false
+average; (2) cross-source player identity (item 5) is the transfer bridge's
+prerequisite — without it, careers fragment and pools disconnect; (3) if bridge
+convergence is too slow, consider seeding debutants at their competition's
+current average instead of 0 — revisits the grill's cold-start decision, needs
+its own mini-grill.
+
+## 10. New data sources: API / scraper / manual-entry GUI
+
+**Why:** StatsBomb Open Data is nearly exhausted as a source. Preference order
+(user, 2026-07): (1) a football data API, (2) scraping, (3) a simple GUI for
+manual entry of match events, plus master data (players, teams, competitions)
+and transfer registration so entered lineups land on the right team.
+
+**Design notes:** ADR 0004's loader boundary is the seam — every source (API,
+scraper, GUI-backed store) must just produce `Match` + typed `MatchEvent`s. A
+manual-entry GUI implies our own persistent match format, which would then also
+be the natural target format for scraped/API data. The model itself derives team
+affiliation from lineups, so transfer registration is entry-UX/validation, not a
+model concept. Reopens ADR 0001; item 5 (player identity) is the hard part.
+
 ## 4. Checkpoint + incremental persistence
 
 **Why:** Rule C recomputes ratings by replaying all history each run, which stays
