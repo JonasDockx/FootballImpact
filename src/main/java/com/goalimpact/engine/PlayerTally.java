@@ -4,8 +4,8 @@ import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
 
 // A player's running state across the whole replay: the accumulated
-// GoalImpact rating, plus total on-pitch time (kept for reporting only -
-// minutes no longer normalize the rating).
+// GoalImpact rating, plus total on-pitch time - the exposure that sizes the
+// player's update factor (ADR 0006) and feeds reporting.
 public class PlayerTally {
 
     private final Player player;

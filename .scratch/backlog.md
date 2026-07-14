@@ -69,7 +69,7 @@ Nachkomma-Bereich"): a predicted rout ending only 1-0 credits the losing side's
 players. Expectations are set per match *and per player*. Input data is exactly
 ours: lineups, goals, subs, red cards — nothing else.
 
-## 6. Adaptive per-player update factor (uncertainty-based K)
+## 6. Adaptive per-player update factor (uncertainty-based K) — DONE
 
 **Why:** With uniform K, a 47,000-minute veteran's rating swings as hard per
 match as a debutant's — Messi losing ~2 rating points (20% of the dataset's top
@@ -91,6 +91,19 @@ league"), exposure frozen at kickoff, strength untouched, conservation given up
 uncertainty state as the named upgrade path. Ship gate: beat the best uniform-K
 log-loss in one coarse (k, K0, H, floor-fraction) grid with the uniform
 baseline embedded as floor-fraction = 100%. Ready to implement.
+
+**Implemented and tuned (2026-07-14):** `SmoothFadeSchedule` behind the
+`UpdateSchedule` seam; `MatchProcessor` sizes updates from exposure frozen at
+kickoff (the substitution trap is pinned by a test). Tuning found that only the
+*product* k·K0 matters (predictions see only k·gap), so k is pinned at 0.10 and
+K0 carries the tuning; the winning cell is K0=2.0, H=4,000 min, interior on
+both axes. Ship gate passed: log-loss 0.6331 vs 0.6335 best-uniform, and the
+cosmetic win is large (veterans ~6× steadier relative to scale, debutants
+learning ~8× faster). Caveats: the floor never binds within observed careers
+(fade reaches it only past ~196,000 min), so the late-career-decline worry is
+*untested*, not resolved; and keepers (item 7) are now the most visible
+distortion — Bravo #3 and Valdés #4 on the adaptive leaderboard. Details in
+[ADR 0006](../docs/adr/0006-exposure-based-update-factor.md).
 
 **Calibration anchors from the real Goalimpact** (Übersteiger interview, see
 item 3): ~100 recorded games ≈ "relatively reliable" (their Pogba example),

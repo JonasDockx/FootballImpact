@@ -6,6 +6,8 @@ import com.goalimpact.data.DataLoader;
 import com.goalimpact.engine.MatchProcessor;
 import com.goalimpact.engine.PlayerTally;
 import com.goalimpact.engine.PredictionQuality;
+import com.goalimpact.engine.SmoothFadeSchedule;
+import com.goalimpact.engine.UpdateSchedule;
 import com.goalimpact.model.CompetitionSeason;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
@@ -22,11 +24,16 @@ import java.util.Locale;
 import java.util.Map;
 
 public class Main {
-    // The two empirical knobs of rule C (see ADR 0005), grid-searched below:
-    // k - link gain: how strongly a rating gap moves the expected outcome
-    // K - update factor: how much of a match's residual enters the rating
-    private static final double[] LINK_GAINS = {0.05, 0.1, 0.2, 0.5, 1.0};
-    private static final double[] K_FACTORS = {0.1, 0.25, 0.5, 1.0};
+    // The empirical knobs of rule C + ADR 0006, grid-searched below:
+    // k    - link gain: how strongly a rating gap moves the expected outcome.
+    // K0   - update factur for a debutant (zero exposure)
+    // H    - halving exposure: career minutes at which updates halve.
+    // floor    - fraction of K0 below which updates never fade;
+    //            1.0 switches the fade off = the uniform-K baseline (ship gate)
+    private static final double[] LINK_GAINS = {0.10};
+    private static final double[] K0S = {1.25, 1.5, 2.0, 2.5, 3.0};
+    private static final double[] HALVING_MINUTES = {2000, 4000, 8000, 16000};
+    private static final double[] FLOOR_FRACTIONS = {0.02, 0.05, 0.25, 1.0};
 
     public static void main(String[] args) throws Exception {
         Path dataDir = Path.of("C:/Users/dockx/Documents/Programmeren/DataStatsbomb/open-data/data");
@@ -59,19 +66,34 @@ public class Main {
 
         // Grid search: prequential mean log-loss per (k, K). 0.6931 = ln 2 is
         // the know-nothing baseline; lower is better.
-        System.out.printf("%8s %8s %10s%n", "k", "K", "logloss");
-        double bestGain = 0, bestKFactor = 0, bestLoss = Double.MAX_VALUE;
+                System.out.printf("%8s %8s %8s %8s %10s%n", "k", "K0", "H", "floor", "logloss");
+        double bestGain = 0, bestK0 = 0, bestH = 0, bestFloor = 0, bestLoss = Double.MAX_VALUE;
+        double bestUniformLoss = Double.MAX_VALUE;
         for (double gain : LINK_GAINS) {
-            for (double kFactor : K_FACTORS) {
-                PredictionQuality quality = new PredictionQuality();
-                replay(replays, gain, kFactor, quality::observe);
-                double loss = quality.meanLogLoss();
-                System.out.printf(Locale.US, "%8.2f %8.2f %10.4f%n",
-                    gain, kFactor, loss);
-                if (loss < bestLoss) {
-                    bestLoss = loss;
-                    bestGain = gain;
-                    bestKFactor = kFactor;
+            for (double k0 : K0S) {
+                for (double h : HALVING_MINUTES) {
+                    for (double floor : FLOOR_FRACTIONS) {
+                        // At floor 1.0 the fade is off and H is irrelevant:
+                        // run that uniform baseline once, not once per H.
+                        if (floor == 1.0 && h != HALVING_MINUTES[0]) {
+                            continue;
+                        }
+                        PredictionQuality quality = new PredictionQuality();
+                        replay(replays, gain, new SmoothFadeSchedule(k0, h, floor), quality::observe);
+                        double loss = quality.meanLogLoss();
+                        System.out.printf(Locale.US, "%8.2f %8.2f %8.0f %8.2f %10.4f%n",
+                            gain, k0, h, floor, loss);
+                        if (floor == 1.0 && loss < bestUniformLoss) {
+                            bestUniformLoss = loss;
+                        }
+                        if (loss < bestLoss) {
+                            bestLoss = loss;
+                            bestGain = gain;
+                            bestK0 = k0;
+                            bestH = h;
+                            bestFloor = floor;
+                        }
+                    }
                 }
             }
         }
@@ -79,11 +101,17 @@ public class Main {
             throw new IllegalStateException("grid search saw no goals - cannot pick knobs.");
         }
         System.out.printf(Locale.US,
-            "%nBest: k=%.2f K=%.2f (logloss %.4f vs 0.6931 baseline)%n%n",
-            bestGain, bestKFactor, bestLoss);
+            "%nBest: k=%.2f K0=%.2f H=%.0f floor=%.2f (logloss %.4f vs 0.6931 know-nothing)%n",
+            bestGain, bestK0, bestH, bestFloor, bestLoss);
+        System.out.printf(Locale.US,
+            "Ship gate (ADR 0006): best uniform logloss %.4f -> %s%n%n",
+            bestUniformLoss,
+            bestLoss < bestUniformLoss
+                ? "adaptive K beats uniform"
+                : "adaptive K does NOT beat uniform");
 
         // Final replay with the winning knobs; reports come from this one.
-        Map<Long, PlayerTally> tallies = replay(replays, bestGain, bestKFactor, p -> {});
+        Map<Long, PlayerTally> tallies = replay(replays, bestGain, new SmoothFadeSchedule(bestK0, bestH, bestFloor), p -> {});
 
         new Leaderboard().print(tallies.values(), 20);
 
@@ -96,9 +124,9 @@ public class Main {
     // One full chronological replay of all matches with the given knobs;
     // returns the resulting tallies, pObserver hears every goal's expected P.
     private static Map<Long, PlayerTally> replay(List<List<MatchEvent>> replays,
-        double linkGain, double kFactor, DoubleConsumer pObserver) {
+        double linkGain, UpdateSchedule schedule, DoubleConsumer pObserver) {
             MatchProcessor processor = new MatchProcessor(
-                new ResidualCreditRule(new LogisticLinkFunction(linkGain), pObserver), kFactor);
+                new ResidualCreditRule(new LogisticLinkFunction(linkGain), pObserver), schedule);
             Map<Long, PlayerTally> tallies = new HashMap<>();
             for (List<MatchEvent> events : replays) {
                 processor.process(events, tallies);

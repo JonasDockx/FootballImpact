@@ -46,7 +46,7 @@ class MatchProcessorTest {
 
     @Test
     void flatRuleWithOneMatchesOriginalBehaviour() {
-        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), 1.0);
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
 
         processor.process(List.of(
@@ -69,7 +69,7 @@ class MatchProcessorTest {
         // would be worth less than 0.5 and this total would be below 1.0.
 
         MatchProcessor processor = 
-            new MatchProcessor(new ResidualCreditRule(new LogisticLinkFunction(1.0)), 1.0);
+            new MatchProcessor(new ResidualCreditRule(new LogisticLinkFunction(1.0)), m -> 1.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
 
         processor.process(List.of(
@@ -91,7 +91,7 @@ class MatchProcessorTest {
         // moves ratings less.
 
         MatchProcessor processor = 
-            new MatchProcessor(new ResidualCreditRule(new LogisticLinkFunction(1.0)), 1.0);
+            new MatchProcessor(new ResidualCreditRule(new LogisticLinkFunction(1.0)), m -> 1.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
 
         List<MatchEvent> match = List.of(
@@ -109,7 +109,7 @@ class MatchProcessorTest {
     @Test
     void kFactorScalesTheUpdate() {
         MatchProcessor processor = 
-            new MatchProcessor(new ResidualCreditRule(new LogisticLinkFunction(1.0)), 2.0);
+            new MatchProcessor(new ResidualCreditRule(new LogisticLinkFunction(1.0)), m -> 2.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
 
         processor.process(List.of(
@@ -123,7 +123,7 @@ class MatchProcessorTest {
 
     @Test
     void substitutedOffPlayerMissesLaterGoals() {
-        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), 1.0);
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
 
         processor.process(List.of(
@@ -140,7 +140,7 @@ class MatchProcessorTest {
 
     @Test
     void minutesAreStillTracked() {
-        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), 1.0);
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
 
         processor.process(List.of(
@@ -153,5 +153,53 @@ class MatchProcessorTest {
         assertEquals(90.0, tallies.get(1L).minutes(), 1e-9);
         assertEquals(10.0, tallies.get(2L).minutes(), 1e-9);
         assertEquals(80.0, tallies.get(3L).minutes(), 1e-9);
+    }
+
+    @Test
+    void veteransMoveLessThanDebutants() {
+        // Player 1 arrives with 1,000 career minutes, exactly the halving
+        // exposure: K = 0.5. Player 2 debuts: K = 1.0. Both witness the same
+        // 0.5 residual, so the veteran gains 0.25 and the debutant 0.5.
+        MatchProcessor processor = new MatchProcessor(
+            new ResidualCreditRule(new LogisticLinkFunction(1.0)),
+            new SmoothFadeSchedule(1.0, 1000.0, 0.05));
+        Map <Long, PlayerTally> tallies = new HashMap<>();
+
+        PlayerTally veteran = new PlayerTally(player(1), TEAM_A);
+        veteran.addSeconds(60_000); // 1,000 minutes
+        tallies.put(1L, veteran);
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_A)
+        ), tallies);
+
+        assertEquals(0.25, rating(tallies, 1), 1e-9);
+        assertEquals(0.5, rating(tallies, 2), 1e-9);
+    }
+
+    @Test
+    void exposureIsFrozenAtKickoffLikeRatings() {
+        // Players 1 and 2 both debut (zero career minutes at kickoff) and both
+        // witness the goal at 5'. Player 2 is then subbed off at 10', which
+        // books his 10 minutes mid-match - player 1's land only after the
+        // update loop. Identical pre-match exposure must mean identical
+        // updates; reading exposure at the whistle instead would
+        // halve player 2's K (H = 10 minutes makes the trap loud).
+        MatchProcessor processor = new MatchProcessor(
+            new ResidualCreditRule(new LogisticLinkFunction(1.0)), 
+            new SmoothFadeSchedule(1.0, 10.0, 0.05));
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(5, TEAM_A),
+            sub(10, TEAM_A, 2, 3)
+        ), tallies);
+
+        assertEquals(0.5, rating(tallies, 1), 1e-9);
+        assertEquals(0.5, rating(tallies, 2), 1e-9);
     }
 }

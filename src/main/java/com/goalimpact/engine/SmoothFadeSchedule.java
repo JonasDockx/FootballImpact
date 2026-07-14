@@ -5,7 +5,7 @@ package com.goalimpact.engine;
 // updates halve; floorFraction = 1.0 switches the fade off entirely - that is
 // the uniform-K baseline the grid search compares against.
 
-public final class SmoothFadeSchedule {
+public final class SmoothFadeSchedule implements UpdateSchedule {
     
     private final double k0;
     private final double halvingMinutes;
@@ -26,6 +26,7 @@ public final class SmoothFadeSchedule {
         this.floorFraction = floorFraction;
     }
 
+    @Override
     public double factor(double minutes) {
         double fade = k0 * halvingMinutes / (halvingMinutes + minutes);
         return Math.max(fade, floorFraction * k0);

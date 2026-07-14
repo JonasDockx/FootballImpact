@@ -15,23 +15,23 @@ import java.util.Set;
 public class MatchProcessor {
     
     private final CreditRule creditRule;
-    private final double kFactor;
+    private final UpdateSchedule schedule;
 
-    public MatchProcessor(CreditRule creditRule, double kFactor) {
-        if (kFactor <= 0) {
-            throw new IllegalArgumentException("update factor K must be positive, was " + kFactor);
-        }
+    public MatchProcessor(CreditRule creditRule, UpdateSchedule schedule) {
         this.creditRule = creditRule;
-        this.kFactor = kFactor;
+        this.schedule = schedule;
     }
 
     public void process(List<MatchEvent> events, Map<Long, PlayerTally> tallies) {
-        // Rating period: freeze every player's rating at its pre-match value.
-        // Every goal in this match is judged against these frozen ratings;
-        // update applies only at the final whistle.
+        // Rating period: freeze every player's rating AND exposure at their
+        // pre-match values. Every goal is judged against the frozen ratings,
+        // every update sized by the frozen exposure; updates apply only at
+        // the final whistle.
         Map<Long, Double> frozen = new HashMap<>();
+        Map<Long, Double> frozenMinutes = new HashMap<>();
         for (Map.Entry<Long, PlayerTally> entry : tallies.entrySet()) {
             frozen.put(entry.getKey(), entry.getValue().rating());
+            frozenMinutes.put(entry.getKey(), entry.getValue().minutes());
         }
         RatingLookup preMatch = id -> frozen.getOrDefault(id, 0.0);
 
@@ -89,7 +89,8 @@ public class MatchProcessor {
 
         // Final whistle: apply one rating update per player...
         for(Map.Entry<Long, Double> entry : matchResiduals.entrySet()) {
-            tallies.get(entry.getKey()).applyUpdate(kFactor * entry.getValue());
+            double k = schedule.factor(frozenMinutes.getOrDefault(entry.getKey(), 0.0));
+            tallies.get(entry.getKey()).applyUpdate(k * entry.getValue());
         }
         // ...and close out on-pitch time for everyone still on the pitch.
         for (Map.Entry<Long, Integer> entry : enterTime.entrySet()) {
