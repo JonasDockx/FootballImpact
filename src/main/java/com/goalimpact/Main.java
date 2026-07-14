@@ -78,6 +78,9 @@ public class Main {
                     bestGain = gain;
                     bestKFactor = kFactor;
                 }
+                if (bestLoss == Double.MAX_VALUE) {
+                    throw new IllegalStateException("grid search saw no goals - cannot pick knobs.");
+                }
             }
         }
         System.out.printf(Locale.US,
