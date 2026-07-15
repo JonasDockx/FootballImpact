@@ -18,4 +18,6 @@ public sealed interface MatchEvent {
     
     record RedCard(int period, int minute, int second,
         Team team, Player player) implements MatchEvent {}
+
+    record MatchEnd(int period, int minute, int second) implements MatchEvent {}
 }

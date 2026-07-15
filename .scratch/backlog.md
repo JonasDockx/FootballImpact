@@ -41,7 +41,7 @@ data-source question we closed in
 [ADR 0001](../docs/adr/0001-statsbomb-open-data-as-source.md). Treat sourcing DOB
 as its own investigation before committing.
 
-## 3. Time-integrated (clean-sheet-aware) residual source
+## 3. Time-integrated (clean-sheet-aware) residual source — DONE
 
 **Why:** Rule C ships goals-only, so 0-0s and low-event matches carry no signal
 and holding a strong side scoreless earns nothing. A time-integrated model would
@@ -68,6 +68,112 @@ expectation is a *fractional goal difference* per match ("wir arbeiten im
 Nachkomma-Bereich"): a predicted rout ending only 1-0 credits the losing side's
 players. Expectations are set per match *and per player*. Input data is exactly
 ours: lineups, goals, subs, red cards — nothing else.
+
+**Grill done (2026-07-15), decisions in
+[ADR 0007](../docs/adr/0007-time-integrated-residual.md):** two per-team
+scoring rates — a *measured* base scoring rate (goals ÷ team-minutes, never a
+grid dimension: the who-scored log-loss is blind to it; **re-measure it when
+large new eras/competitions land**) bent multiplicatively by the strength gap,
+recovering the logistic link as the who-scores half. Residual = full `±1`
+scoreboard jumps minus a continuously draining expected GD, per player over
+their stints; per-goal surprise (`1 − P`) is retired. The loader owns a new
+continuous playing clock + `MatchEnd` event (fixes the exposure undercount and
+the backwards-jumping half-time clock); the seam becomes `ResidualSource`
+(`goal` + `segment`), `MatchProcessor` chops segments, old rules stay
+expressible via an empty `segment` default. Deferred with backlog items: score
+effects (12), man-count-aware rates (13). Staged landing: clock fix +
+re-baseline → measure base rate → pure seam refactor → new model + (K0, H)
+re-grid. Gate: parity-or-better log-loss vs the re-baselined old rule, plus
+named-match clean-sheet demonstrations. Ready to implement.
+
+**Stage 1 landed (2026-07-15):** continuous playing clock + `MatchEnd`
+shipped; re-baselined log-loss **0.6331** (unchanged at four decimals — the
+number stage 4 must beat or match). The 2,651-match replay surfaced three
+boundary cases, each pinned in the loader: post-whistle cards clamp to the
+end of play (Valdés, Clásico 70272); a period ends at its latest in-play
+stamp, not the Half End stamp (Puyol at 93:07 vs whistle 93:06, match 68339);
+and short-format halves (2×40 youth matches) no longer inherit phantom
+minutes from the nominal 45:00 second-half start. Old-vs-new CSV audit: all
+34 minute decreases accounted for (3 duplicate-name join artifacts — all
+actually gained; 31 short-half corrections); total minutes +10.1%, largest
+gain Messi +4,510. A whistle-monotonicity tripwire (whistle ≥ every event
+stamp) guards the clock invariant.
+
+**Stage 2 done (2026-07-15): base scoring rate measured = 0.01473 goals per
+team-minute** (7,496 goals / 509,022 team-minutes on the honest clock; ≈ 2.83
+goals per match over 96.0 played minutes on average — old eras and the
+Barcelona-heavy La Liga slice run high). This is the pinned calibration
+constant for stage 4; re-measure when large new eras/competitions land.
+
+**Stage 3 done (2026-07-15):** seam refactored to `ResidualSource` (`goal` +
+default no-op `segment`); `MatchProcessor` chops lineup-constant segments
+(subs, red cards, whistle — goals deliberately don't chop) and merges segment
+deltas into the same per-match accumulation; chopping pinned by a
+recorder-fake test. Gate held: output byte-identical (CSV cmp clean,
+log-loss 0.6331), all 40 tests green.
+
+**Stage 4 shipped (2026-07-15):** `TimeIntegratedResidual` behind the seam;
+grid re-tuned to K0 = 1.0, H = 4,000 (interior on both axes; K0 halved as
+predicted — every match now signals). Gate passed on both halves: log-loss
+**0.6326 vs 0.6331** goals-only baseline, and the named-match demo shows both
+directions — England 0-0 Slovenia: all Slovenia +, all England −, scaled by
+per-player K and stint length; Georgia 2-0 Portugal: ±2.5 swings, Ronaldo
+docked least. Leaderboard shift: defenders rise (Puyol #6). Outcome details
+in ADR 0007.
+
+## 12. Score-aware scoring rates (the drip has no memory)
+
+**Why:** The time-integrated residual (item 3) drains expectation at a rate set
+only by the strength gap, indifferent to the current score. Real teams manage
+the score: a side 3-0 up eases off, a trailing side chases. So expected GD is
+slightly mis-calibrated in lopsided matches — the model expects a leading team
+to keep scoring at full rate. Accepted during the item-3 grill (2026-07-15) as
+a deliberate simplification: the real Goalimpact also works from match-level GD
+expectations. Revisit only if blowout matches visibly distort ratings — a fix
+would condition the two rates on the current scoreline, which needs its own
+calibration data.
+
+**Prerequisite:** item 3 shipped.
+
+## 13. Man-count-aware scoring rates (red cards)
+
+**Why:** Item 3's drip rates are computed from count-invariant Strength (an
+average), so a side reduced to 10 is expected to perform as if still 11 — for
+every remaining minute. The ten survivors systematically absorb negative
+residual for a structural disadvantage (roughly half a goal per 25 minutes by
+published estimates), while the sent-off player stops accruing at the card.
+Accepted during the item-3 grill (2026-07-15): rare, bounded, and not a new
+wrongness — glossary *Strength* documents the count-invariance, and the
+goals-only rule had the same blindness at goal instants.
+
+**Design note:** the `ResidualSource.segment(teamA, teamB, seconds, ratings)`
+seam already exposes the man count (the set sizes), so the fix is internal to
+the rate function — no engine or interface change. The real work is
+calibration: our data has too few red cards to measure the per-man effect
+well, and importing a literature number is its own mini-decision.
+
+**Prerequisite:** item 3 shipped.
+
+## 14. Home-field advantage in the expectation
+
+**Why (user, 2026-07-15):** home advantage is one of the largest documented
+effects in football (roughly 0.3–0.5 goals of expected GD per match), and the
+time-integrated model (item 3) currently expects equal teams to draw
+*anywhere*. Home sides therefore systematically beat expectation and away
+sides under-shoot it. It roughly washes out per player over a career (players
+play ~half home, ~half away) but it is unmodeled signal in the who-scores
+probability and the drain — likely the largest known systematic error now
+that item 3 has shipped.
+
+**Design notes:** enters naturally as a constant added to the home side's
+effective strength gap (equivalently, a rate multiplier), calibratable from
+the data like the base scoring rate. Two real problems to grill before
+building: (1) *plumbing* — `Match` knows home/away but `MatchProcessor` and
+the `ResidualSource` seam see only events and lineups, so venue must travel
+into the rule; (2) *neutral venues* — StatsBomb designates a "home team" even
+for neutral-site tournament matches (World Cups, Euros), where the label is
+administrative, not an advantage (except hosts) — applying HFA naively there
+injects noise. Needs its own mini-grill.
 
 ## 6. Adaptive per-player update factor (uncertainty-based K) — DONE
 

@@ -88,6 +88,12 @@ public class DataLoader {
         Path file = dataDir.resolve("events").resolve(matchId + ".json");
 
         List<MatchEvent> events = new ArrayList<>();
+        // Translate StatsBomb's restarting per-period clocks onto one
+        // continuous playing clock: seconds of actual play since kickoff.
+        int offsetSeconds = 0;  // summed true lengths of the periods already ended
+        int endedPeriod = 0;    // highest period whose Half End we have seen.
+        int maxT = 0;
+        int periodMaxRaw = 0;   // latest raw stamp seen inside the running period
         try (Reader reader = Files.newBufferedReader(file)) {
             JsonArray array = JsonParser.parseReader(reader).getAsJsonArray();
             for (JsonElement element : array) {
@@ -97,9 +103,40 @@ public class DataLoader {
                 if (period == 5) {
                     continue; // skip penalty shootout
                 }
-                int minute = obj.get("minute").getAsInt();
-                int second = obj.get("second").getAsInt();
+                int rawSeconds = obj.get("minute").getAsInt() * 60
+                                + obj.get("second").getAsInt();
                 String type = obj.getAsJsonObject("type").get("name").getAsString();
+
+                if (type.equals("Half End")) {
+                    if (period > endedPeriod) {   // arrives once per team - count each period once
+                        // The Half End stamp can land a second before the last
+                        // in-play event's stamp - the period end at whichever
+                        // is latest.
+                        offsetSeconds += Math.max(rawSeconds, periodMaxRaw) - nominalStart(period);
+                        endedPeriod = period;
+                        periodMaxRaw = 0;
+                    }
+                    continue;
+                }
+                int t;
+                if (period == endedPeriod + 1) {
+                    // normal case: an event inside the running period
+                    periodMaxRaw = Math.max(periodMaxRaw, rawSeconds);
+                    t = offsetSeconds + (rawSeconds - nominalStart(period));
+                } else if (period == endedPeriod) {
+                    // trailing event of a period that already ended, e.g. a red
+                    // card shown after the whistle: it happened outside play, so
+                    // it lands at the playing clock's current end - the state
+                    // effect applies, but zero playing time is attached.
+                    t = offsetSeconds;
+                } else {
+                    throw new IllegalStateException("match " + matchId + ": period " + period
+                        + "events arrived while period " + endedPeriod
+                        + " was the last one ended - the clock would lie");
+                }
+                int minute = t / 60;
+                int second = t % 60;
+                maxT = Math.max(maxT, t);
 
                 switch(type) {
                     case "Starting XI" -> {
@@ -169,7 +206,30 @@ public class DataLoader {
                 }
             }
         }
+        if (endedPeriod == 0) {
+            throw new IllegalStateException("match " + matchId
+                + ": no Half End events - match length unknown.");
+        }
+        if (offsetSeconds < maxT) {
+            throw new IllegalStateException("match " + matchId + ": whistle at "
+                + offsetSeconds + "s but an event happened at " + maxT
+                + "s - the continuous clock is broken.");
+        }
+        events.add(new MatchEvent.MatchEnd(endedPeriod, offsetSeconds / 60, offsetSeconds % 60));
         return events;
+    }
+
+    // StatsBomb clocks restart each period: the second half begins at 45:00
+    // even when first-half stoppage ran past it, extra time at 90:00 and
+    // 105:00 (verified against the Half Start events in the open data).
+    private static int nominalStart(int period) {
+        return switch(period) {
+            case 1 -> 0;
+            case 2 -> 45 * 60;
+            case 3 -> 90 * 60;
+            case 4 -> 105 * 60;
+            default -> throw new IllegalStateException("unexpected period " + period);
+        };
     }
 
     private Team readTeam(JsonObject event) {

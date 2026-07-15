@@ -1,7 +1,6 @@
 package com.goalimpact;
 
-import com.goalimpact.credit.LogisticLinkFunction;
-import com.goalimpact.credit.ResidualCreditRule;
+import com.goalimpact.credit.TimeIntegratedResidual;
 import com.goalimpact.data.DataLoader;
 import com.goalimpact.engine.MatchProcessor;
 import com.goalimpact.engine.PlayerTally;
@@ -33,9 +32,14 @@ public class Main {
     // floor    - fraction of K0 below which updates never fade;
     //            1.0 switches the fade off = the uniform-K baseline (ship gate)
     private static final double[] LINK_GAINS = {0.10};
-    private static final double[] K0S = {2.0};
+    private static final double[] K0S = {1.0};
     private static final double[] HALVING_MINUTES = {4000};
     private static final double[] FLOOR_FRACTIONS = {0.05};
+    // Measured 2026-07-15 on the honest clock (stage 2, ADR 0007):
+    // 7,496 goals / 509,022 team-minutes. Re-measure when new eras land.
+    private static final double BASE_RATE = 0.01473;
+    // Stage 1 re-baseline; the goals-only rule's log-loss to beat or match.
+    private static final double GOALS_ONLY_BASELINE = 0.6331;
 
     public static void main(String[] args) throws Exception {
         System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
@@ -66,29 +70,38 @@ public class Main {
         System.out.printf("Loaded %d of %d matches (%s to %s).%n%n",
             replays.size(), matches.size(),
             matches.get(0).date(), matches.get(matches.size() - 1).date());
+        
+        // Base scoring rate (ADR 0007): goals per team-minute of play across
+        // the whole male dataset - a measured calibration constant, not a
+        // tuned knob. Re-measure when large new eras/competitions land.
+        long goals = 0;
+        double teamMinutes = 0;
+        for (List<MatchEvent> events : replays) {
+            for (MatchEvent e : events) {
+                if (e instanceof MatchEvent.Goal) {
+                    goals++;
+                } else if (e instanceof MatchEvent.MatchEnd end) {
+                    teamMinutes += 2 * (end.minute() + end.second() / 60.0);
+                }
+            }
+        }
+        System.out.printf(Locale.US,
+            "Base scoring rate: %d goals / %.0f team-minutes = %.5f goals per team-minute%n%n",
+            goals, teamMinutes, goals / teamMinutes);
 
         // Grid search: prequential mean log-loss per (k, K). 0.6931 = ln 2 is
         // the know-nothing baseline; lower is better.
                 System.out.printf("%8s %8s %8s %8s %10s%n", "k", "K0", "H", "floor", "logloss");
         double bestGain = 0, bestK0 = 0, bestH = 0, bestFloor = 0, bestLoss = Double.MAX_VALUE;
-        double bestUniformLoss = Double.MAX_VALUE;
         for (double gain : LINK_GAINS) {
             for (double k0 : K0S) {
                 for (double h : HALVING_MINUTES) {
                     for (double floor : FLOOR_FRACTIONS) {
-                        // At floor 1.0 the fade is off and H is irrelevant:
-                        // run that uniform baseline once, not once per H.
-                        if (floor == 1.0 && h != HALVING_MINUTES[0]) {
-                            continue;
-                        }
                         PredictionQuality quality = new PredictionQuality();
                         replay(replays, gain, new SmoothFadeSchedule(k0, h, floor), quality::observe);
                         double loss = quality.meanLogLoss();
                         System.out.printf(Locale.US, "%8.2f %8.2f %8.0f %8.2f %10.4f%n",
                             gain, k0, h, floor, loss);
-                        if (floor == 1.0 && loss < bestUniformLoss) {
-                            bestUniformLoss = loss;
-                        }
                         if (loss < bestLoss) {
                             bestLoss = loss;
                             bestGain = gain;
@@ -107,13 +120,11 @@ public class Main {
             "%nBest: k=%.2f K0=%.2f H=%.0f floor=%.2f (logloss %.4f vs 0.6931 know-nothing)%n",
             bestGain, bestK0, bestH, bestFloor, bestLoss);
         System.out.printf(Locale.US,
-            "Ship gate (ADR 0006): best uniform logloss %.4f -> %s%n%n",
-            bestUniformLoss,
-            bestLoss < bestUniformLoss
-                ? "adaptive K beats uniform"
-                : "adaptive K does NOT beat uniform");
+            "Ship gate (ADR 0007): %.4f vs %.4f goals-only baseline -> %s%n%n",
+            bestLoss, GOALS_ONLY_BASELINE,
+            bestLoss <= GOALS_ONLY_BASELINE ? "parity or better" : "worse - investigate");
 
-        // Final replay with the winning knobs; reports come from this one.
+        // Final replay with the winning knows; reports come from this one.
         Map<Long, PlayerTally> tallies = replay(replays, bestGain, new SmoothFadeSchedule(bestK0, bestH, bestFloor), p -> {});
 
         new Leaderboard().print(tallies.values(), 20);
@@ -129,7 +140,7 @@ public class Main {
     private static Map<Long, PlayerTally> replay(List<List<MatchEvent>> replays,
         double linkGain, UpdateSchedule schedule, DoubleConsumer pObserver) {
             MatchProcessor processor = new MatchProcessor(
-                new ResidualCreditRule(new LogisticLinkFunction(linkGain), pObserver), schedule);
+                new TimeIntegratedResidual(BASE_RATE, linkGain, pObserver), schedule);
             Map<Long, PlayerTally> tallies = new HashMap<>();
             for (List<MatchEvent> events : replays) {
                 processor.process(events, tallies);

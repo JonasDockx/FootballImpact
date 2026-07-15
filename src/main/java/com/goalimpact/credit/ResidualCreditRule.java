@@ -13,7 +13,7 @@ import java.util.Set;
 // Scorers each get +(1 - P), conceders -(1 - P): an expected goal moves
 // ratings barely, an upset moves them a lot, and each goal is zero-sum.
 
-public final class ResidualCreditRule implements CreditRule {
+public final class ResidualCreditRule implements ResidualSource {
 
     private final LinkFunction link;
     private final DoubleConsumer pObserver;
@@ -30,7 +30,7 @@ public final class ResidualCreditRule implements CreditRule {
     }
 
     @Override
-    public Map<Player, Double> credit(Set<Player> scoringOnPitch, Set<Player> concedingOnPitch, RatingLookup ratings) {
+    public Map<Player, Double> goal(Set<Player> scoringOnPitch, Set<Player> concedingOnPitch, RatingLookup ratings) {
         double gap = strength(scoringOnPitch, ratings) - strength(concedingOnPitch, ratings);
         double expectedP = link.expected(gap);
         pObserver.accept(expectedP);

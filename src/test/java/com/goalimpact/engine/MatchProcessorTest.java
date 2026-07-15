@@ -2,15 +2,19 @@ package com.goalimpact.engine;
 
 import com.goalimpact.credit.FlatCreditRule;
 import com.goalimpact.credit.LogisticLinkFunction;
+import com.goalimpact.credit.RatingLookup;
 import com.goalimpact.credit.ResidualCreditRule;
+import com.goalimpact.credit.ResidualSource;
 import com.goalimpact.model.MatchEvent;
 import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -159,6 +163,24 @@ class MatchProcessorTest {
     }
 
     @Test
+    void minutesRunToTheFinalWhistleNotTheLastAction() {
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            sub(70, TEAM_A, 2, 3),
+            goal(80, TEAM_A),
+            new MatchEvent.MatchEnd(2, 95, 0) // whistle 15' after the last action
+        ), tallies);
+
+        assertEquals(95.0, tallies.get(1L).minutes(), 1e-9);    // not 80
+        assertEquals(70.0, tallies.get(2L).minutes(), 1e-9);    // subbed off unaffected
+        assertEquals(25.0, tallies.get(3L).minutes(), 1e-9);    // 70' -> whistle
+    }
+
+    @Test
     void veteransMoveLessThanDebutants() {
         // Player 1 arrives with 1,000 career minutes, exactly the halving
         // exposure: K = 0.5. Player 2 debuts: K = 1.0. Both witness the same
@@ -228,5 +250,32 @@ class MatchProcessorTest {
         assertTrue(tallies.get(2L).isGoalkeeper()); // earned late: outfield first, keeper second
         assertFalse(tallies.get(3L).isGoalkeeper()); // entered mid-match, never *started* in goal
         assertFalse(tallies.get(13L).isGoalkeeper()); // ordinary outfield starter
+    }
+
+    @Test
+    void segmentsAreChoppedAtLineupChangesOnly() {
+        List<Double> segmentLengths = new ArrayList<>();
+        ResidualSource recorder = new ResidualSource() {
+            @Override
+            public Map<Player, Double> goal(Set<Player> scoring, Set<Player> conceding, RatingLookup ratings) {
+                return Map.of();
+            }
+            @Override
+            public Map<Player, Double> segment(Set<Player> teamA, Set<Player> teamB, double seconds, RatingLookup ratings) {
+                segmentLengths.add(seconds);
+                return Map.of();
+            }
+        };
+        MatchProcessor processor = new MatchProcessor(recorder, m -> 1.0);
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_A),       // goals must NOT chop segments
+            sub(60, TEAM_A, 2, 3),
+            new MatchEvent.MatchEnd(2, 90, 0)
+        ), new HashMap<>());
+
+        assertEquals(List.of(3600.0, 1800.0), segmentLengths);
     }
 }

@@ -1,6 +1,6 @@
 package com.goalimpact.engine;
 
-import com.goalimpact.credit.CreditRule;
+import com.goalimpact.credit.ResidualSource;
 import com.goalimpact.credit.RatingLookup;
 import com.goalimpact.model.MatchEvent;
 import com.goalimpact.model.Player;
@@ -8,17 +8,18 @@ import com.goalimpact.model.Team;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 public class MatchProcessor {
     
-    private final CreditRule creditRule;
+    private final ResidualSource residualSource;
     private final UpdateSchedule schedule;
 
-    public MatchProcessor(CreditRule creditRule, UpdateSchedule schedule) {
-        this.creditRule = creditRule;
+    public MatchProcessor(ResidualSource residualSource, UpdateSchedule schedule) {
+        this.residualSource = residualSource;
         this.schedule = schedule;
     }
 
@@ -40,6 +41,7 @@ public class MatchProcessor {
         Map<Long, Double> matchResiduals = new HashMap<>(); // playerId -> summed residuals
 
         int lastTime = 0;
+        int segStart = 0;   // when the current lineup-constant segment began
 
         for (MatchEvent e : events) {
             int t = e.minute() * 60 + e.second();
@@ -57,6 +59,8 @@ public class MatchProcessor {
                     tallies.get(s.goalkeeper().id()).startedInGoal();
                 }
                 case MatchEvent.Substitution sub -> {
+                    closeSegment(onPitch, preMatch, matchResiduals, segStart, t);
+                    segStart = t;
                     onPitch.get(sub.team().id()).remove(sub.playerOff());
                     leavePitch(tallies, enterTime, sub.playerOff(), sub.team(), t);
 
@@ -66,6 +70,8 @@ public class MatchProcessor {
                         .playsFor(sub.team());
                 }
                 case MatchEvent.RedCard rc -> {
+                    closeSegment(onPitch, preMatch, matchResiduals, segStart, t);
+                    segStart = t;
                     onPitch.get(rc.team().id()).remove(rc.player());
                     leavePitch(tallies, enterTime, rc.player(), rc.team(), t);
                 }
@@ -80,10 +86,15 @@ public class MatchProcessor {
                         }
                     }
 
-                    Map<Player, Double> deltas = creditRule.credit(scoringOnPitch, concedingOnPitch, preMatch);
+                    Map<Player, Double> deltas = residualSource.goal(scoringOnPitch, concedingOnPitch, preMatch);
                     for (Map.Entry<Player, Double> d : deltas.entrySet()) {
                         matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
                     }
+                }
+                case MatchEvent.MatchEnd end -> {
+                    // The whistle closes the final segment; its timestamp already
+                    // became lastTime, which closes every open stint.
+                    closeSegment(onPitch, preMatch, matchResiduals, segStart, t);
                 }
             }
         }
@@ -105,4 +116,16 @@ public class MatchProcessor {
             tallies.computeIfAbsent(p.id(), k -> new PlayerTally(p, team)).addSeconds(t - start);
         }
     }
+
+    private void closeSegment(Map<Long, Set<Player>> onPitch, RatingLookup ratings,
+        Map<Long, Double> matchResiduals, int from, int to) {
+            if (to <= from || onPitch.size() != 2) {
+                return; // zero-length segment, or lineups not both known yet
+            }
+            Iterator<Set<Player>> teams = onPitch.values().iterator();
+            Map<Player, Double> deltas = residualSource.segment(teams.next(), teams.next(), to - from, ratings);
+            for (Map.Entry<Player, Double> d : deltas.entrySet()) {
+                matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
+            }
+        }
 }

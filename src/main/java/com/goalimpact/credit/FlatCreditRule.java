@@ -6,9 +6,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-public final class FlatCreditRule implements CreditRule {
+public final class FlatCreditRule implements ResidualSource {
     @Override
-    public Map<Player, Double> credit(Set<Player> scoringOnPitch, Set<Player> concedingOnPitch, RatingLookup ratings) {
+    public Map<Player, Double> goal(Set<Player> scoringOnPitch, Set<Player> concedingOnPitch, RatingLookup ratings) {
         Map<Player, Double> deltas = new HashMap<>();
         for (Player p : scoringOnPitch) {
             deltas.put(p, 1.0);
