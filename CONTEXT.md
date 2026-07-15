@@ -45,6 +45,23 @@ ratings of that team's on-pitch players. Emergent from players — there is no
 separate team rating. Count-invariant, so a red-carded side keeps roughly its
 level.
 
+**Home side**:
+The side of a match, if any, genuinely playing at its own venue. At most one
+side is ever at home; a match on neutral ground has no home side. Determined
+from evidence (whose venue it is, who hosts the tournament), never from a
+fixture list's administrative home/away labeling — tournaments, neutral-venue
+finals, and bubble seasons assign that label without meaning.
+_Avoid_: home team — that names the administrative label, not the concept
+
+**Home advantage**:
+The strength bonus the home side enjoys for the duration of a match: a
+constant that shifts the effective strength gap in the home side's favour,
+leaning the who-scores probability and the expected-goal-difference drain
+toward them alike. Pure match context — applied at kickoff, gone at the final
+whistle, never written into any rating, so ratings stay venue-neutral. An
+empirically calibrated constant.
+_Avoid_: HFA (in code and docs)
+
 **Credit / Blame**:
 The signed value a goal assigns to each on-pitch player — positive (credit) on
 the scoring team, negative (blame) on the conceding team: the goal's full `±1`

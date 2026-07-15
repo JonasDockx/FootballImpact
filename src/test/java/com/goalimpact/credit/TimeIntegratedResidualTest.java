@@ -24,12 +24,16 @@ class TimeIntegratedResidualTest {
     // Team A players rate 1.0, everyone else 0.0: gap exactly 1.
     private static final RatingLookup RATINGS = id -> id < 10 ? 1.0 : 0.0;
 
+    private static Lineup neutral(Player... players) {
+        return new Lineup(Set.of(players), false);
+    }
+    
     @Test
     void goalIsAFullJumpAndReportsTheWhoScoresProbability() {
         List<Double> observed = new ArrayList<>();
-        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, observed::add);
+        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, 0.0, observed::add);
 
-        Map<Player, Double> deltas = rule.goal(Set.of(A1, A2), Set.of(B1, B2), RATINGS);
+        Map<Player, Double> deltas = rule.goal(neutral(A1, A2), neutral(B1, B2), RATINGS);
 
         assertEquals(1.0, deltas.get(A1), 1e-9);  // full jump - no surprise scaling
         assertEquals(-1.0, deltas.get(B1), 1e-9);
@@ -38,10 +42,10 @@ class TimeIntegratedResidualTest {
 
     @Test
     void drainIsTheExpectedGoalDifferenceOverTheSegment() {
-        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, p -> {});
+        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, 0.0, p -> {});
 
         // 60 minutes at rates 0.04 vs 0.01 goals/min: expected GD 1.8.
-        Map<Player, Double> deltas = rule.segment(Set.of(A1, A2), Set.of(B1, B2), 3600, RATINGS);
+        Map<Player, Double> deltas = rule.segment(neutral(A1, A2), neutral(B1, B2), 3600, RATINGS);
 
         assertEquals(-1.8, deltas.get(A1), 1e-9); // favourites owe the drain
         assertEquals(1.8, deltas.get(B1), 1e-9);  // underdogs earn it by surviving
@@ -49,9 +53,9 @@ class TimeIntegratedResidualTest {
 
     @Test
     void sidesArePassedInArbitraryOrderAndMirrorExactly() {
-        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, p -> {});
+        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, 0.0, p -> {});
 
-        Map<Player, Double> deltas = rule.segment(Set.of(B1, B2), Set.of(A1, A2), 3600, RATINGS);
+        Map<Player, Double> deltas = rule.segment(neutral(B1, B2), neutral(A1, A2), 3600, RATINGS);
 
         assertEquals(1.8, deltas.get(B1), 1e-9);  // same answer with sides swapped
         assertEquals(-1.8, deltas.get(A1), 1e-9);
@@ -59,11 +63,11 @@ class TimeIntegratedResidualTest {
 
     @Test
     void equalStrengthSidesDrainNothing() {
-        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, p -> {});
+        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, 0.0, p -> {});
         Player c1 = new Player(22, "C1");
 
         // 2 players vs 1: Strength is an average, so counts don't matter.
-        Map<Player, Double> deltas = rule.segment(Set.of(B1, B2), Set.of(c1), 3600, RATINGS);
+        Map<Player, Double> deltas = rule.segment(neutral(B1, B2), neutral(c1), 3600, RATINGS);
 
         assertEquals(0.0, deltas.get(B1), 1e-9);
         assertEquals(0.0, deltas.get(c1), 1e-9);

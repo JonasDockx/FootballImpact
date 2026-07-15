@@ -1,0 +1,24 @@
+[
+  {
+    "match_id": 9401,
+    "match_date": "2016-04-02",
+    "home_team": {
+      "home_team_id": 217,
+      "home_team_name": "Barcelona",
+      "country": { "id": 214, "name": "Spain" }
+    },
+    "away_team": {
+      "away_team_id": 220,
+      "away_team_name": "Real Madrid",
+      "country": { "id": 214, "name": "Spain" }
+    },
+    "home_score": 1,
+    "away_score": 2,
+    "competition_stage": { "id": 1, "name": "Regular Season" },
+    "stadium": {
+      "id": 342,
+      "name": "Camp Nou",
+      "country": { "id": 214, "name": "Spain" }
+    }
+  }
+]

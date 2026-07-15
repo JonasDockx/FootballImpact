@@ -1,0 +1,42 @@
+[
+  {
+    "period": 1,
+    "minute": 0,
+    "second": 0,
+    "type": { "id": 35, "name": "Starting XI" },
+    "team": { "id": 100, "name": "Alpha FC" },
+    "tactics": {
+      "lineup": [
+        { "player": { "id": 1, "name": "Alpha Keeper" }, "position": { "id": 1, "name": "Goalkeeper" } },
+        { "player": { "id": 2, "name": "Alpha Defender" }, "position": { "id": 3, "name": "Right Center Back" } }
+      ]
+    }
+  },
+  {
+    "period": 1,
+    "minute": 0,
+    "second": 0,
+    "type": { "id": 35, "name": "Starting XI" },
+    "team": { "id": 200, "name": "Beta United" },
+    "tactics": {
+      "lineup": [
+        { "player": { "id": 11, "name": "Beta Keeper" }, "position": { "id": 1, "name": "Goalkeeper" } },
+        { "player": { "id": 12, "name": "Beta Striker" }, "position": { "id": 23, "name": "Center Forward" } }
+      ]
+    }
+  },
+  {
+    "period": 1,
+    "minute": 45,
+    "second": 0,
+    "type": { "id": 34, "name": "Half End" },
+    "team": { "id": 100, "name": "Alpha FC" }
+  },
+  {
+    "period": 1,
+    "minute": 45,
+    "second": 0,
+    "type": { "id": 34, "name": "Half End" },
+    "team": { "id": 200, "name": "Beta United" }
+  }
+]

@@ -19,35 +19,39 @@ public final class TimeIntegratedResidual implements ResidualSource {
     
     private final double baseRate;  // goals per team-minute between equal lineups
     private final double gain;      // who-scores logistic gain (k)
+    private final double homeAdvantage; // rating points added to the home side's effective strength (ADR 0008)
     private final DoubleConsumer pObserver;
 
-    public TimeIntegratedResidual(double baseRate, double gain, DoubleConsumer pObserver) {
+    public TimeIntegratedResidual(double baseRate, double gain, double homeAdvantage, DoubleConsumer pObserver) {
         if (baseRate <= 0) {
             throw new IllegalArgumentException("base rate must be positive, was "+ baseRate);
         }
         this.baseRate = baseRate;
         this.gain = gain;
+        this.homeAdvantage = homeAdvantage;
         this.pObserver = pObserver;
     }
 
     @Override
-    public Map<Player, Double> goal(Set<Player> scoringOnPitch, Set<Player> concedingOnPitch, RatingLookup ratings) {
-        double gap = strength(scoringOnPitch, ratings) - strength(concedingOnPitch, ratings);
+    public Map<Player, Double> goal(Lineup scoring, Lineup conceding, RatingLookup ratings) {
+        double gap = strength(scoring.players(), ratings) - strength(conceding.players(), ratings)
+        + (scoring.home() ? homeAdvantage : 0) - (conceding.home() ? homeAdvantage : 0);
         pObserver.accept(1.0 / (1.0 + Math.exp(-gain * gap)));
 
         Map<Player, Double> deltas = new HashMap<>();
-        for (Player p : scoringOnPitch) {
+        for (Player p : scoring.players()) {
             deltas.put(p, 1.0);
         }
-        for (Player p : concedingOnPitch) {
+        for (Player p : conceding.players()) {
             deltas.put(p, -1.0);
         }
         return deltas;
     }
 
     @Override
-    public Map<Player, Double> segment(Set<Player> teamA, Set<Player> teamB, double seconds, RatingLookup ratings) {
-        double gap = strength(teamA, ratings) - strength(teamB, ratings);
+    public Map<Player, Double> segment(Lineup teamA, Lineup teamB, double seconds, RatingLookup ratings) {
+        double gap = strength(teamA.players(), ratings) - strength(teamB.players(), ratings)
+        + (teamA.home() ? homeAdvantage : 0) - (teamB.home() ? homeAdvantage : 0);
         // Team A's expected goal-difference rate per minute: the gap bends
         // the base rate up for one side, down by the same factor for the
         // other; the difference between the two rates is what drains.
@@ -55,10 +59,10 @@ public final class TimeIntegratedResidual implements ResidualSource {
         double drain = gdPerMinute * seconds / 60.0;
 
         Map<Player, Double> deltas = new HashMap<>();
-        for (Player p : teamA) {
+        for (Player p : teamA.players()) {
             deltas.put(p, -drain);
         }
-        for (Player p : teamB) {
+        for (Player p : teamB.players()) {
             deltas.put(p, drain);
         }
         return deltas;

@@ -30,17 +30,17 @@ public final class ResidualCreditRule implements ResidualSource {
     }
 
     @Override
-    public Map<Player, Double> goal(Set<Player> scoringOnPitch, Set<Player> concedingOnPitch, RatingLookup ratings) {
-        double gap = strength(scoringOnPitch, ratings) - strength(concedingOnPitch, ratings);
+    public Map<Player, Double> goal(Lineup scoring, Lineup conceding, RatingLookup ratings) {
+        double gap = strength(scoring.players(), ratings) - strength(conceding.players(), ratings);
         double expectedP = link.expected(gap);
         pObserver.accept(expectedP);
         double residual = 1.0 - expectedP;
 
         Map<Player, Double> deltas = new HashMap<>();
-        for (Player p : scoringOnPitch) {
+        for (Player p : scoring.players()) {
             deltas.put(p, residual);
         }
-        for (Player p : concedingOnPitch) {
+        for (Player p : conceding.players()) {
             deltas.put(p, -residual);
         }
         return deltas;

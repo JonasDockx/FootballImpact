@@ -32,6 +32,7 @@ class DataLoaderTest {
         assertEquals("UEFA Euro", euro.competitionName());
         assertEquals("2024", euro.seasonName());
         assertEquals("male", euro.gender());
+        assertEquals("Europe", euro.countryName());
     }
 
     @Test

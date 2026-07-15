@@ -1,0 +1,24 @@
+[
+  {
+    "match_id": 9301,
+    "match_date": "1983-06-04",
+    "home_team": {
+      "home_team_id": 220,
+      "home_team_name": "Real Madrid",
+      "country": { "id": 214, "name": "Spain" }
+    },
+    "away_team": {
+      "away_team_id": 217,
+      "away_team_name": "Barcelona",
+      "country": { "id": 214, "name": "Spain" }
+    },
+    "home_score": 1,
+    "away_score": 2,
+    "competition_stage": { "id": 26, "name": "Final" },
+    "stadium": {
+      "id": 4665,
+      "name": "La Romareda",
+      "country": { "id": 214, "name": "Spain" }
+    }
+  }
+]

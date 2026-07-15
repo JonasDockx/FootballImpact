@@ -17,10 +17,22 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public class DataLoader {
     
     private final Path dataDir;
+
+    // country_name values StatsBomb gives cross-border competitions; any
+    // real country name means a domestic competition (ADR 0008).
+    private static final Set<String> REGIONS = Set.of("Africa", "Asia",
+        "Europe", "International", "North and Central America", "Oceania",
+        "South America");
+
+    // Domestic stages that are a single match at a chosen neutral ground,
+    // never anyone's home fixture (cup finals; league stages never use these).
+    private static final Set<String> SINGLE_MATCH_FINALS =
+        Set.of("Final", "Championship - Final");
 
     public DataLoader(Path dataDir) {
         this.dataDir = dataDir;
@@ -39,17 +51,17 @@ public class DataLoader {
                     obj.get("season_id").getAsInt(),
                     obj.get("competition_name").getAsString(),
                     obj.get("season_name").getAsString(),
-                    obj.get("competition_gender").getAsString()));
+                    obj.get("competition_gender").getAsString(),
+                    obj.get("country_name").getAsString()));
             }
         }
         return competitions;
     }
 
-    public List<Match> loadMatches(int competitionId, int seasonId) throws IOException {        
+    public List<Match> loadMatches(CompetitionSeason competition) throws IOException {
         Path file = dataDir.resolve("matches")
-                            .resolve(String.valueOf(competitionId))
-                            .resolve(seasonId + ".json");
-
+                    .resolve(String.valueOf(competition.competitionId()))
+                    .resolve(competition.seasonId() + ".json");
         List<Match> matches = new ArrayList<>();
         try (Reader reader = Files.newBufferedReader(file)) {
             JsonArray array = JsonParser.parseReader(reader).getAsJsonArray();
@@ -72,10 +84,40 @@ public class DataLoader {
                 int homeScore = obj.get("home_score").getAsInt();
                 int awayScore = obj.get("away_score").getAsInt();
 
-                matches.add(new Match(matchId, date, home, away, homeScore, awayScore));
+                matches.add(new Match(matchId, date, home, away, homeScore, awayScore,
+                    classifyHomeSide(competition, obj)));
             }
         }
         return matches;
+    }
+
+    // ADR 0008: the two-world rule. Domestic competitions trust the fixture
+    // label; cross-border competitions trust geography - a side is at home
+    // if the stadium stands in its country.
+    private Match.HomeSide classifyHomeSide(CompetitionSeason competition, JsonObject match) {
+        if (REGIONS.contains(competition.countryName())) {
+            String stadiumCountry = stadiumCountryOf(match);
+            if (stadiumCountry == null) {
+                return Match.HomeSide.NEITHER;  // no evidence, no advantage
+            }
+            boolean homeInOwnCountry = stadiumCountry.equals(countryOf(match, "home_team"));
+            boolean awayInOwnCountry = stadiumCountry.equals(countryOf(match, "away_team"));
+            if (homeInOwnCountry == awayInOwnCountry) {
+                // Neither side's country - or both sides' (a same-country
+                // tie): geography cannot pick a host, so nobody is one.
+                return Match.HomeSide.NEITHER;
+            }
+            return homeInOwnCountry ? Match.HomeSide.HOME : Match.HomeSide.AWAY;
+        }
+        if (SINGLE_MATCH_FINALS.contains(stageOf(match))) {
+            return Match.HomeSide.NEITHER;  // cup final at a neutral ground
+        }
+        if (competition.competitionId() == 1238 && competition.seasonId() == 108) {
+            // ISL 2021/22: the whole season in a COVID bubble - 115 matches
+            // in 3 stadiums, no travel, every home label a fiction
+            return Match.HomeSide.NEITHER;
+        }
+        return Match.HomeSide.HOME;
     }
 
     // The open dataset occasionally lists a match whose events file is not
@@ -84,8 +126,16 @@ public class DataLoader {
         return Files.exists(dataDir.resolve("events").resolve(matchId + ".json"));
     }
 
-    public List<MatchEvent> loadEvents(long matchId) throws IOException {
+    public List<MatchEvent> loadEvents(Match match) throws IOException {
+        long matchId = match.matchId();
         Path file = dataDir.resolve("events").resolve(matchId + ".json");
+
+        long homeTeamId = switch (match.homeSide()) {
+            case HOME -> match.home().id();
+            case AWAY -> match.away().id();
+            case NEITHER -> -1;
+        };
+        int homeFlagged = 0;
 
         List<MatchEvent> events = new ArrayList<>();
         // Translate StatsBomb's restarting per-period clocks onto one
@@ -156,7 +206,12 @@ public class DataLoader {
                             throw new IllegalStateException(
                                 "Starting XI without a goalkeeper: match " + matchId + ", team " + team.name());
                         }
-                        events.add(new MatchEvent.StartingXI(period, minute, second, team, players, goalkeeper));
+                        boolean home = team.id() == homeTeamId;
+                        if (home) {
+                            homeFlagged++;
+                        }
+                        events.add(new MatchEvent.StartingXI(period, minute, second,
+                            team, players, goalkeeper, home));
                     }
                     case "Substitution" -> {
                         Team team = readTeam(obj);
@@ -215,6 +270,11 @@ public class DataLoader {
                 + offsetSeconds + "s but an event happened at " + maxT
                 + "s - the continuous clock is broken.");
         }
+        if (match.homeSide() != Match.HomeSide.NEITHER && homeFlagged != 1) {
+            throw new IllegalStateException("match " + matchId + ": home side is "
+                + match.homeSide() + " but " + homeFlagged
+                + " lineups were flagged home - matches and events disagree on team ids");
+        }
         events.add(new MatchEvent.MatchEnd(endedPeriod, offsetSeconds / 60, offsetSeconds % 60));
         return events;
     }
@@ -239,5 +299,21 @@ public class DataLoader {
 
     private Player readPlayer(JsonObject playerObj) {
         return new Player(playerObj.get("id").getAsLong(), playerObj.get("name").getAsString());
+    }
+
+    private static String stageOf(JsonObject match) {
+        return match.getAsJsonObject("competition_stage").get("name").getAsString();
+    }
+
+    private static String countryOf(JsonObject match, String team) {
+        return match.getAsJsonObject(team).getAsJsonObject("country").get("name").getAsString();
+    }
+
+    // A handful of old matches ship without a stadium; null means "unknown".
+    private static String stadiumCountryOf(JsonObject match) {
+        if (!match.has("stadium") || !match.get("stadium").isJsonObject()) {
+            return null;
+        }
+        return match.getAsJsonObject("stadium").getAsJsonObject("country").get("name").getAsString();
     }
 }

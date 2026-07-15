@@ -1,5 +1,6 @@
 package com.goalimpact.engine;
 
+import com.goalimpact.credit.Lineup;
 import com.goalimpact.credit.ResidualSource;
 import com.goalimpact.credit.RatingLookup;
 import com.goalimpact.model.MatchEvent;
@@ -42,6 +43,7 @@ public class MatchProcessor {
 
         int lastTime = 0;
         int segStart = 0;   // when the current lineup-constant segment began
+        long homeTeamId = -1;   // -1: no home side (neutral venue)
 
         for (MatchEvent e : events) {
             int t = e.minute() * 60 + e.second();
@@ -57,9 +59,12 @@ public class MatchProcessor {
                             .playsFor(s.team());
                     }
                     tallies.get(s.goalkeeper().id()).startedInGoal();
+                    if (s.home()) {
+                        homeTeamId = s.team().id();
+                    }
                 }
                 case MatchEvent.Substitution sub -> {
-                    closeSegment(onPitch, preMatch, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, matchResiduals, segStart, t);
                     segStart = t;
                     onPitch.get(sub.team().id()).remove(sub.playerOff());
                     leavePitch(tallies, enterTime, sub.playerOff(), sub.team(), t);
@@ -70,7 +75,7 @@ public class MatchProcessor {
                         .playsFor(sub.team());
                 }
                 case MatchEvent.RedCard rc -> {
-                    closeSegment(onPitch, preMatch, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, matchResiduals, segStart, t);
                     segStart = t;
                     onPitch.get(rc.team().id()).remove(rc.player());
                     leavePitch(tallies, enterTime, rc.player(), rc.team(), t);
@@ -85,8 +90,12 @@ public class MatchProcessor {
                             concedingOnPitch.addAll(entry.getValue());
                         }
                     }
-
-                    Map<Player, Double> deltas = residualSource.goal(scoringOnPitch, concedingOnPitch, preMatch);
+                    
+                    boolean scoringHome = scoringId == homeTeamId;
+                    boolean concedingHome = homeTeamId != -1 && !scoringHome;
+                    Map<Player, Double> deltas = residualSource.goal(
+                        new Lineup(scoringOnPitch, scoringHome),
+                        new Lineup(concedingOnPitch, concedingHome), preMatch);
                     for (Map.Entry<Player, Double> d : deltas.entrySet()) {
                         matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
                     }
@@ -94,7 +103,7 @@ public class MatchProcessor {
                 case MatchEvent.MatchEnd end -> {
                     // The whistle closes the final segment; its timestamp already
                     // became lastTime, which closes every open stint.
-                    closeSegment(onPitch, preMatch, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, matchResiduals, segStart, t);
                 }
             }
         }
@@ -117,13 +126,18 @@ public class MatchProcessor {
         }
     }
 
-    private void closeSegment(Map<Long, Set<Player>> onPitch, RatingLookup ratings,
+    private void closeSegment(Map<Long, Set<Player>> onPitch, long homeTeamId, RatingLookup ratings,
         Map<Long, Double> matchResiduals, int from, int to) {
             if (to <= from || onPitch.size() != 2) {
                 return; // zero-length segment, or lineups not both known yet
             }
-            Iterator<Set<Player>> teams = onPitch.values().iterator();
-            Map<Player, Double> deltas = residualSource.segment(teams.next(), teams.next(), to - from, ratings);
+            Iterator<Map.Entry<Long, Set<Player>>> teams = onPitch.entrySet().iterator();
+            Map.Entry<Long, Set<Player>> teamA = teams.next();
+            Map.Entry<Long, Set<Player>> teamB = teams.next();
+            Map<Player, Double> deltas = residualSource.segment(
+                new Lineup(teamA.getValue(), teamA.getKey() == homeTeamId),
+                new Lineup(teamB.getValue(), teamB.getKey() == homeTeamId),
+                to - from, ratings);
             for (Map.Entry<Player, Double> d : deltas.entrySet()) {
                 matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
             }

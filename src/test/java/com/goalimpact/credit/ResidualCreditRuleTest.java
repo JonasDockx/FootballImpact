@@ -31,9 +31,13 @@ class ResidualCreditRuleTest {
         return set;
     }
 
+    private static Lineup lineup(long... ids) {
+        return new Lineup(players(ids), false);
+    }
+
     @Test
     void equalStrengthGoalIsWorthHalf() {
-        Map<Player, Double> deltas = rule.goal(players(1, 2, 3), players(12, 13, 14), ALL_ZERO);
+        Map<Player, Double> deltas = rule.goal(lineup(1, 2, 3), lineup(12, 13, 14), ALL_ZERO);
 
         for (long id : new long[] {1, 2, 3}) {
             assertEquals(0.5, deltas.get(player(id)), 1e-9);
@@ -45,7 +49,7 @@ class ResidualCreditRuleTest {
 
     @Test
     void everyOnPitchPlayerGetsADelta() {
-        Map<Player, Double> deltas = rule.goal(players(1, 2, 3), players(12, 13, 14), ALL_ZERO);
+        Map<Player, Double> deltas = rule.goal(lineup(1, 2, 3), lineup(12, 13, 14), ALL_ZERO);
 
         assertEquals(6, deltas.size());
     }
@@ -55,7 +59,7 @@ class ResidualCreditRuleTest {
         // Scoring side much stronger: their goal was expected, so little credit.
         RatingLookup ratings = id -> id < 12 ? 3.0 : 0.0;
 
-        Map<Player, Double> deltas = rule.goal(players(1, 2, 3), players(12, 13, 14), ratings);
+        Map<Player, Double> deltas = rule.goal(lineup(1, 2, 3), lineup(12, 13, 14), ratings);
 
         double credit = deltas.get(player(1));
         assertTrue(credit > 0);
@@ -67,7 +71,7 @@ class ResidualCreditRuleTest {
         // Conceding side much stronger: scoring against them is an upset.
         RatingLookup ratings = id -> id < 12 ? 0.0 : 3.0;
 
-        Map<Player, Double> deltas = rule.goal(players(1, 2, 3), players(12, 13, 14), ratings);
+        Map<Player, Double> deltas = rule.goal(lineup(1, 2, 3), lineup(12, 13, 14), ratings);
 
         double credit = deltas.get(player(1));
         assertTrue(credit > 0.5);
@@ -80,7 +84,7 @@ class ResidualCreditRuleTest {
         // so credit = 1 - P
         RatingLookup ratings = id -> id < 12 ? 1.0 : 0.0;
 
-        Map<Player, Double> deltas = rule.goal(players(1, 2, 3), players(12, 13, 14), ratings);
+        Map<Player, Double> deltas = rule.goal(lineup(1, 2, 3), lineup(12, 13, 14), ratings);
 
         assertEquals(0.2689414213699951, deltas.get(player(1)), 1e-9);
         assertEquals(-0.2689414213699951, deltas.get(player(12)), 1e-9);        
@@ -90,7 +94,7 @@ class ResidualCreditRuleTest {
     void creditAndBlameMirrorEachOther() {
         RatingLookup ratings = id -> id < 12 ? 2.0 : 0.5;
 
-        Map<Player, Double> deltas = rule.goal(players(1, 2, 3), players(12, 13, 14), ratings);
+        Map<Player, Double> deltas = rule.goal(lineup(1, 2, 3), lineup(12, 13, 14), ratings);
 
         assertEquals(deltas.get(player(1)), -deltas.get(player(12)), 1e-9);
     }
@@ -99,7 +103,7 @@ class ResidualCreditRuleTest {
     void strengthIsAverageNotSum() {
         RatingLookup ratings = id -> 1.0;
 
-        Map<Player, Double> deltas = rule.goal(players(1, 2), players(12, 13, 14, 15), ratings);
+        Map<Player, Double> deltas = rule.goal(lineup(1, 2), lineup(12, 13, 14, 15), ratings);
 
         assertEquals(0.5, deltas.get(player(1)), 1e-9);
     }
@@ -110,7 +114,7 @@ class ResidualCreditRuleTest {
         ResidualSource observed =
             new ResidualCreditRule(new LogisticLinkFunction(1.0), seen::add);
 
-        observed.goal(players(1, 2, 3), players(12, 13, 14), ALL_ZERO);
+        observed.goal(lineup(1, 2, 3), lineup(12, 13, 14), ALL_ZERO);
 
         assertEquals(1, seen.size());
         assertEquals(0.5, seen.get(0), 1e-9);
@@ -119,7 +123,7 @@ class ResidualCreditRuleTest {
     @Test
     void observerlessConstructorStillWorks() {
         Map<Player, Double> deltas =
-            rule.goal(players(1, 2, 3), players(12, 13, 14), ALL_ZERO);
+            rule.goal(lineup(1, 2, 3), lineup(12, 13, 14), ALL_ZERO);
 
         assertEquals(6, deltas.size());
     }

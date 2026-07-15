@@ -1,0 +1,85 @@
+[
+  {
+    "match_id": 9101,
+    "match_date": "2024-06-18",
+    "home_team": {
+      "home_team_id": 780,
+      "home_team_name": "Portugal",
+      "country": { "id": 183, "name": "Portugal" }
+    },
+    "away_team": {
+      "away_team_id": 912,
+      "away_team_name": "Czech Republic",
+      "country": { "id": 60, "name": "Czech Republic" }
+    },
+    "home_score": 2,
+    "away_score": 1,
+    "competition_stage": { "id": 10, "name": "Group Stage" },
+    "stadium": {
+      "id": 376,
+      "name": "Red Bull Arena",
+      "country": { "id": 85, "name": "Germany" }
+    }
+  },
+  {
+    "match_id": 9102,
+    "match_date": "2024-06-14",
+    "home_team": {
+      "home_team_id": 770,
+      "home_team_name": "Germany",
+      "country": { "id": 85, "name": "Germany" }
+    },
+    "away_team": {
+      "away_team_id": 776,
+      "away_team_name": "Scotland",
+      "country": { "id": 199, "name": "Scotland" }
+    },
+    "home_score": 5,
+    "away_score": 1,
+    "competition_stage": { "id": 10, "name": "Group Stage" },
+    "stadium": {
+      "id": 367,
+      "name": "Allianz Arena",
+      "country": { "id": 85, "name": "Germany" }
+    }
+  },
+  {
+    "match_id": 9103,
+    "match_date": "2024-06-19",
+    "home_team": {
+      "home_team_id": 773,
+      "home_team_name": "Hungary",
+      "country": { "id": 97, "name": "Hungary" }
+    },
+    "away_team": {
+      "away_team_id": 770,
+      "away_team_name": "Germany",
+      "country": { "id": 85, "name": "Germany" }
+    },
+    "home_score": 0,
+    "away_score": 2,
+    "competition_stage": { "id": 10, "name": "Group Stage" },
+    "stadium": {
+      "id": 372,
+      "name": "Stuttgart Arena",
+      "country": { "id": 85, "name": "Germany" }
+    }
+  },
+  {
+    "match_id": 9104,
+    "match_date": "2024-06-20",
+    "home_team": {
+      "home_team_id": 772,
+      "home_team_name": "Spain",
+      "country": { "id": 214, "name": "Spain" }
+    },
+    "away_team": {
+      "away_team_id": 771,
+      "away_team_name": "Italy",
+      "country": { "id": 112, "name": "Italy" }
+    },
+    "home_score": 1,
+    "away_score": 0,
+    "competition_stage": { "id": 10, "name": "Group Stage" }
+  }
+]

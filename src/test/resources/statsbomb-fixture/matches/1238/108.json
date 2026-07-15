@@ -1,0 +1,24 @@
+[
+  {
+    "match_id": 9501,
+    "match_date": "2021-11-19",
+    "home_team": {
+      "home_team_id": 3500,
+      "home_team_name": "Kerala Blasters",
+      "country": { "id": 99, "name": "India" }
+    },
+    "away_team": {
+      "away_team_id": 3501,
+      "away_team_name": "ATK Mohun Bagan",
+      "country": { "id": 99, "name": "India" }
+    },
+    "home_score": 2,
+    "away_score": 4,
+    "competition_stage": { "id": 1, "name": "Regular Season" },
+    "stadium": {
+      "id": 4667,
+      "name": "Fatorda Stadium",
+      "country": { "id": 99, "name": "India" }
+    }
+  }
+]

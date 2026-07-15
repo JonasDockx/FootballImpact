@@ -1,6 +1,7 @@
 package com.goalimpact.engine;
 
 import com.goalimpact.credit.FlatCreditRule;
+import com.goalimpact.credit.Lineup;
 import com.goalimpact.credit.LogisticLinkFunction;
 import com.goalimpact.credit.RatingLookup;
 import com.goalimpact.credit.ResidualCreditRule;
@@ -14,7 +15,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,7 +36,7 @@ class MatchProcessorTest {
         for (long id : ids) {
             players.add(player(id));
         }
-        return new MatchEvent.StartingXI(1, 0, 0, team, players, player(ids[0]));
+        return new MatchEvent.StartingXI(1, 0, 0, team, players, player(ids[0]), false);
     }
 
     private static MatchEvent.Goal goal(int minute, Team scoringTeam) {
@@ -257,11 +257,11 @@ class MatchProcessorTest {
         List<Double> segmentLengths = new ArrayList<>();
         ResidualSource recorder = new ResidualSource() {
             @Override
-            public Map<Player, Double> goal(Set<Player> scoring, Set<Player> conceding, RatingLookup ratings) {
+            public Map<Player, Double> goal(Lineup scoring, Lineup conceding, RatingLookup ratings) {
                 return Map.of();
             }
             @Override
-            public Map<Player, Double> segment(Set<Player> teamA, Set<Player> teamB, double seconds, RatingLookup ratings) {
+            public Map<Player, Double> segment(Lineup teamA, Lineup teamB, double seconds, RatingLookup ratings) {
                 segmentLengths.add(seconds);
                 return Map.of();
             }

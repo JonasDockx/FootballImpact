@@ -175,6 +175,28 @@ for neutral-site tournament matches (World Cups, Euros), where the label is
 administrative, not an advantage (except hosts) — applying HFA naively there
 injects noise. Needs its own mini-grill.
 
+**Grill done (2026-07-15), decisions in
+[ADR 0008](../docs/adr/0008-home-advantage-in-the-expectation.md):** one
+constant `h` in rating units shifts the home side's effective gap everywhere
+(who-scores and drain alike); ratings stay venue-neutral. Who is at home is a
+loader-owned conclusion (home team / away team / nobody) under a **two-world
+rule**: domestic → trust the label except single-match finals and the ISL
+2021/22 bubble season (115 matches, 3 stadiums — all labels fiction, found
+during the grill); cross-border → home iff team country == stadium country
+(pays Euro 2020's 27 own-country matches and mislabeled host Germany 2024,
+leaves Qatar 2022 neutral). Plumbing: conclusion on `Match`, `boolean home`
+on `StartingXI` (at most one, tripwired), seam deepened to
+`Lineup(players, home)` — the named landing spot for items 11 and 13.
+Calibration: h joins the grid (it does NOT cancel from the log-loss, unlike
+the base rate) with h = 0 as the embedded baseline plus a printed
+home-goal-share sanity anchor. ~90 COVID ghost matches accepted as documented
+calibration noise. Known limitation: same-country European ties degrade to
+neutral (none in current data; upgrade = club→home-stadium map). Staged
+landing: (1) inert plumbing at h = 0, byte-identical gate; (2) grid on,
+gate **strictly** beat 0.6326 + anchor vicinity + named demos (home 1-0 pays
+less than away 1-0; Euro 2024 hosts boosted, Portugal-in-Leipzig an unchanged
+control). Ready to implement.
+
 ## 6. Adaptive per-player update factor (uncertainty-based K) — DONE
 
 **Why:** With uniform K, a 47,000-minute veteran's rating swings as hard per
