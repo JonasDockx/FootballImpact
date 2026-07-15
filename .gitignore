@@ -1,7 +1,6 @@
 .agents/
 .claude/
-docs/
 skills-lock.json
-CONTEXT.md
 CLAUDE.md
 *.csv
+.~lock*
