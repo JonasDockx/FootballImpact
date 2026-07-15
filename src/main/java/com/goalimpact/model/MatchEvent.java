@@ -8,7 +8,7 @@ public sealed interface MatchEvent {
     int second();
 
     record StartingXI(int period, int minute, int second,
-        Team team, List<Player> players) implements MatchEvent {}
+        Team team, List<Player> players, Player goalkeeper) implements MatchEvent {}
 
     record Substitution(int period, int minute, int second,
         Team team, Player playerOff, Player playerOn) implements MatchEvent {}

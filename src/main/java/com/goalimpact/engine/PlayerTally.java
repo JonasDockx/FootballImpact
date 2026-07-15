@@ -12,6 +12,7 @@ public class PlayerTally {
     private Team team; // latest team seen: players change teams over a career
     private double rating;
     private long seconds;
+    private boolean goalkeeper; // sticky: ever started in goal, per the glossary's career-level tag
 
     public PlayerTally(Player player, Team team) {
         this.player = player;
@@ -21,9 +22,11 @@ public class PlayerTally {
     public void applyUpdate(double delta) { this.rating += delta; }
     public void addSeconds(long s) { this.seconds += s; }
     public void playsFor(Team team) { this.team = team; }
+    public void startedInGoal() { this.goalkeeper = true; }
 
     public Player player() { return player; }
     public Team team() { return team; }
     public double rating() { return rating; }
+    public boolean isGoalkeeper() { return goalkeeper; }
     public double minutes() { return seconds / 60.0; }
 }

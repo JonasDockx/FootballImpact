@@ -105,12 +105,21 @@ public class DataLoader {
                     case "Starting XI" -> {
                         Team team = readTeam(obj);
                         List<Player> players = new ArrayList<>();
+                        Player goalkeeper = null;
                         JsonArray lineup = obj.getAsJsonObject("tactics").getAsJsonArray("lineup");
                         for (JsonElement le : lineup) {
-                            JsonObject p = le.getAsJsonObject().getAsJsonObject("player");
-                            players.add(readPlayer(p));
+                            JsonObject entry = le.getAsJsonObject();
+                            Player player = readPlayer(entry.getAsJsonObject("player"));
+                            players.add(player);
+                            if (entry.getAsJsonObject("position").get("id").getAsInt() == 1) {
+                                goalkeeper = player;
+                            }
                         }
-                        events.add(new MatchEvent.StartingXI(period, minute, second, team, players));
+                        if (goalkeeper == null) {
+                            throw new IllegalStateException(
+                                "Starting XI without a goalkeeper: match " + matchId + ", team " + team.name());
+                        }
+                        events.add(new MatchEvent.StartingXI(period, minute, second, team, players, goalkeeper));
                     }
                     case "Substitution" -> {
                         Team team = readTeam(obj);

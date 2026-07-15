@@ -54,6 +54,7 @@ public class MatchProcessor {
                         tallies.computeIfAbsent(p.id(), k -> new PlayerTally(p, s.team()))
                             .playsFor(s.team());
                     }
+                    tallies.get(s.goalkeeper().id()).startedInGoal();
                 }
                 case MatchEvent.Substitution sub -> {
                     onPitch.get(sub.team().id()).remove(sub.playerOff());

@@ -122,6 +122,51 @@ never contribute goals directly — their flat share of team performance has
 different dynamics from outfield players. StatsBomb Starting XI events carry
 position data, so tagging keepers is cheap once we decide what to do with them.
 
+**Mini-grill done (2026-07-15), display-only resolution — no ADR (trivially
+reversible, no real trade-off surrendered):** Diagnosis committed:
+**collinearity, not keeper-ness** — the model identifies an individual only
+through lineup variation, so a never-rotated player's rating is a
+team-performance proxy wearing a player's name; keepers are merely the
+*systematic* case (an ever-present centre-back would distort identically).
+Evidence that closed the "just an exposure story?" branch: adaptive K made
+keepers *more* prominent (Bravo #3, Valdés #4), so no K/exposure tuning can
+ever fix this. Consequences: the **engine is untouched** — keepers keep full
+credit/blame and stay in Strength (their team-proxy rating is real predictive
+signal; glossary *Strength* unchanged). The fix is comparison-scoping only:
+new glossary term **Goalkeeper** (ever started at GK — career-level, sticky;
+emergency keepers stay field players); `StartingXI` gains a `Player goalkeeper`
+field (lineup position id 1, loader fails loudly if absent) inside the
+ADR 0004 boundary — position must NOT go on `Player`, whose record equality
+drives on-pitch set removal; `MatchProcessor` folds it into a sticky flag on
+`PlayerTally`; the printed leaderboard becomes field-players-only and the CSV
+keeps everyone plus a goalkeeper column. **No keeper board is printed**: our
+keeper ratings compare teams, not keepers, so a keeper-vs-keeper ranking would
+be dishonest until keepers are rated differently (the real GI's "etwas
+anders", explicitly not attempted here). Ship gate: **identity + cosmetic** —
+log-loss unchanged at 0.6331 with pinned knobs, printed top-20 keeper-free,
+Valdés/Bravo flagged in the CSV, tag semantics pinned by a unit test (set at
+GK start, survives later outfield matches, emergency keeper never earns it).
+Declined: gated field-players-only Strength experiment, zero/reduced keeper
+credit share, per-match keeper tracking, two printed boards.
+
+## 11. Field-players-only Strength experiment
+
+**Why:** Item 7's grill committed to the collinearity diagnosis and
+deliberately left keepers in Strength: their team-proxy rating is *presumed*
+to be genuine predictive signal. That presumption is untested. The experiment:
+compute lineup strength as the average of on-pitch **field players** only,
+behind the existing `strength()` seam, judged by the log-loss harness. This
+changes the prediction path, so the full gate applies — adopt only if it beats
+the current 0.6331; either way the result quantifies how much of a keeper's
+rating is informative team signal. If adopted, the glossary *Strength* entry
+changes to say "field players".
+
+**Design note before typing:** the credit path sees `Set<Player>` and a
+`RatingLookup`, but the goalkeeper tag (item 7) lives on `PlayerTally` — the
+flag needs plumbing into the rule (e.g. a keeper-aware lookup, or carrying the
+tag alongside the player). Decide that seam shape first; it is the only real
+work in the experiment.
+
 ## 8. Normalized display scale
 
 **Why:** Raw accumulated ratings (±10-ish) are meaningless to outsiders. The

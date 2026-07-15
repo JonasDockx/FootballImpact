@@ -18,11 +18,11 @@ public class CsvWriter {
         all.sort(Comparator.comparingDouble(PlayerTally::rating).reversed());
 
         try (Writer writer = Files.newBufferedWriter(file)) {
-            writer.write("player,team,minutes,rating\n");
+            writer.write("player,team,minutes,rating,goalkeeper\n");
             for (PlayerTally pt : all) {
-                writer.write(String.format(Locale.ROOT, "%s,%s,%.1f,%.2f",
+                writer.write(String.format(Locale.ROOT, "%s,%s,%.1f,%.2f,%s",
                     escape(pt.player().name()), escape(pt.team().name()),
-                    pt.minutes(), pt.rating()));
+                    pt.minutes(), pt.rating(), pt.isGoalkeeper()));
                 writer.write("\n");
             }
         }

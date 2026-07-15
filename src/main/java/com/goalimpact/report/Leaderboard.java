@@ -10,10 +10,15 @@ import java.util.Locale;
 public class Leaderboard {
 
     public void print(Collection<PlayerTally> tallies, int topN) {
-        List<PlayerTally> ranked = new ArrayList<>(tallies);
+        List<PlayerTally> ranked = new ArrayList<>();
+        for (PlayerTally pt : tallies) {
+            if (!pt.isGoalkeeper()) {
+                ranked.add(pt);
+            }
+        }
         ranked.sort(Comparator.comparingDouble(PlayerTally::rating).reversed());
 
-        System.out.printf("GoalImpact leaderboard (%d players)%n%n", ranked.size());
+        System.out.printf("GoalImpact leaderboard - field players only (%d of %d players; goalkeepers in the CSV)%n%n", ranked.size(), tallies.size());
         System.out.printf("%-4s %-28s %-24s %7s %8s%n",
             "#", "Player", "Team", "Min", "Rating");
 

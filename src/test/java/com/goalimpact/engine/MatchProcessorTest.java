@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MatchProcessorTest {
     
@@ -24,12 +26,13 @@ class MatchProcessorTest {
         return new Player(id, "Player " + id);
     }
 
+    // The first id is the designated goalkeeper - every real Starting XI has exactly one.
     private static MatchEvent.StartingXI xi(Team team, long... ids) {
         List<Player> players = new java.util.ArrayList<>();
         for (long id : ids) {
             players.add(player(id));
         }
-        return new MatchEvent.StartingXI(1, 0, 0, team, players);
+        return new MatchEvent.StartingXI(1, 0, 0, team, players, player(ids[0]));
     }
 
     private static MatchEvent.Goal goal(int minute, Team scoringTeam) {
@@ -201,5 +204,29 @@ class MatchProcessorTest {
 
         assertEquals(0.5, rating(tallies, 1), 1e-9);
         assertEquals(0.5, rating(tallies, 2), 1e-9);
+    }
+
+    @Test
+    void startingInGoalMarksAPlayerAsGoalkeeperForGood() {
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        // Match 1: player 1 keeps goal for team A; player 3 enters as a sub.
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            sub(10, TEAM_A, 2, 3)
+        ), tallies);
+
+        // Match 2: player 2 takes over in goal; player 1 starts outfield
+        processor.process(List.of(
+            xi(TEAM_A, 2, 1),
+            xi(TEAM_B, 12, 13)
+        ), tallies);
+
+        assertTrue(tallies.get(1L).isGoalkeeper()); // sticky: outfield in match 2, still a Goalkeeper
+        assertTrue(tallies.get(2L).isGoalkeeper()); // earned late: outfield first, keeper second
+        assertFalse(tallies.get(3L).isGoalkeeper()); // entered mid-match, never *started* in goal
+        assertFalse(tallies.get(13L).isGoalkeeper()); // ordinary outfield starter
     }
 }
