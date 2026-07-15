@@ -14,6 +14,8 @@ import com.goalimpact.model.MatchEvent;
 import com.goalimpact.report.CsvWriter;
 import com.goalimpact.report.Leaderboard;
 
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,16 +28,17 @@ import java.util.Map;
 public class Main {
     // The empirical knobs of rule C + ADR 0006, grid-searched below:
     // k    - link gain: how strongly a rating gap moves the expected outcome.
-    // K0   - update factur for a debutant (zero exposure)
+    // K0   - update factor for a debutant (zero exposure)
     // H    - halving exposure: career minutes at which updates halve.
     // floor    - fraction of K0 below which updates never fade;
     //            1.0 switches the fade off = the uniform-K baseline (ship gate)
     private static final double[] LINK_GAINS = {0.10};
-    private static final double[] K0S = {1.25, 1.5, 2.0, 2.5, 3.0};
-    private static final double[] HALVING_MINUTES = {2000, 4000, 8000, 16000};
-    private static final double[] FLOOR_FRACTIONS = {0.02, 0.05, 0.25, 1.0};
+    private static final double[] K0S = {2.0};
+    private static final double[] HALVING_MINUTES = {4000};
+    private static final double[] FLOOR_FRACTIONS = {0.05};
 
     public static void main(String[] args) throws Exception {
+        System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
         Path dataDir = Path.of("C:/Users/dockx/Documents/Programmeren/DataStatsbomb/open-data/data");
         DataLoader loader = new DataLoader(dataDir);
 
