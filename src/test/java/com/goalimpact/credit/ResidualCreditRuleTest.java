@@ -32,7 +32,7 @@ class ResidualCreditRuleTest {
     }
 
     private static Lineup lineup(long... ids) {
-        return new Lineup(players(ids), false);
+        return new Lineup(players(ids), false, Set.of());
     }
 
     @Test

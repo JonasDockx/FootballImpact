@@ -25,11 +25,11 @@ class TimeIntegratedResidualTest {
     private static final RatingLookup RATINGS = id -> id < 10 ? 1.0 : 0.0;
 
     private static Lineup neutral(Player... players) {
-        return new Lineup(Set.of(players), false);
+        return new Lineup(Set.of(players), false, Set.of());
     }
 
     private static Lineup home(Player... players) {
-        return new Lineup(Set.of(players), true);
+        return new Lineup(Set.of(players), true, Set.of());
     }
 
     

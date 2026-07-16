@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,6 +61,33 @@ class MatchProcessorTest {
             }
         };
     }
+
+    // Sorted ids, so assertions read stably regardless of set order.
+    private static List<Long> ids(Set<Player> players) {
+        return players.stream().map(Player::id).sorted().toList();
+    }
+
+    // Records what the seam hears about each side's goalkeepers. Sides
+    // arrive in no particular order; per the ids convention above, the
+    // lineup whose smallest id is below 12 is Team A.
+    private static ResidualSource keeperRecorder(List<String> heard) {
+        return new ResidualSource() {
+            @Override
+            public Map<Player, Double> goal(Lineup scoring, Lineup conceding, RatingLookup ratings) {
+                heard.add("goal scoring=" + ids(scoring.goalkeepers())
+                    + " conceding=" + ids(conceding.goalkeepers()));
+                return Map.of();
+            }
+            @Override
+            public Map<Player, Double> segment(Lineup teamA, Lineup teamB, double seconds, RatingLookup ratings) {
+                Lineup a = ids(teamA.players()).get(0) < 12 ? teamA : teamB;
+                Lineup b = a == teamA ? teamB : teamA;
+                heard.add("segment A=" + ids(a.goalkeepers()) + " B=" + ids(b.goalkeepers()));
+                return Map.of();
+            }
+        };
+    }
+
 
     private static MatchEvent.Goal goal(int minute, Team scoringTeam) {
         return new MatchEvent.Goal(1, minute, 0, scoringTeam, null);
@@ -333,6 +361,75 @@ class MatchProcessorTest {
         assertEquals(List.of(
             "goal scoring=false conceding=false",
             "segment A=false B=false"), heard);
+    }
+
+    @Test
+    void startingGoalkeepersTravelWithTheirSideIntoTheSeam() {
+        List<String> heard = new ArrayList<>();
+        MatchProcessor processor = new MatchProcessor(keeperRecorder(heard), m -> 1.0);
+
+        // All four players are career debutants: the tag is stamped at
+        // kickoff, so even a first-ever-match keeper is in the subset.
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_B),
+            new MatchEvent.MatchEnd(2, 90, 0)
+        ), new HashMap<>());
+
+        assertEquals(List.of(
+            "goal scoring=[12] conceding=[1]",
+            "segment A=[1] B=[12]"), heard);
+    }
+
+    @Test
+    void subbedOnKeeperIsInTheSubsetOnlyIfAlreadyTagged() {
+        List<String> heard = new ArrayList<>();
+        MatchProcessor processor = new MatchProcessor(keeperRecorder(heard), m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        // Match 1: player 3 starts in goal for A - the career tag is earned.
+        processor.process(List.of(
+            xi(TEAM_A, 3, 2),
+            xi(TEAM_B, 12, 13)
+        ), tallies);
+        heard.clear(); // match 1 is scaffolding; assertions are about match 2
+
+        // Match 2: keeper 1 is replaced by tagged keeper 3; debutant 4
+        // comes on untagged - a substitution names no position.
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            sub(10, TEAM_A, 1, 3),
+            sub(20, TEAM_A, 2, 4),
+            goal(30, TEAM_A),
+            new MatchEvent.MatchEnd(2, 90, 0)
+        ), tallies);
+
+        assertEquals(List.of(
+            "segment A=[1] B=[12]",
+            "segment A=[3] B=[12]",
+            "goal scoring=[3] conceding=[12]",
+            "segment A=[3] B=[12]"), heard);
+    }
+
+    @Test
+    void sentOffKeeperDropsOutOfTheSubset() {
+        List<String> heard = new ArrayList<>();
+        MatchProcessor processor = new MatchProcessor(keeperRecorder(heard), m -> 1.0);
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            new MatchEvent.RedCard(1, 10, 0, TEAM_A, player(1)),
+            goal(30, TEAM_B),
+            new MatchEvent.MatchEnd(2, 90, 0)
+        ), new HashMap<>());
+
+        assertEquals(List.of(
+            "segment A=[1] B=[12]",
+            "goal scoring=[12] conceding=[]",
+            "segment A=[] B=[12]"), heard);
     }
 
 }

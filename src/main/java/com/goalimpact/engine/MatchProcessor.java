@@ -64,7 +64,7 @@ public class MatchProcessor {
                     }
                 }
                 case MatchEvent.Substitution sub -> {
-                    closeSegment(onPitch, homeTeamId, preMatch, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
                     segStart = t;
                     onPitch.get(sub.team().id()).remove(sub.playerOff());
                     leavePitch(tallies, enterTime, sub.playerOff(), sub.team(), t);
@@ -75,7 +75,7 @@ public class MatchProcessor {
                         .playsFor(sub.team());
                 }
                 case MatchEvent.RedCard rc -> {
-                    closeSegment(onPitch, homeTeamId, preMatch, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
                     segStart = t;
                     onPitch.get(rc.team().id()).remove(rc.player());
                     leavePitch(tallies, enterTime, rc.player(), rc.team(), t);
@@ -94,8 +94,8 @@ public class MatchProcessor {
                     boolean scoringHome = scoringId == homeTeamId;
                     boolean concedingHome = homeTeamId != -1 && !scoringHome;
                     Map<Player, Double> deltas = residualSource.goal(
-                        new Lineup(scoringOnPitch, scoringHome),
-                        new Lineup(concedingOnPitch, concedingHome), preMatch);
+                        new Lineup(scoringOnPitch, scoringHome, goalkeepers(scoringOnPitch, tallies)),
+                        new Lineup(concedingOnPitch, concedingHome, goalkeepers(concedingOnPitch, tallies)), preMatch);
                     for (Map.Entry<Player, Double> d : deltas.entrySet()) {
                         matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
                     }
@@ -103,7 +103,7 @@ public class MatchProcessor {
                 case MatchEvent.MatchEnd end -> {
                     // The whistle closes the final segment; its timestamp already
                     // became lastTime, which closes every open stint.
-                    closeSegment(onPitch, homeTeamId, preMatch, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
                 }
             }
         }
@@ -127,7 +127,7 @@ public class MatchProcessor {
     }
 
     private void closeSegment(Map<Long, Set<Player>> onPitch, long homeTeamId, RatingLookup ratings,
-        Map<Long, Double> matchResiduals, int from, int to) {
+        Map<Long, PlayerTally> tallies, Map<Long, Double> matchResiduals, int from, int to) {
             if (to <= from || onPitch.size() != 2) {
                 return; // zero-length segment, or lineups not both known yet
             }
@@ -135,11 +135,24 @@ public class MatchProcessor {
             Map.Entry<Long, Set<Player>> teamA = teams.next();
             Map.Entry<Long, Set<Player>> teamB = teams.next();
             Map<Player, Double> deltas = residualSource.segment(
-                new Lineup(teamA.getValue(), teamA.getKey() == homeTeamId),
-                new Lineup(teamB.getValue(), teamB.getKey() == homeTeamId),
+                new Lineup(teamA.getValue(), teamA.getKey() == homeTeamId, goalkeepers(teamA.getValue(), tallies)),
+                new Lineup(teamB.getValue(), teamB.getKey() == homeTeamId, goalkeepers(teamB.getValue(), tallies)),
                 to - from, ratings);
             for (Map.Entry<Player, Double> d : deltas.entrySet()) {
                 matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
             }
+        }
+
+        // The on-pitch subset carrying the career Goalkeeper tag, read live:
+        // the tag is stamped while StartingXI is processed, so today's starter
+        // - even a career debutant - is always covered (item 11).
+        private Set<Player> goalkeepers(Set<Player> onPitch, Map<Long, PlayerTally> tallies) {
+            Set<Player> keepers = new HashSet<>();
+            for (Player p : onPitch) {
+                if (tallies.get(p.id()).isGoalkeeper()) {
+                    keepers.add(p);
+                }
+            }
+            return keepers;
         }
 }

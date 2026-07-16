@@ -305,7 +305,8 @@ to be genuine predictive signal. That presumption is untested. The experiment:
 compute lineup strength as the average of on-pitch **field players** only,
 behind the existing `strength()` seam, judged by the log-loss harness. This
 changes the prediction path, so the full gate applies — adopt only if it beats
-the current 0.6331; either way the result quantifies how much of a keeper's
+the current best (0.6259 since ADR 0008; the 0.6331 first written here
+predated home advantage); either way the result quantifies how much of a keeper's
 rating is informative team signal. If adopted, the glossary *Strength* entry
 changes to say "field players".
 
@@ -314,6 +315,35 @@ changes to say "field players".
 flag needs plumbing into the rule (e.g. a keeper-aware lookup, or carrying the
 tag alongside the player). Decide that seam shape first; it is the only real
 work in the experiment.
+
+**Grill done (2026-07-16), no ADR (reversible; item 7 precedent):** the
+"existing `strength()` seam" wording above was loose — `strength()` is a
+private helper of `TimeIntegratedResidual`, not a seam. The variant enters as
+a constructor flag on the rule, exposed in `Main` as a `{false, true}` grid
+dimension with the status quo embedded as the baseline cell (the floor = 1.0
+/ h = 0 pattern; a `StrengthFunction` seam was declined — no second consumer
+on the board — and a duplicate rule class rejected outright). Filter fact:
+the career *Goalkeeper* tag read **live** from tallies — stamped during
+StartingXI processing, so today's starter (even a career debutant) is always
+covered, and a subbed-on previously-tagged keeper too. Accepted as noise: a
+debut backup keeper subbed on (untagged that match, counts as field player)
+and a sticky-tagged ex-keeper playing outfield (excluded anyway; essentially
+never occurs). Plumbing lands on ADR 0008's named spot:
+`Lineup(players, home, Set<Player> goalkeepers)` — the subset of on-pitch
+tagged players; empty set = no keeper on pitch, so a keeper red card just
+works; `players` stays the full lineup and credit/blame is untouched (item
+7's commitment). The filter applies to `goal()` and `segment()` alike — one
+model, never split (ADR 0008 precedent). Gate **best-vs-best, strict**: the
+variant cells get their own h sweep (0–4) plus a K0/H cross-check, and the
+variant's best must strictly beat **0.6259** at four decimals — a tie keeps
+the status quo. Staged landing: (1) inert plumbing, gate byte-identical CSV
++ 0.6259 unchanged, processor tests pin the subset semantics (starter in;
+tagged sub in; untagged debut sub out; sent-off keeper out); (2) grid flag
+on, rule test (keepers out of the average, still in the deltas,
+empty-after-filter hits the existing empty-set guard), run the gate. Either
+outcome is the deliverable — a loss quantifies what a keeper's team-proxy
+rating is worth in log-loss. Glossary *Strength* changes to "field players"
+only on adoption. Ready to implement.
 
 ## 8. Normalized display scale
 
