@@ -30,13 +30,35 @@ class MatchProcessorTest {
         return new Player(id, "Player " + id);
     }
 
-    // The first id is the designated goalkeeper - every real Starting XI has exactly one.
     private static MatchEvent.StartingXI xi(Team team, long... ids) {
-        List<Player> players = new java.util.ArrayList<>();
+        return xi(team, false, ids);
+    }
+
+    private static MatchEvent.StartingXI xi(Team team, boolean home, long... ids) {
+        List<Player> players = new ArrayList<>();
         for (long id : ids) {
             players.add(player(id));
         }
-        return new MatchEvent.StartingXI(1, 0, 0, team, players, player(ids[0]), false);
+        return new MatchEvent.StartingXI(1, 0, 0, team, players, player(ids[0]), home);
+    }
+
+    // Records what the seam hears about home-ness. Sides arrive in no
+    // particular order, so Team A is identified by membership, not position.
+    private static ResidualSource homeRecorder(List<String> heard) {
+        return new ResidualSource() {
+            @Override
+            public Map<Player, Double> goal(Lineup scoring, Lineup conceding, RatingLookup ratings) {
+                heard.add("goal scoring=" + scoring.home() + " conceding=" + conceding.home());
+                return Map.of();
+            }
+            @Override
+            public Map<Player, Double> segment(Lineup teamA, Lineup teamB, double seconds, RatingLookup ratings) {
+                Lineup a = teamA.players().contains(player(1)) ? teamA : teamB;
+                Lineup b = a == teamA ? teamB : teamA;
+                heard.add("segment A=" + a.home() + " B=" + b.home());
+                return Map.of();
+            }
+        };
     }
 
     private static MatchEvent.Goal goal(int minute, Team scoringTeam) {
@@ -278,4 +300,39 @@ class MatchProcessorTest {
 
         assertEquals(List.of(3600.0, 1800.0), segmentLengths);
     }
+
+    @Test
+    void homeFlagTravelsWithItsSideIntoTheSeam() {
+        List<String> heard = new ArrayList<>();
+        MatchProcessor processor = new MatchProcessor(homeRecorder(heard), m -> 1.0);
+
+        processor.process(List.of(
+            xi(TEAM_A, true, 1, 2),   // Team A plays at its own venue
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_B),         // the away side scores
+            new MatchEvent.MatchEnd(2, 90, 0)
+        ), new HashMap<>());
+
+        assertEquals(List.of(
+            "goal scoring=false conceding=true",
+            "segment A=true B=false"), heard);
+    }
+
+    @Test
+    void neutralMatchFlagsNeitherSideAnywhere() {
+        List<String> heard = new ArrayList<>();
+        MatchProcessor processor = new MatchProcessor(homeRecorder(heard), m -> 1.0);
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_A),
+            new MatchEvent.MatchEnd(2, 90, 0)
+        ), new HashMap<>());
+
+        assertEquals(List.of(
+            "goal scoring=false conceding=false",
+            "segment A=false B=false"), heard);
+    }
+
 }

@@ -27,6 +27,11 @@ class TimeIntegratedResidualTest {
     private static Lineup neutral(Player... players) {
         return new Lineup(Set.of(players), false);
     }
+
+    private static Lineup home(Player... players) {
+        return new Lineup(Set.of(players), true);
+    }
+
     
     @Test
     void goalIsAFullJumpAndReportsTheWhoScoresProbability() {
@@ -72,4 +77,50 @@ class TimeIntegratedResidualTest {
         assertEquals(0.0, deltas.get(B1), 1e-9);
         assertEquals(0.0, deltas.get(c1), 1e-9);
     }
+
+    @Test
+    void homeAdvantageTiltsTheWhoScoresProbability() {
+        List<Double> observed = new ArrayList<>();
+        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, 1.0, observed::add);
+        Player c1 = new Player(22, "C1");
+
+        rule.goal(home(B1, B2), neutral(c1), RATINGS); // equal ratings, scorer at home
+
+        assertEquals(0.8, observed.get(0), 1e-9); // h = 1 point = the gap-1 table
+    }
+
+    @Test
+    void homeAdvantageDrainsExpectationFromTheHomeSide() {
+        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, 1.0, p -> {});
+        Player c1 = new Player(22, "C1");
+
+        Map<Player, Double> deltas = rule.segment(home(B1, B2), neutral(c1), 3600, RATINGS);
+
+        assertEquals(-1.8, deltas.get(B1), 1e-9); // the home side owes the drain
+        assertEquals(1.8, deltas.get(c1), 1e-9);  // visitors earn it by surviving
+    }
+
+    @Test
+    void homeAdvantageIsSideOrderIndependent() {
+        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, 1.0, p -> {});
+        Player c1 = new Player(22, "C1");
+
+        Map<Player, Double> deltas = rule.segment(neutral(c1), home(B1, B2), 3600, RATINGS);
+
+        assertEquals(-1.8, deltas.get(B1), 1e-9); // same answer, sides swapped
+        assertEquals(1.8, deltas.get(c1), 1e-9);
+    }
+
+    @Test
+    void homeAdvantageCanExactlyCancelAQualityGap() {
+        TimeIntegratedResidual rule = new TimeIntegratedResidual(0.02, GAIN, 1.0, p -> {});
+
+        // The A-side is a full point stronger; the B-side is at home with
+        // h = 1: venue exactly cancels quality, so nothing drains.
+        Map<Player, Double> deltas = rule.segment(home(B1, B2), neutral(A1, A2), 3600, RATINGS);
+
+        assertEquals(0.0, deltas.get(B1), 1e-9);
+        assertEquals(0.0, deltas.get(A1), 1e-9);
+    }
+
 }

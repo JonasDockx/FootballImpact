@@ -42,7 +42,7 @@ public class Main {
     private static final double GOALS_ONLY_BASELINE = 0.6331;
     // ADR 0008: home advantage in rating points, added to the home side's
     // effective gap. {0.0} = venue-blind; stage 2 widens this array.
-    private static final double[] HOME_ADVANTAGES = {0.0};
+    private static final double[] HOME_ADVANTAGES = {0.0, 1.0, 2.0, 2.5, 3.0, 4.0};
 
     public static void main(String[] args) throws Exception {
         System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
