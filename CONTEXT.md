@@ -47,10 +47,11 @@ level.
 
 **Home side**:
 The side of a match, if any, genuinely playing at its own venue. At most one
-side is ever at home; a match on neutral ground has no home side. Determined
-from evidence (whose venue it is, who hosts the tournament), never from a
-fixture list's administrative home/away labeling — tournaments, neutral-venue
-finals, and bubble seasons assign that label without meaning.
+side is ever at home; a match on neutral ground has no home side. In club
+football the fixture's home label marks a genuine home fixture — except
+one-off finals at a chosen ground and seasons played wholesale at neutral
+venues. In national-team tournaments the label is administrative and only
+geography decides: a side is at home only in its own country.
 _Avoid_: home team — that names the administrative label, not the concept
 
 **Home advantage**:

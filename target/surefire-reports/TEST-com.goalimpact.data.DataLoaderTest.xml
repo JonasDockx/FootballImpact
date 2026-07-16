@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.goalimpact.data.DataLoaderTest" time="0.04" tests="14" errors="0" skipped="0" failures="0">
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.goalimpact.data.DataLoaderTest" time="0.044" tests="16" errors="0" skipped="0" failures="0">
   <properties>
     <property name="java.specification.version" value="21"/>
     <property name="sun.cpu.isalist" value="amd64"/>
@@ -15,7 +15,7 @@
     <property name="sun.java.launcher" value="SUN_STANDARD"/>
     <property name="user.country" value="GB"/>
     <property name="sun.boot.library.path" value="C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot\bin"/>
-    <property name="sun.java.command" value="C:\Users\dockx\AppData\Local\Temp\surefire7979674058931159636\surefirebooter-20260716070534765_3.jar C:\Users\dockx\AppData\Local\Temp\surefire7979674058931159636 2026-07-16T07-05-34_661-jvmRun1 surefire-20260716070534765_1tmp surefire_0-20260716070534765_2tmp"/>
+    <property name="sun.java.command" value="C:\Users\dockx\AppData\Local\Temp\surefire3885431300048512571\surefirebooter-20260716152518110_3.jar C:\Users\dockx\AppData\Local\Temp\surefire3885431300048512571 2026-07-16T15-25-18_007-jvmRun1 surefire-20260716152518110_1tmp surefire_0-20260716152518110_2tmp"/>
     <property name="jdk.debug" value="release"/>
     <property name="surefire.test.class.path" value="C:\Users\dockx\Documents\Programmeren\GoalImpact\target\test-classes;C:\Users\dockx\Documents\Programmeren\GoalImpact\target\classes;C:\Users\dockx\.m2\repository\com\google\code\gson\gson\2.11.0\gson-2.11.0.jar;C:\Users\dockx\.m2\repository\com\google\errorprone\error_prone_annotations\2.27.0\error_prone_annotations-2.27.0.jar;C:\Users\dockx\.m2\repository\org\junit\jupiter\junit-jupiter\5.10.2\junit-jupiter-5.10.2.jar;C:\Users\dockx\.m2\repository\org\junit\jupiter\junit-jupiter-api\5.10.2\junit-jupiter-api-5.10.2.jar;C:\Users\dockx\.m2\repository\org\opentest4j\opentest4j\1.3.0\opentest4j-1.3.0.jar;C:\Users\dockx\.m2\repository\org\junit\platform\junit-platform-commons\1.10.2\junit-platform-commons-1.10.2.jar;C:\Users\dockx\.m2\repository\org\apiguardian\apiguardian-api\1.1.2\apiguardian-api-1.1.2.jar;C:\Users\dockx\.m2\repository\org\junit\jupiter\junit-jupiter-params\5.10.2\junit-jupiter-params-5.10.2.jar;C:\Users\dockx\.m2\repository\org\junit\jupiter\junit-jupiter-engine\5.10.2\junit-jupiter-engine-5.10.2.jar;C:\Users\dockx\.m2\repository\org\junit\platform\junit-platform-engine\1.10.2\junit-platform-engine-1.10.2.jar;"/>
     <property name="sun.cpu.endian" value="little"/>
@@ -30,7 +30,7 @@
     <property name="line.separator" value="&#10;"/>
     <property name="java.vm.specification.vendor" value="Oracle Corporation"/>
     <property name="java.specification.name" value="Java Platform API Specification"/>
-    <property name="surefire.real.class.path" value="C:\Users\dockx\AppData\Local\Temp\surefire7979674058931159636\surefirebooter-20260716070534765_3.jar"/>
+    <property name="surefire.real.class.path" value="C:\Users\dockx\AppData\Local\Temp\surefire3885431300048512571\surefirebooter-20260716152518110_3.jar"/>
     <property name="user.script" value=""/>
     <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
     <property name="java.runtime.version" value="21.0.11+10-LTS"/>
@@ -59,18 +59,20 @@
     <property name="sun.io.unicode.encoding" value="UnicodeLittle"/>
     <property name="java.class.version" value="65.0"/>
   </properties>
-  <testcase name="carriesGenderSoCallersCanFilter" classname="com.goalimpact.data.DataLoaderTest" time="0.019"/>
+  <testcase name="carriesGenderSoCallersCanFilter" classname="com.goalimpact.data.DataLoaderTest" time="0.017"/>
   <testcase name="islBubbleSeasonIsPinnedAllNeutral" classname="com.goalimpact.data.DataLoaderTest" time="0.005"/>
   <testcase name="crossBorderMatchOnNeutralGroundHasNoHomeSide" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
-  <testcase name="tripwireFiresWhenMatchesAndEventsDisagreeOnTeamIds" classname="com.goalimpact.data.DataLoaderTest" time="0.005"/>
-  <testcase name="tournamentHostLabeledHomeIsTheHomeSide" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
-  <testcase name="missingStadiumMeansNoEvidenceAndNoHomeSide" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
+  <testcase name="tripwireFiresWhenMatchesAndEventsDisagreeOnTeamIds" classname="com.goalimpact.data.DataLoaderTest" time="0.006"/>
+  <testcase name="clubLabelIsTrustedInCrossBorderCompetitions" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
+  <testcase name="tournamentHostLabeledHomeIsTheHomeSide" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
+  <testcase name="curatedOverrideBeatsEveryRule" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
+  <testcase name="missingStadiumMeansNoEvidenceAndNoHomeSide" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
   <testcase name="neutralVenueFlagsNobody" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
-  <testcase name="tournamentHostLabeledAwayIsStillTheHomeSide" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
-  <testcase name="homeFlagLandsOnTheHomeSidesStartingXI" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
-  <testcase name="sameCountryTieDefeatsGeography" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
+  <testcase name="tournamentHostLabeledAwayIsStillTheHomeSide" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
+  <testcase name="homeFlagLandsOnTheHomeSidesStartingXI" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
+  <testcase name="clubFinalIsNeutralEvenInAFinalistsCountry" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
   <testcase name="loadsEveryCompetitionSeasonPair" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
   <testcase name="domesticCupFinalIsNeutralGround" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
-  <testcase name="domesticLeagueTrustsTheLabel" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
-  <testcase name="parsesTheFieldsOfACompetitionSeason" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
+  <testcase name="domesticLeagueTrustsTheLabel" classname="com.goalimpact.data.DataLoaderTest" time="0.0"/>
+  <testcase name="parsesTheFieldsOfACompetitionSeason" classname="com.goalimpact.data.DataLoaderTest" time="0.001"/>
 </testsuite>

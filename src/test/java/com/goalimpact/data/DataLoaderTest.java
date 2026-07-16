@@ -26,15 +26,17 @@ class DataLoaderTest {
     // loadMatches takes the CompetitionSeason record directly, so these
     // fixture handles never need to appear in the fixture competitions.json.
     private static final CompetitionSeason EURO_2024 =
-        new CompetitionSeason(55, 282, "UEFA Euro", "2024", "male", "Europe");
+        new CompetitionSeason(55, 282, "UEFA Euro", "2024", "male", true);
     private static final CompetitionSeason CL_2018_19 =
-        new CompetitionSeason(16, 4, "Champions League", "2018/2019", "male", "Europe");
+        new CompetitionSeason(16, 4, "Champions League", "2018/2019", "male", false);
     private static final CompetitionSeason COPA_DEL_REY_1982_83 =
-        new CompetitionSeason(87, 268, "Copa del Rey", "1982/1983", "male", "Spain");
+        new CompetitionSeason(87, 268, "Copa del Rey", "1982/1983", "male", false);
     private static final CompetitionSeason LA_LIGA_2015_16 =
-        new CompetitionSeason(11, 27, "La Liga", "2015/2016", "male", "Spain");
+        new CompetitionSeason(11, 27, "La Liga", "2015/2016", "male", false);
     private static final CompetitionSeason ISL_2021_22 =
-        new CompetitionSeason(1238, 108, "Indian Super league", "2021/2022", "male", "India");
+        new CompetitionSeason(1238, 108, "Indian Super league", "2021/2022", "male", false);
+    private static final CompetitionSeason EUROPA_LEAGUE_1988_89 =
+        new CompetitionSeason(35, 75, "UEFA Europa League", "1988/1989", "male", false);
 
     private Match match(CompetitionSeason competition, long matchId) throws IOException {
         return loader.loadMatches(competition).stream()
@@ -63,7 +65,7 @@ class DataLoaderTest {
         assertEquals("UEFA Euro", euro.competitionName());
         assertEquals("2024", euro.seasonName());
         assertEquals("male", euro.gender());
-        assertEquals("Europe", euro.countryName());
+        assertTrue(euro.international());
     }
 
     @Test
@@ -101,9 +103,11 @@ class DataLoaderTest {
     }
 
     @Test
-    void sameCountryTieDefeatsGeography() throws IOException {
-        // Real vs Atletico in Spain: both countries match the stadium's, so
-        // geography cannot pick a host - the documented ADR 0008 limitation.
+    void clubFinalIsNeutralEvenInAFinalistsCountry() throws IOException {
+        // Real vs Atletico, a Champions League final in Spain: a single
+        // match at a chosen ground is nobody's home fixture, whatever
+        // country it lands in (Wembley 20211 taught us the label and the
+        // geography both lie at finals).
         assertEquals(Match.HomeSide.NEITHER, match(CL_2018_19, 9201).homeSide());
     }
 
@@ -148,5 +152,19 @@ class DataLoaderTest {
             new Team(999, "Ghost"), new Team(998, "Phantom"), 0, 0, Match.HomeSide.HOME);
 
         assertThrows(IllegalStateException.class, () -> loader.loadEvents(ghost));
+    }
+
+    @Test
+    void clubLabelIsTrustedInCrossBorderCompetitions() throws IOException {
+        // Bayern's home leg of a Champions League semi-final: in club
+        // football the label marks a genuine home fixture, Europa included.
+        assertEquals(Match.HomeSide.HOME, match(CL_2018_19, 9202).homeSide());
+    }
+
+    @Test
+    void curatedOverrideBeatsEveryRule() throws IOException {
+        // The 1989 UEFA Cup final was two-legged; Napoli's first leg was a
+        // genuine home fixture that the finals rule would neutralise.
+        assertEquals(Match.HomeSide.HOME, match(EUROPA_LEAGUE_1988_89, 3887188).homeSide());
     }
 }

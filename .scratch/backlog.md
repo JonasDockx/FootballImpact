@@ -190,12 +190,32 @@ on `StartingXI` (at most one, tripwired), seam deepened to
 Calibration: h joins the grid (it does NOT cancel from the log-loss, unlike
 the base rate) with h = 0 as the embedded baseline plus a printed
 home-goal-share sanity anchor. ~90 COVID ghost matches accepted as documented
-calibration noise. Known limitation: same-country European ties degrade to
-neutral (none in current data; upgrade = club→home-stadium map). Staged
-landing: (1) inert plumbing at h = 0, byte-identical gate; (2) grid on,
-gate **strictly** beat 0.6326 + anchor vicinity + named demos (home 1-0 pays
-less than away 1-0; Euro 2024 hosts boosted, Portugal-in-Leipzig an unchanged
-control). Ready to implement.
+calibration noise. Staged landing: (1) inert plumbing at h = 0,
+byte-identical gate; (2) grid on, gate **strictly** beat 0.6326 + anchor
+vicinity + named demos.
+
+**Redesigned mid-implementation (2026-07-16):** reviewing the flagged
+matches exposed the country test as a *host-nation* test misapplied to
+clubs — it made Man United "home" at the 2011 Wembley final and Ajax "home"
+at De Kuip 1972, while degrading Napoli's genuine 1989 home leg vs Juventus
+to neutral. Final rule forks on `competition_international`: national teams
+→ geography (country == stadium country); clubs → trust the fixture label,
+minus single-match finals, minus **curated source facts** (`NEUTRAL_SEASONS`:
+ISL 2021/22 bubble; `HOME_SIDE_OVERRIDES`: Napoli's two-legged-final home
+leg). Bayern's 2012 "Finale dahoam" deliberately left neutral. Bonus: the
+old same-country limitation vanished — labels handle future all-Spanish
+European ties; no club→stadium map ever needed.
+
+**Shipped (2026-07-16):** h = **2.5** (grid winner, interior on 0–4;
+K0/H reconfirmed in a 27-cell cross-check), log-loss **0.6259 vs 0.6326**
+venue-blind baseline — the largest single tuning gain yet (0.0067; adaptive
+K was 0.0004, time-integration 0.0005). Anchor agreed: home sides scored
+56.7% of goals → h ≈ 2.69. Implied venue edge between equals ≈ 0.35 goals
+of expected GD per match, inside the 0.3–0.5 this item predicted. Demos:
+Müller −0.19 for a goalless cameo in a 5-1 *home* win, late Scotland subs
+positive, England 0-0 Slovenia (neutral) reproduces ADR 0007's demo, Real's
+home 0-4 collapse docked −2.6..−3.6. Leaderboard: Pepe to #2, Zlatan/Cavani
+down. Outcome details in ADR 0008.
 
 ## 6. Adaptive per-player update factor (uncertainty-based K) — DONE
 

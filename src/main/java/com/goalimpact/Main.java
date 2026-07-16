@@ -38,11 +38,15 @@ public class Main {
     // Measured 2026-07-15 on the honest clock (stage 2, ADR 0007):
     // 7,496 goals / 509,022 team-minutes. Re-measure when new eras land.
     private static final double BASE_RATE = 0.01473;
-    // Stage 1 re-baseline; the goals-only rule's log-loss to beat or match.
-    private static final double GOALS_ONLY_BASELINE = 0.6331;
+    // Stage 1 baseline (ADR 0008): the venue-blind model's log-loss - the
+    // number home advantage must strictly beat (parity is failure here:
+    // this knob targets the measured quantity directly.)
+    private static final double VENUE_BLIND_BASELINE = 0.6326;
     // ADR 0008: home advantage in rating points, added to the home side's
-    // effective gap. {0.0} = venue-blind; stage 2 widens this array.
-    private static final double[] HOME_ADVANTAGES = {0.0, 1.0, 2.0, 2.5, 3.0, 4.0};
+    // effective gap. Grid-tuned 2026-07-16: winner 2.5 (logloss 0.6259),
+    // interior on a 0-4 sweep, beside the measured anchor 2.69; 0.0
+    // recovers the venue-blind baseline.
+    private static final double[] HOME_ADVANTAGES = {2.5};
 
     public static void main(String[] args) throws Exception {
         System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
@@ -71,7 +75,7 @@ public class Main {
 
         // Parse every events file once; each grid cell then replays from memory.
         List<List<MatchEvent>> replays = new ArrayList<>();
-        long homeGoals = 0, awayGoals = 0; // scored by / conceded by hime sides
+        long homeGoals = 0, awayGoals = 0; // scored by / conceded by home sides
         for (Match m : matches) {
             if (loader.hasEvents(m.matchId())) {
                 replays.add(loader.loadEvents(m));
@@ -147,11 +151,11 @@ public class Main {
             "%nBest: k=%.2f K0=%.2f H=%.0f floor=%.2f home=%.2f (logloss %.4f vs 0.6931 know-nothing)%n",
             bestGain, bestK0, bestH, bestFloor, bestHome, bestLoss);
         System.out.printf(Locale.US,
-            "Ship gate (ADR 0007): %.4f vs %.4f goals-only baseline -> %s%n%n",
-            bestLoss, GOALS_ONLY_BASELINE,
-            bestLoss <= GOALS_ONLY_BASELINE ? "parity or better" : "worse - investigate");
+            "Ship gate (ADR 0008): %.4f vs %.4f venue-blind baseline -> %s%n%n",
+            bestLoss, VENUE_BLIND_BASELINE,
+            bestLoss < VENUE_BLIND_BASELINE ? "strictly better" : "NOT strictly better - do not ship");
 
-        // Final replay with the winning knows; reports come from this one.
+        // Final replay with the winning knobs; reports come from this one.
         Map<Long, PlayerTally> tallies = replay(replays, bestGain, bestHome, new SmoothFadeSchedule(bestK0, bestH, bestFloor), p -> {});
 
         new Leaderboard().print(tallies.values(), 20);

@@ -1,0 +1,24 @@
+[
+  {
+    "match_id": 3887188,
+    "match_date": "1989-05-03",
+    "home_team": {
+      "home_team_id": 1852,
+      "home_team_name": "Napoli",
+      "country": { "id": 112, "name": "Italy" }
+    },
+    "away_team": {
+      "away_team_id": 185,
+      "away_team_name": "VfB Stuttgart",
+      "country": { "id": 85, "name": "Germany" }
+    },
+    "home_score": 2,
+    "away_score": 1,
+    "competition_stage": { "id": 26, "name": "Final" },
+    "stadium": {
+      "id": 4668,
+      "name": "Stadio Diego Armando Maradona",
+      "country": { "id": 112, "name": "Italy" }
+    }
+  }
+]

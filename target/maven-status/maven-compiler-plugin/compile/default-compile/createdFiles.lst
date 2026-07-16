@@ -6,6 +6,7 @@ com\goalimpact\data\DataLoader$1.class
 com\goalimpact\engine\MatchProcessor.class
 com\goalimpact\report\Leaderboard.class
 com\goalimpact\model\Team.class
+com\goalimpact\data\DataLoader$SeasonKey.class
 com\goalimpact\model\MatchEvent$MatchEnd.class
 com\goalimpact\model\MatchEvent$StartingXI.class
 com\goalimpact\credit\FlatCreditRule.class

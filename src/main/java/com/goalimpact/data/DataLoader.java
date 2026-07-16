@@ -17,22 +17,36 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class DataLoader {
     
     private final Path dataDir;
 
-    // country_name values StatsBomb gives cross-border competitions; any
-    // real country name means a domestic competition (ADR 0008).
-    private static final Set<String> REGIONS = Set.of("Africa", "Asia",
-        "Europe", "International", "North and Central America", "Oceania",
-        "South America");
-
-    // Domestic stages that are a single match at a chosen neutral ground,
-    // never anyone's home fixture (cup finals; league stages never use these).
+    // Stages that are a single match at a chosen neutral ground, never
+    // anyone's home fixture (cup and tournament finals; league stages and
+    // two-legged rounds never use these names).
     private static final Set<String> SINGLE_MATCH_FINALS =
         Set.of("Final", "Championship - Final");
+
+    // Curated source facts (ADR 0008): places where the data's labels cannot
+    // be trusted and no rule can know better. Each entry documents why.
+    private record SeasonKey(int competitionId, int seasonId) {}
+
+    // Whole seasons played at neutral venues despite their home labels.
+    private static final Set<SeasonKey> NEUTRAL_SEASONS = Set.of(
+        // ISL 2021/22: the whole season in a COVID bubble - 115 matches
+        // in 3 stadiums, no travel, every home label a fiction.
+        new SeasonKey(1238, 108));
+    
+    // Per-match verdicts that beat every rule - the manual escape hatch.
+    private static final Map<Long, Match.HomeSide> HOME_SIDE_OVERRIDES = Map.of(
+        // Europa League 88/89 final, 1st leg: a TWO-legged final, genuinely
+        // Napoli's home fixture - the single-match-finals rule would
+        // wrongly neutralise it.
+        3887188L, Match.HomeSide.HOME);
+
 
     public DataLoader(Path dataDir) {
         this.dataDir = dataDir;
@@ -52,7 +66,7 @@ public class DataLoader {
                     obj.get("competition_name").getAsString(),
                     obj.get("season_name").getAsString(),
                     obj.get("competition_gender").getAsString(),
-                    obj.get("country_name").getAsString()));
+                    obj.get("competition_international").getAsBoolean()));
             }
         }
         return competitions;
@@ -85,40 +99,44 @@ public class DataLoader {
                 int awayScore = obj.get("away_score").getAsInt();
 
                 matches.add(new Match(matchId, date, home, away, homeScore, awayScore,
-                    classifyHomeSide(competition, obj)));
+                    classifyHomeSide(competition, obj, matchId)));
             }
         }
         return matches;
     }
 
-    // ADR 0008: the two-world rule. Domestic competitions trust the fixture
-    // label; cross-border competitions trust geography - a side is at home
-    // if the stadium stands in its country.
-    private Match.HomeSide classifyHomeSide(CompetitionSeason competition, JsonObject match) {
-        if (REGIONS.contains(competition.countryName())) {
+    // ADR 0008: who, if anyone, is genuinely at home. National-team
+    // competitions trust geography: a side is at home if the stadium
+    // stands in its country - hosts are real, labels administrative.
+    // Club competitions trust the fixture label: a labeled home match is
+    // someone's genuine home fixture, whether in La Liga or in Europe -
+    // except single-match finals at a chosen ground, and curated facts.
+    private Match.HomeSide classifyHomeSide(CompetitionSeason competition, JsonObject match, long matchId) {
+        Match.HomeSide override = HOME_SIDE_OVERRIDES.get(matchId);
+        if (override != null) {
+            return override;
+        }
+        if (competition.international()) {
             String stadiumCountry = stadiumCountryOf(match);
             if (stadiumCountry == null) {
-                return Match.HomeSide.NEITHER;  // no evidence, no advantage
+                return Match.HomeSide.NEITHER; // no evidence, no advantage
             }
             boolean homeInOwnCountry = stadiumCountry.equals(countryOf(match, "home_team"));
             boolean awayInOwnCountry = stadiumCountry.equals(countryOf(match, "away_team"));
             if (homeInOwnCountry == awayInOwnCountry) {
-                // Neither side's country - or both sides' (a same-country
-                // tie): geography cannot pick a host, so nobody is one.
-                return Match.HomeSide.NEITHER;
+                return Match.HomeSide.NEITHER; // nobody's country: true neutral
             }
             return homeInOwnCountry ? Match.HomeSide.HOME : Match.HomeSide.AWAY;
         }
-        if (SINGLE_MATCH_FINALS.contains(stageOf(match))) {
-            return Match.HomeSide.NEITHER;  // cup final at a neutral ground
-        }
-        if (competition.competitionId() == 1238 && competition.seasonId() == 108) {
-            // ISL 2021/22: the whole season in a COVID bubble - 115 matches
-            // in 3 stadiums, no travel, every home label a fiction
+        if (NEUTRAL_SEASONS.contains(new SeasonKey(competition.competitionId(), competition.seasonId()))) {
             return Match.HomeSide.NEITHER;
+        }
+        if (SINGLE_MATCH_FINALS.contains(stageOf(match))) {
+            return Match.HomeSide.NEITHER; // a final at a chosen ground
         }
         return Match.HomeSide.HOME;
     }
+
 
     // The open dataset occasionally lists a match whose events file is not
     // shipped. Callers use this to skip those instead of crashing mid-replay.
