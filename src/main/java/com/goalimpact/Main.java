@@ -48,9 +48,17 @@ public class Main {
     // recovers the venue-blind baseline.
     private static final double[] HOME_ADVANTAGES = {2.5};
 
+    // Item 11: the field-players-only Strength experiment. false = status
+    // quo (Goalkeepers count in Strength), true = field players only. Gate:
+    // the variant's best cell must strictly beat the all-players champion;
+    // a tie keeps Goalkeepers in Strength.
+    private static final boolean[] FIELD_PLAYERS_ONLY = {false};
+    // The tuned all-players model (ADR 0008) - the number item 11 must beat.
+    private static final double CHAMPION = 0.6259;
+
     public static void main(String[] args) throws Exception {
         System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
-        Path dataDir = Path.of("C:/Users/dockx/Documents/Programmeren/DataStatsbomb/open-data/data");
+        Path dataDir = Path.of("C:/Users/dockx/Documents/Programmeren/FootballData/statsbomb-open-data/data");
         DataLoader loader = new DataLoader(dataDir);
 
         // Men's competitions only: women's football forms a disconnected
@@ -119,25 +127,29 @@ public class Main {
 
         // Grid search: prequential mean log-loss per (k, K). 0.6931 = ln 2 is
         // the know-nothing baseline; lower is better.
-        System.out.printf("%8s %8s %8s %8s %8s %10s%n", "k", "K0", "H", "floor", "home", "logloss");
+        System.out.printf("%8s %8s %8s %8s %8s %8s %10s%n", "k", "K0", "H", "floor", "home", "field", "logloss");
         double bestGain = 0, bestK0 = 0, bestH = 0, bestFloor = 0, bestHome = 0, bestLoss = Double.MAX_VALUE;
+        boolean bestFieldOnly = false;
         for (double gain : LINK_GAINS) {
             for (double k0 : K0S) {
                 for (double h : HALVING_MINUTES) {
                     for (double floor : FLOOR_FRACTIONS) {
                         for (double home : HOME_ADVANTAGES) {
-                            PredictionQuality quality = new PredictionQuality();
-                            replay(replays, gain, home, new SmoothFadeSchedule(k0, h, floor), quality::observe);
-                            double loss = quality.meanLogLoss();
-                            System.out.printf(Locale.US, "%8.2f %8.2f %8.0f %8.2f %8.2f %10.4f%n",
-                                gain, k0, h, floor, home, loss);
-                            if (loss < bestLoss) {
-                                bestLoss = loss;
-                                bestGain = gain;
-                                bestK0 = k0;
-                                bestH = h;
-                                bestFloor = floor;
-                                bestHome = home;
+                            for (boolean fieldOnly : FIELD_PLAYERS_ONLY ) {
+                                PredictionQuality quality = new PredictionQuality();
+                                replay(replays, gain, home, fieldOnly, new SmoothFadeSchedule(k0, h, floor), quality::observe);
+                                double loss = quality.meanLogLoss();
+                                System.out.printf(Locale.US, "%8.2f %8.2f %8.0f %8.2f %8.2f %8s %10.4f%n",
+                                    gain, k0, h, floor, home, fieldOnly ? "yes" : "no", loss);
+                                if (loss < bestLoss) {
+                                    bestLoss = loss;
+                                    bestGain = gain;
+                                    bestK0 = k0;
+                                    bestH = h;
+                                    bestFloor = floor;
+                                    bestHome = home;
+                                    bestFieldOnly = fieldOnly;
+                                }
                             }
                         }
                     }
@@ -148,15 +160,20 @@ public class Main {
             throw new IllegalStateException("grid search saw no goals - cannot pick knobs.");
         }
         System.out.printf(Locale.US,
-            "%nBest: k=%.2f K0=%.2f H=%.0f floor=%.2f home=%.2f (logloss %.4f vs 0.6931 know-nothing)%n",
-            bestGain, bestK0, bestH, bestFloor, bestHome, bestLoss);
+            "%nBest: k=%.2f K0=%.2f H=%.0f floor=%.2f home=%.2f fieldOnly=%s (logloss %.4f vs 0.6931 know-nothing)%n",
+            bestGain, bestK0, bestH, bestFloor, bestHome, bestFieldOnly ? "yes" : "no", bestLoss);
         System.out.printf(Locale.US,
             "Ship gate (ADR 0008): %.4f vs %.4f venue-blind baseline -> %s%n%n",
             bestLoss, VENUE_BLIND_BASELINE,
             bestLoss < VENUE_BLIND_BASELINE ? "strictly better" : "NOT strictly better - do not ship");
+        System.out.printf(Locale.US,
+            "Item 11 gate: best %.4f (field-players-only: %s) vs %.4f all-players champion -> %s%n%n",
+            bestLoss, bestFieldOnly ? "yes": "no", CHAMPION,
+            bestFieldOnly && bestLoss < CHAMPION
+                ? "adop field-player-only-Strength" : "keep Goalkeepers in Strength");
 
         // Final replay with the winning knobs; reports come from this one.
-        Map<Long, PlayerTally> tallies = replay(replays, bestGain, bestHome, new SmoothFadeSchedule(bestK0, bestH, bestFloor), p -> {});
+        Map<Long, PlayerTally> tallies = replay(replays, bestGain, bestHome, bestFieldOnly, new SmoothFadeSchedule(bestK0, bestH, bestFloor), p -> {});
 
         new Leaderboard().print(tallies.values(), 20);
 
@@ -169,9 +186,9 @@ public class Main {
     // One full chronological replay of all matches with the given knobs;
     // returns the resulting tallies, pObserver hears every goal's expected P.
     private static Map<Long, PlayerTally> replay(List<List<MatchEvent>> replays,
-        double linkGain, double homeAdvantage, UpdateSchedule schedule, DoubleConsumer pObserver) {
+        double linkGain, double homeAdvantage, boolean fieldPlayersOnly, UpdateSchedule schedule, DoubleConsumer pObserver) {
             MatchProcessor processor = new MatchProcessor(
-                new TimeIntegratedResidual(BASE_RATE, linkGain, homeAdvantage, pObserver), schedule);
+                new TimeIntegratedResidual(BASE_RATE, linkGain, homeAdvantage, fieldPlayersOnly, pObserver), schedule);
             Map<Long, PlayerTally> tallies = new HashMap<>();
             for (List<MatchEvent> events : replays) {
                 processor.process(events, tallies);

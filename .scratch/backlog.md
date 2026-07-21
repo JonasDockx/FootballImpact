@@ -345,6 +345,43 @@ outcome is the deliverable — a loss quantifies what a keeper's team-proxy
 rating is worth in log-loss. Glossary *Strength* changes to "field players"
 only on adoption. Ready to implement.
 
+**Stage 1 landed (2026-07-16):** `Lineup(players, home, goalkeepers)` — the
+on-pitch subset carrying the career tag, read live from the tallies at both
+construction sites; no rule reads it yet. Gate held: byte-identical CSV,
+log-loss 0.6259 unchanged, 66 tests green (3 new pin the subset semantics:
+debut starter in, tagged sub in, untagged debut sub out, sent-off keeper
+out).
+
+**Stage 2 run — REJECTED (2026-07-16). Goalkeepers stay in Strength.** The
+variant lost at every h in the sweep (9 of 9, by a steady 0.0001–0.0002),
+and the 81-cell cross-check (K0 ∈ {0.5, 1, 2} × H ∈ {2000, 4000, 8000} ×
+h ∈ 0–4) settled the one loophole worth checking — that filtering rescales
+the gaps and might want different knobs. It doesn't: the variant's best cell
+is **the champion's own knobs** (K0 = 1.0, H = 4,000, h = 2.5), interior on
+all three axes, at **0.6261 vs 0.6259**. No knob combination rescues it.
+
+**What this bought:** item 7's presumption — that a keeper's team-proxy
+rating is genuine predictive signal in Strength — is now **tested, not
+assumed**. The signal is worth **0.0002** of log-loss: small, but the same
+order as the gains that shipped (time-integration 0.0005, adaptive K
+0.0004; venue 0.0067). Not noise, and not free to discard. The filter is not
+cosmetic either — the variant's leaderboard moves real distances (Rakitić
+4→9, Puyol 5→4) — it just moves them the wrong way. Glossary *Strength*
+therefore unchanged, now on evidence rather than presumption.
+
+**What stayed in the code:** the `fieldPlayersOnly` flag on
+`TimeIntegratedResidual` and `FIELD_PLAYERS_ONLY = {false}` in `Main`,
+deliberately kept as executable documentation — flipping it to `{true}`
+re-runs the experiment, so the record can never drift from the code. The
+`Lineup.goalkeepers` subset likewise stays: it is stage 1's plumbing, still
+inert in the shipped model, and the natural input for any future
+keepers-rated-differently work (the real GI's "etwas anders", still not
+attempted).
+
+**Not tested by this item:** whether keepers should be *rated* differently —
+only whether they belong in the strength average. The collinearity
+diagnosis from item 7 stands untouched.
+
 ## 8. Normalized display scale
 
 **Why:** Raw accumulated ratings (±10-ish) are meaningless to outsiders. The
