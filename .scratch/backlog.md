@@ -156,6 +156,77 @@ Verified against the file while implementing: no event in the database carries
 `minute = 0` (all 17,575 non-positive stamps are `−1`), and the maximum minute
 anywhere is 120.
 
+## 19. Transfermarkt loader, increment 2 — cup, tournament, venue forks — DONE
+
+**Why:** item 18 landed the spine on a slice that was clean in a way that hid
+things: 380 league fixtures, every one `HOME`, none skipped, none past 90
+minutes. Six paths therefore shipped unexercised — `AWAY`, `NEITHER`, the club
+finals rule, the tournament-host rule, the 120-minute path and the
+skip-and-count path. This increment picks a slice that hits all six.
+
+**Data availability, probed 2026-07-21:** only **four finals-tournament editions
+in the whole snapshot are replayable** — Asian Cup 2024 (44 of 51 with lineups),
+AFCON 2025, Copa América 2024, World Cup 2026. Euro 2024 and every World Cup
+before 2026 have **zero lineups**, so ADR 0009's "~40 curated host rows" is
+really four.
+
+**Grill done (2026-07-21), six decisions, no new ADR** — every answer is ADR 0009
+as written except two amendments recorded below:
+
+1. **Slice: FA Cup 2024/25 (123) + Asian Cup 2024 (51)**, replayed with the PL
+   season as one pooled run in date order.
+2. **Extra time on either signal** — an event past minute 90 **or**
+   `appearances >= 120`. This **amends ADR 0009**, which pinned `appearances`
+   alone on the reasoning that a quiet extra time leaves no event trace: true of
+   28 matches, while `appearances` is missing entirely for **1,174** that plainly
+   played extra time. In the FA Cup slice it sees 32 extra-time ties where
+   `appearances` sees 16 — exactly half.
+3. **The host rule beats the finals rule** inside a national-team competition.
+   The 2024 Asian Cup final was Jordan-labelled-home vs Qatar-labelled-away at
+   Lusail: Qatar's genuine home match, so `AWAY`. The club finals rule never runs
+   in a tournament.
+4. **The host table stays a compiled constant** — three curated rows, growing
+   about one a year. This **defers ADR 0009's sidecar**, whose own text says its
+   first row should be a repair that was actually needed. Revisit when a real
+   repair arrives or the table outgrows a `Map`.
+5. **FA Cup semi-finals are curated neutral**, scoped as `(competition, round)`.
+   Both 2024/25 semis were at Wembley. A blanket rule on the round name would be
+   wrong in eleven other competitions to be right in one.
+6. **The post-whistle tripwire skips and counts**, rather than killing the run:
+   ADR 0009 already rejected hard gates on a spine of 78,000 vendor-supplied
+   matches.
+
+**Stages landed (2026-07-22).** F1 the three-way home-side rule on a `Fixture`
+record; F2 extra time + tripwire; F3 `Main` replays a list of slices as one pool;
+F4 the home-goal anchor counted from goal events.
+
+**Result — all gates held.** 100 tests green.
+
+| Gate | Result |
+|---|---|
+| StatsBomb unchanged | log-loss **0.6259**, anchor still 2.69 |
+| Increment 1 unchanged | GB1 alone: **380/380, 0.6685**, identical leaderboard |
+| New slice | **547 of 554 replay**, 7 × `no lineups`, 0 events dropped |
+| Venue forks | **HOME 504, AWAY 3, NEITHER 40** — every fork exercised |
+| Leaderboard | still recognisable with three competitions pooled |
+
+Pooled run: base rate 0.01594, home share 51.9%, anchor h ≈ 0.76, log-loss
+0.6761 (vs 0.6685 for the league alone — cup ties bring unrated minnows, which
+is item 16's known bias, and 2,924 players instead of 562, so more of the run is
+burn-in).
+
+**Defect found and fixed in F4: the home-goal anchor was counting shootout
+penalties.** Transfermarkt folds shootout results into `home_club_goals`, so the
+scoreline says 510 goals across the FA Cup slice where the events say 375. The
+residual model never saw them — it reads goal events only — but the anchor that
+ADR 0009 says must drive the `h` re-measurement did. Now counted from events on
+both spines; the StatsBomb anchor is unmoved at 2.69, confirming its scorelines
+and events already agreed.
+
+**Still not built:** the sidecar; per-match home-side overrides; multi-host
+per-match rows (World Cup 2026 is absent from the host table, so its matches are
+all neutral); rating history; any interface extracted from `DataLoader`.
+
 ## 1. Store the date each match was played — DONE
 
 Implemented: `Match` now carries a `LocalDate date` parsed from `match_date`;

@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 // The Transfermarkt spine (ADR 0009). SQL does the set-shaped work -
 // filtering, joining, the usability gate; Java owns every per-match
@@ -29,6 +30,43 @@ public class TransfermarktLoader implements AutoCloseable {
     // Two-legged finals are named "final 1st leg" / "final 2nd leg",
     // and are correctly untouched by an exact match on this.
     private static final String SINGLE_MATCH_FINAL = "Final";
+
+    // One row of the games table, reduced to what the home-side rule
+    // needs - so the rule stays a single testable function rather than a
+    // six-argument call.
+    record Fixture(String competitionId, String season, String competitionType,
+        String round, long homeClubId, long awayClubId) {
+    }
+
+    private record Edition(String competitionId, String season) {
+    }
+
+    // Curated source facts (ADR 0009): a finals tournament is played at a
+    // chosen host, which this snapshot records nowhere - it carries no
+    // country for any club and no geography for any stadium. Only the
+    // editions that ship lineups are listed; the rest cannot be replayed
+    // at all. Values are Transfermarkt's own stable club ids.
+    //
+    // World Cup 2026 (FIWC/2025) is hosted by the USA, Canada and Mexico
+    // at once, which this shape cannot express: it stays absent, so its
+    // matches are neutral until per-match host rows exist.
+    private static final Map<Edition, Long> TOURNAMENT_HOSTS = Map.of(
+        new Edition("AFAC", "2024"), 14162L,   // Asian Cup 2024: Qatar
+        new Edition("AFCN", "2025"), 3575L,    // AFCON 2025: Morocco
+        new Edition("COPA", "2025"), 3505L);   // Copa America 2024: USA
+
+    private record NeutralRound(String competitionId, String round) {
+    }
+
+    // Rounds a competition always plays at a chosen ground, whatever the
+    // fixture label says. Scoped per competition on purpose: the FA Cup
+    // has played its semi-finals at Wembley since 2008, while the
+    // DFB-Pokal, KNVB Beker and Russian Cup play theirs at a club's own
+    // ground - a blanket rule on the round name would be wrong in eleven
+    // competitions to be right in one.
+    private static final Set<NeutralRound> NEUTRAL_ROUNDS = Set.of(
+        new NeutralRound("FAC", "Semi-Finals"));
+
 
     private final Connection connection;
     private long droppedEvents = 0; // events the source could not place
@@ -66,6 +104,9 @@ public class TransfermarktLoader implements AutoCloseable {
             statement.setString(2, season);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
+                    Fixture fixture = new Fixture(competitionId, season,
+                        rows.getString("competition_type"), rows.getString("round"),
+                        rows.getLong("home_club_id"), rows.getLong("away_club_id"));
                     matches.add(new Match(
                         Long.parseLong(rows.getString("game_id")),
                         rows.getDate("date").toLocalDate(),
@@ -73,7 +114,7 @@ public class TransfermarktLoader implements AutoCloseable {
                         new Team(rows.getLong("away_club_id"), rows.getString("away_club_name")),
                         rows.getInt("home_club_goals"),
                         rows.getInt("away_club_goals"),
-                        classifyHomeSide(rows.getString("competition_type"), rows.getString("round"))));
+                        classifyHomeSide(fixture)));
                 }
             }
         }
@@ -92,8 +133,10 @@ public class TransfermarktLoader implements AutoCloseable {
         """;
 
 
-    // Extra time leaves no event trace when it is quiet, so it is read
-    // from the minutes played rather than from the last event's minute.
+    // Half of the extra-time evidence. ADR 0009 pinned this as the whole
+    // of it, on the reasoning that a quiet extra time leaves no event
+    // trace - true of 28 matches, while appearances is missing entirely
+    // for 1,174 that plainly played it, national-team football included.
     private static final String LENGTH_SQL = """
         SELECT max(minutes_played)
         FROM appearances
@@ -134,15 +177,39 @@ public class TransfermarktLoader implements AutoCloseable {
         events.add(startingXi(match, match.home(), startersByClub, goalkeeperByClub));
         events.add(startingXi(match, match.away(), startersByClub, goalkeeperByClub));
         readEvents(match, names, events);
-        boolean extraTime = playedExtraTime(match.matchId());
-        events.add(extraTime
+        boolean extraTime = playedExtraTime(match.matchId(), events);
+        MatchEvent.MatchEnd whistle = extraTime
             ? new MatchEvent.MatchEnd(4, 120, 0)
-            : new MatchEvent.MatchEnd(2, 90, 0));
+            : new MatchEvent.MatchEnd(2, 90, 0);
+
+        // Tripwire: the whistle must be the last thing that happens. An
+        // event beyond it means the length verdict and the stamps
+        // contradict each other, and a replay of it would silently
+        // accrue time after the match ended.
+        int whistleTime = whistle.minute() * 60 + whistle.second();
+        for (MatchEvent event : events) {
+            int t = event.minute() * 60 + event.second();
+            if (t > whistleTime) {
+                throw new UnusableMatchException("an event at " + t + "s but the whistle at "
+                    + whistleTime + "s - the clock would lie");
+            }
+        }
+        events.add(whistle);
         EventOrdering.sort(events);
         return events;
+
     }
 
-    private boolean playedExtraTime(long matchId) throws SQLException {
+    // Extra time on either signal, because neither alone suffices: the
+    // events miss a quiet extra time (28 matches), and appearances misses
+    // whole competitions (1,174). Checked in that order because the events
+    // are already in memory and settle most matches without a query.
+    private boolean playedExtraTime(long matchId, List<MatchEvent> events) throws SQLException {
+        for (MatchEvent event : events) {
+            if (event.minute() >= 90) {
+                return true;
+            }
+        }
         try (PreparedStatement statement = connection.prepareStatement(LENGTH_SQL)) {
             statement.setLong(1, matchId);
             try (ResultSet rows = statement.executeQuery()) {
@@ -280,23 +347,36 @@ public class TransfermarktLoader implements AutoCloseable {
         return new MatchEvent.StartingXI(1, 0, 0, team, starters, goalkeeper, home);
     }
 
-    // ADR 0009: who, if anyone, is genuinely at home. In club football the
-    // fixture label names a real home fixture - in a domestic league, a cup
-    // tie and a European tie alike - and the only thing that overturns it is
-    // a one-off final at a chosen ground.
-    static Match.HomeSide classifyHomeSide(String competitionType, String round) {
-        if ("national_team_competition".equals(competitionType)) {
-            // These 742 games are finals tournaments only: the whole
-            // competition sits at a chosen host, so the label names nobody
-            // and only a host-country side is at home. That needs the
-            // curated per-edition table, which is increment 2's job - fail
-            // loudly rather than silently hand out advantage by label.
-            throw new IllegalStateException(
-                "national-team competition: host-country classification is not built yet.");
+    // ADR 0009: who, if anyone, is genuinely at home - three forks, not
+    // two. In a national-team finals tournament the whole competition sits
+    // at a chosen host, so the fixture label cannot mean what it says:
+    // only a side of the host country is at home, and the club finals rule
+    // never runs. The 2024 Asian Cup final was Qatar's genuine home match
+    // at Lusail however the label reads. In club football the label does
+    // name a real home fixture - domestic league, cup tie and European tie
+    // alike - and only a chosen ground overturns it.
+    static Match.HomeSide classifyHomeSide(Fixture fixture) {
+        if ("national_team_competition".equals(fixture.competitionType())) {
+            Long host = TOURNAMENT_HOSTS.get(
+                new Edition(fixture.competitionId(), fixture.season()));
+            if (host == null) {
+                return Match.HomeSide.NEITHER;   // uncurated edition: no evidence, no advantage
+            }
+            if (host == fixture.homeClubId()) {
+                return Match.HomeSide.HOME;
+            }
+            return host == fixture.awayClubId()
+                ? Match.HomeSide.AWAY
+                : Match.HomeSide.NEITHER;        // the host is not playing
         }
-        if (SINGLE_MATCH_FINAL.equals(round)) {
+        if (NEUTRAL_ROUNDS.contains(
+            new NeutralRound(fixture.competitionId(), fixture.round()))) {
+            return Match.HomeSide.NEITHER;
+        }
+        if (SINGLE_MATCH_FINAL.equals(fixture.round())) {
             return Match.HomeSide.NEITHER;
         }
         return Match.HomeSide.HOME;
     }
+
 }

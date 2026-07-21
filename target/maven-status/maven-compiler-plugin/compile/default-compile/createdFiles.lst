@@ -7,10 +7,12 @@ com\goalimpact\engine\MatchProcessor.class
 com\goalimpact\report\Leaderboard.class
 com\goalimpact\data\TransfermarktLoader.class
 com\goalimpact\data\TransfermarktLoader$1.class
+com\goalimpact\data\TransfermarktLoader$Fixture.class
 com\goalimpact\model\Team.class
 com\goalimpact\data\DataLoader$SeasonKey.class
 com\goalimpact\model\MatchEvent$MatchEnd.class
 com\goalimpact\model\MatchEvent$StartingXI.class
+com\goalimpact\data\TransfermarktLoader$NeutralRound.class
 com\goalimpact\credit\FlatCreditRule.class
 com\goalimpact\credit\LinkFunction.class
 com\goalimpact\credit\LogisticLinkFunction.class
@@ -25,6 +27,8 @@ com\goalimpact\model\CompetitionSeason.class
 com\goalimpact\credit\ResidualCreditRule.class
 com\goalimpact\engine\SmoothFadeSchedule.class
 com\goalimpact\model\Match$HomeSide.class
+com\goalimpact\data\TransfermarktLoader$Edition.class
+com\goalimpact\Main$Spine.class
 com\goalimpact\engine\UpdateSchedule.class
 com\goalimpact\model\MatchEvent$Substitution.class
 com\goalimpact\model\Match.class

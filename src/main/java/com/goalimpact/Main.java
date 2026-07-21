@@ -74,9 +74,18 @@ public class Main {
     private static final Path SNAPSHOT = Path.of(
         "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb");
 
-    // Increment 1's vertical slice: Premier League 2024/25, 380 matches.
-    private static final String COMPETITION_ID = "GB1";
-    private static final String SEASON = "2024";
+    // Increment 2's vertical slice (ADR 0009): the league season increment 1
+    // proved, plus a domestic cup and a finals tournament - which between
+    // them exercise AWAY, NEITHER, the club finals rule, the tournament-host
+    // rule, extra time and the skip-and-count path.
+    private record Slice(String competitionId, String season) {
+    }
+
+    private static final List<Slice> SLICES = List.of(
+        new Slice("GB1", "2024"),     // Premier League 2024/25, 380 matches
+        new Slice("FAC", "2024"),     // FA Cup 2024/25, 123 matches
+        new Slice("AFAC", "2024")       // AFC Asian Cup 2024, 51 matches, 44 usable
+    );   
 
 
     public static void main(String[] args) throws Exception {
@@ -91,18 +100,33 @@ public class Main {
             SPINE, replays.size(),
             matches.get(0).date(), matches.get(matches.size() - 1).date());
 
-        // The home-goal share, over the matches that actually replayed and
-        // only where a home side exists at all.
+        // The home-goal share, over matches that actually replayed and only
+        // where a home side exists. Counted from goal EVENTS, never from the
+        // scoreline: Transfermarkt folds penalty shootouts into
+        // home_club_goals, which adds 135 phantom goals to the 123 FA Cup
+        // ties in this slice alone and drags the measured share toward 50%.
+        // This is the anchor h is re-measured against (ADR 0009), so it has
+        // to count the same goals the model does.
         long homeGoals = 0, awayGoals = 0;
-        for (Match m : matches) {
-            if (m.homeSide() == Match.HomeSide.HOME) {
-                homeGoals += m.homeScore();
-                awayGoals += m.awayScore();
-            } else if (m.homeSide() == Match.HomeSide.AWAY) {
-                homeGoals += m.awayScore();
-                awayGoals += m.homeScore();
+        for (int i = 0; i < matches.size(); i++) {
+            Match m = matches.get(i);
+            if (m.homeSide() == Match.HomeSide.NEITHER) {
+                continue;
+            }
+            long homeTeamId = m.homeSide() == Match.HomeSide.HOME
+                ? m.home().id()
+                : m.away().id();
+            for (MatchEvent e : replays.get(i)) {
+                if (e instanceof MatchEvent.Goal goal) {
+                    if (goal.scoringTeam().id() == homeTeamId) {
+                        homeGoals++;
+                    } else {
+                        awayGoals++;
+                    }
+                }
             }
         }
+
         
         // Base scoring rate (ADR 0007): goals per team-minute of play across
         // the whole male dataset - a measured calibration constant, not a
@@ -225,7 +249,16 @@ public class Main {
         throws Exception {
 
         try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT)) {
-            List<Match> all = loader.loadMatches(COMPETITION_ID, SEASON);
+            List<Match> all = new ArrayList<>();
+            for (Slice slice : SLICES) {
+                List<Match> loaded = loader.loadMatches(slice.competitionId(), slice.season());
+                System.out.printf("%-5s %-6s %4d matches%n",
+                    slice.competitionId(), slice.season(), loaded.size());
+                all.addAll(loaded);
+            }
+            // One pooled run in date order: one spine is one rating pool, so
+            // a player's cup, league and international minutes all move the
+            // same rating, and every rating is read only from matches before.
             all.sort(Comparator.comparing(Match::date).thenComparingLong(Match::matchId));
 
             Map<String, Integer> skipped = new TreeMap<>();
@@ -238,13 +271,19 @@ public class Main {
                     skipped.merge(e.getMessage(), 1, Integer::sum);
                 }
             }
-            System.out.printf("%s %s: %d of %d matches replay, %d events dropped.%n",
-                COMPETITION_ID, SEASON, matches.size(), all.size(), loader.droppedEvents());
+            System.out.printf("%d of %d matches replay, %d events dropped.%n",
+                matches.size(), all.size(), loader.droppedEvents());
             skipped.forEach((reason, count) ->
                 System.out.printf("  skipped %4d x %s%n", count, reason));
+
+            // The venue verdict, which no test can eyeball for you.
+            Map<Match.HomeSide, Integer> venues = new TreeMap<>();
+            for (Match m : matches) {
+                venues.merge(m.homeSide(), 1, Integer::sum);
+            }
+            System.out.println("  venue: " + venues);
         }
     }
-
 
     // One full chronological replay of all matches with the given knobs;
     // returns the resulting tallies, pObserver hears every goal's expected P.
