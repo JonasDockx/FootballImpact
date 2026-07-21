@@ -3,10 +3,12 @@
 A learning-oriented Java project that computes each football player's net goal
 contribution *while they are on the pitch*, inspired by the GoalImpact metric.
 
-Initial scope: UEFA Euro 2024 (StatsBomb competition 55, season 282). The
-intended destination is pooling every competition StatsBomb ships, so player
-identity and aggregation are keyed on StatsBomb's stable global player ID and
-must combine stints across competitions.
+Ratings are computed from one source at a time — a *spine*. The spine is
+Transfermarkt; StatsBomb open data is kept as test fixtures and as the
+calibration set the spine is measured against, never pooled into a rating run
+(see [ADR 0009](docs/adr/0009-transfermarkt-as-the-rating-spine.md)). Player
+identity and aggregation are keyed on the spine's own stable player ID and
+must combine stints across every competition it covers.
 
 ## Language
 
@@ -26,6 +28,22 @@ until they are substituted off, sent off, or the match ends.
 A single contiguous interval during which a player is on pitch in one match. A
 player who is never subbed has one stint spanning the whole match.
 _Avoid_: spell, shift
+
+**Spine**:
+The single source a rating run draws its matches from. Exactly one per run: the
+same match arriving under two sources' identities would be replayed twice,
+inflating exposure and double-counting residuals. Other sources may still
+supply reference facts, or serve as a calibration set the spine is measured
+against, without ever entering a run.
+_Avoid_: pooling sources
+
+**Playing clock**:
+The single time axis a match's events sit on: seconds of play since kickoff,
+running continuously across halves rather than restarting each one. Nominal by
+convention — a half is 45 minutes however much stoppage was actually played,
+an extra-time half 15 — because the base scoring rate is measured against the
+very same denominators, so the convention cancels out of the expectation.
+_Avoid_: real time, elapsed time, wall clock
 
 **Segment**:
 A stretch of one match during which neither lineup changes — cut at kickoff,
@@ -47,11 +65,13 @@ level.
 
 **Home side**:
 The side of a match, if any, genuinely playing at its own venue. At most one
-side is ever at home; a match on neutral ground has no home side. In club
-football the fixture's home label marks a genuine home fixture — except
-one-off finals at a chosen ground and seasons played wholesale at neutral
-venues. In national-team tournaments the label is administrative and only
-geography decides: a side is at home only in its own country.
+side is ever at home; a match on neutral ground has no home side. A side is at
+home in a fixture it was scheduled to host — which the fixture's home label
+names correctly in club football and in international qualifying alike, except
+for one-off finals at a chosen ground and seasons played wholesale at neutral
+venues. Where an entire competition is instead played at a chosen host, the
+label is administrative and names nobody: only a side of the host country is
+at home, and at a host that is nobody's country, no one is.
 _Avoid_: home team — that names the administrative label, not the concept
 
 **Home advantage**:
@@ -121,6 +141,14 @@ _Avoid_: keeper (in code and docs), GK
 One match. Every player's rating is frozen at its pre-match value for the whole
 match; the match's residuals are accumulated per player and applied as a single
 update at the final whistle, so ratings never shift mid-match.
+
+**Left-censored career**:
+A career that began before the earliest match a run covers. Its opening ratings
+show the model discovering the player, not the player developing — a rise on
+the age curve that is an artefact of where the data starts. Derived per run
+(first seen at the window's leading edge), never stored, so backfilling earlier
+matches reclassifies it by itself.
+_Avoid_: cold start — that names the model's condition, not the career's
 
 **Value**:
 A player's current GoalImpact rating — an accumulated point total, not a

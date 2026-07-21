@@ -5,6 +5,8 @@ com\goalimpact\model\MatchEvent$Goal.class
 com\goalimpact\data\DataLoader$1.class
 com\goalimpact\engine\MatchProcessor.class
 com\goalimpact\report\Leaderboard.class
+com\goalimpact\data\TransfermarktLoader.class
+com\goalimpact\data\TransfermarktLoader$1.class
 com\goalimpact\model\Team.class
 com\goalimpact\data\DataLoader$SeasonKey.class
 com\goalimpact\model\MatchEvent$MatchEnd.class
@@ -17,6 +19,7 @@ com\goalimpact\data\DataLoader.class
 com\goalimpact\credit\ResidualSource.class
 com\goalimpact\engine\PredictionQuality.class
 com\goalimpact\engine\PlayerTally.class
+com\goalimpact\data\EventOrdering.class
 com\goalimpact\report\CsvWriter.class
 com\goalimpact\model\CompetitionSeason.class
 com\goalimpact\credit\ResidualCreditRule.class
@@ -28,3 +31,4 @@ com\goalimpact\model\Match.class
 com\goalimpact\model\MatchEvent.class
 com\goalimpact\credit\RatingLookup.class
 com\goalimpact\credit\TimeIntegratedResidual.class
+com\goalimpact\data\UnusableMatchException.class

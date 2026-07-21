@@ -2,6 +2,160 @@
 
 Future work, not yet scheduled. Captured during the design grill.
 
+## 18. Transfermarkt loader, increment 1 — Premier League 2024/25
+
+**Why:** [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md) makes
+Transfermarkt the spine. This is its first vertical slice: the whole path end to
+end on one league-season small enough to inspect by hand, before it runs over
+78,000 matches. **Ready to implement** — every decision below was settled in the
+grill of 2026-07-21; what follows is the mechanical detail, so no re-probing is
+needed.
+
+### Inputs
+
+- Vendor snapshot: `C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb`
+  (~195 MiB, storage format version **64**, verified readable by DuckDB 1.5.4).
+  Hardcode the path as a constant in `Main`, mirroring the StatsBomb `dataDir`.
+- Dependency: `org.duckdb:duckdb_jdbc`, pinned. DuckDB reads older storage
+  formats forward, so any current version opens this file; the risk is the
+  vendor republishing on a *newer* format than the pinned jar.
+- **First thing to write: a "count the games" smoke test** asserting 88,958 rows
+  in `games`. A storage-format mismatch then fails on line one instead of three
+  layers deep.
+
+### Slice
+
+`competition_id = 'GB1' AND season = '2024'` — 380 matches, 2024-08-16 to
+2025-05-25. All 380 pass the gate; 1,115 goals (33 of them own goals), 3,207
+substitutions, 1,610 cards of which **52 are match-ending** (26 `Red card`,
+26 `Second yellow`), 106 same-minute goal/lineup-change collisions.
+
+### Column-type traps (these bite on the first join)
+
+The vendor's types are inconsistent across tables. Cast explicitly:
+
+| Column | `games` | `game_events` | `game_lineups` | `appearances` |
+|---|---|---|---|---|
+| `game_id` | VARCHAR | VARCHAR | **INTEGER** | **INTEGER** |
+| club id | INTEGER | INTEGER | INTEGER | INTEGER |
+| `player_id` | — | INTEGER | INTEGER | INTEGER |
+
+`clubs.club_id` is VARCHAR while every club id referencing it is INTEGER;
+`competitions.competition_id` is VARCHAR. `games.game_id` is Transfermarkt's own
+match-report id (`.../spielbericht/1026846`) and is stable across refreshes.
+
+### Building the event stream
+
+- **`StartingXI`** — `game_lineups WHERE type = 'starting_lineup'`, 11 rows per
+  club. Goalkeeper is the row with `position = 'Goalkeeper'`. Player name comes
+  from `game_lineups.player_name` (the `players` table is missing 69,943 players
+  who appear in lineups).
+- **`Substitution`** — `game_events WHERE type = 'Substitutions'`; `player_id` is
+  the player going **off**, `player_in_id` the player coming **on**.
+- **`Goal`** — `game_events WHERE type = 'Goals'`. **`club_id` is the beneficiary**,
+  including on own goals (the scorer sits in the *other* club's lineup). That is
+  the glossary *Goal* definition already satisfied — do not re-derive it from the
+  crest or the description. `description LIKE '%Own-goal%'` identifies own goals;
+  worth carrying for calibration but not needed for crediting.
+- **`RedCard`** — `game_events WHERE type = 'Cards'` **and** the description's
+  first comma-segment, stripped of a leading `"<n>. "`, is `Red card` or
+  `Second yellow`. **Trap:** that leading number is a *season* counter, so
+  `"3. Yellow card"` is a player's third booking of the season, not a second
+  yellow in this match.
+- **`MatchEnd`** — nominal: `(90, 0)`, or `(120, 0)` where extra time is
+  detected. Detect extra time from `appearances.minutes_played = 120`, not from
+  event minutes: a quiet extra time leaves no event trace.
+
+### Clock and ordering
+
+- `t = (minute − 1) · 60 + 30` — the midpoint of the labelled minute. No event in
+  the whole database carries `minute = 0`, so `t` is never negative.
+- `period` from the minute: ≤45 → 1, ≤90 → 2, ≤105 → 3, else 4.
+- Every event of a minute gets the **same** `t`. Order lives in the list.
+- Within a minute, sort **red card → goal → substitution**, with one exception:
+  if a goal's scorer is the `player_in_id` of a same-minute substitution, that
+  substitution sorts *before* the goal. Write it as a named comparator with a
+  test, not as a SQL `ORDER BY`.
+- Drop events with `minute = −1` and `type = 'Shootout'` rows outright.
+
+### Home side
+
+All 380 are league matches with rounds named `"N. Matchday"`, so the label is
+trusted and **every match is `HOME`**. Correct, but note what it means: the
+slice does **not** exercise `AWAY`, `NEITHER`, the finals rule, the tournament
+host rule, extra time, or the skip path. Pick increment 2 to cover them — a
+domestic cup season plus a finals tournament would hit all of them at once.
+
+### Gate
+
+1. The StatsBomb path still yields log-loss **0.6259** with pinned knobs. The
+   new loader must not disturb the old one.
+2. Every match either replays or is counted as skipped **with a reason**. All
+   380 should replay; anything else is a bug in the gate, not in the data.
+3. The leaderboard is recognisable by eye. A broken clock, comparator or venue
+   rule shows up here in seconds and in no test.
+
+Run on the existing base scoring rate (0.01473) and knobs (`K0 = 1.0`,
+`H = 4,000`, `h = 2.5`) **knowingly wrong** — they were measured on a
+Barcelona-heavy StatsBomb slice. Increment 1 proves the pipeline, not the model.
+Re-measurement waits for the full ingest (ADR 0009, Consequences).
+
+### Deliberately not built in this increment
+
+No interface extracted from `DataLoader` — a second independent class, on item
+11's precedent that a seam needs a second consumer before it earns its keep.
+The sidecar file is **not created**; its first row should be a repair that was
+actually needed. No issues table, no `source` column, no `rating_eligible` flag,
+no GUI (item 17), no rating history (that arrives with the full ingest).
+
+### Outcome (2026-07-21) — DONE, all three gates met
+
+Landed in five stages, each with its own gate: (A) `duckdb_jdbc` 1.5.4.0 pinned +
+`SnapshotSmokeTest` (88,958 games); (B) `TransfermarktLoader.loadMatches` and the
+home-side rule; (C) `EventOrdering`; (D) `loadEvents` — lineups and the usability
+gate first, then goals/subs/red cards; (E) the `Spine` switch in `Main`.
+
+**Gate 1** — StatsBomb re-run after the `Main` refactor: log-loss **0.6259**, base
+rate 0.01473, anchor 2.69. Byte-identical to the champion; the old path is
+undisturbed. **Gate 2** — `GB1 2024: 380 of 380 matches replay, 0 events dropped`.
+**Gate 3** — the leaderboard is Liverpool's title-winning side (Díaz,
+Alexander-Arnold, Mac Allister, Robertson, Gravenberch, Van Dijk, Salah) with City
+and Arsenal behind it. 91 tests green.
+
+Numbers this slice produced, all expected and none yet actionable:
+
+- **Base scoring rate 0.01630** goals per team-minute (1,115 goals / 68,400
+  team-minutes — exactly 380 × 180, the nominal clock with no stoppage in the
+  denominator). Higher than StatsBomb's 0.01473 for both reasons at once.
+- **Home share 51.6%**, an `h` anchor of **0.63** rating points against the pinned
+  `h = 2.5` — this run applies roughly four times the home advantage the
+  population shows. Whether that is a 2024/25 England fact or a spine-wide one is
+  a question for the full ingest's re-measurement.
+- **Log-loss 0.6685**, not comparable to 0.6259: one season means every rating
+  starts at 0 and burns in across the very matches being scored. The `Ship gate`
+  and `Item 11 gate` lines `Main` prints are pinned to the StatsBomb population
+  and are meaningless on a Transfermarkt run.
+
+Three design points settled during implementation, worth keeping:
+
+- **The same-minute rule is a rank, not a comparator.** This item's text said
+  "named comparator"; a pairwise comparator is *intransitive* here — a second goal
+  in the minute sorts before the substitution that must sort before the first goal
+  — and Java's sort throws on it. `EventOrdering` assigns each event a rank
+  (red → scoring substitute → goal → substitution) and sorts by it. Test
+  `theExceptionSurvivesASecondGoalInTheSameMinute` pins the arrangement.
+- **`UnusableMatchException` is checked**, because dropping matches is normal
+  rather than exceptional here, and exposure drives the update factor — a silently
+  dropped match manufactures false debutants.
+- **Both lineup types are read**, not just `starting_lineup`: `game_events`
+  carries ids but no names, so an arriving substitute is nameable only from his
+  bench row. The Goalkeeper tag is still taken from starters only, per the
+  glossary.
+
+Verified against the file while implementing: no event in the database carries
+`minute = 0` (all 17,575 non-positive stamps are `−1`), and the maximum minute
+anywhere is 120.
+
 ## 1. Store the date each match was played — DONE
 
 Implemented: `Match` now carries a `LocalDate date` parsed from `match_date`;
@@ -24,6 +178,83 @@ convergence loop.
 populate it in `DataLoader.loadMatches` whenever we need it — a small, low-risk
 change.
 
+## 15. Pre-2013 depth: earlier seasons and international qualifiers
+
+**Why (user, 2026-07-21, emphatic):** the Transfermarkt snapshot has no lineup
+before 2013, so no career curve can honestly begin earlier — Iniesta's line
+starts at 29. "I am not content in just accepting that 2013 is the start of our
+current datasource and that this cannot be helped." Ingesting 2008–2013 must
+**recompute the whole career**, which is why full replay stays the only mode
+(item 4 must stay unbuilt).
+
+Equally wanted, and larger: **international qualifiers**. The snapshot's five
+national-team competitions are finals tournaments only — 742 games. World Cup
+and Euro qualifying plus Nations League is roughly ten times that for UEFA
+alone. Qualifiers matter out of proportion to their count because they are among
+the very few competitive fixtures where players from otherwise disconnected
+leagues meet — the bridges of item 9. Friendlies are absent too, and are *not*
+wanted on the same terms (six substitutions and half-time rewrites break the
+assumption that a stint reflects a competitive coaching judgment).
+
+**Route (ADR 0009):** prefer running the vendor's own scraper + dbt pipeline
+with a wider season range over writing a Java scraper — the output shape stays
+identical, so the read path never learns where the rows came from. A hand-rolled
+parser means reimplementing the vendor's normalisation and keeping it in sync
+forever. Same project also covers **fidelity**: stoppage minutes and per-goal
+running scores, both destroyed by the vendor's pipeline and both unfixable by
+any refresh.
+
+**Caveats:** Transfermarkt's robots.txt disallows bots — personal use, slow
+rate, cache everything, and a multi-year backfill is a once-off batch left
+running for days. Very old match sheets differ in markup; spot-check per era.
+
+## 16. A prior for unrated players (the cup-minnow inflation)
+
+**Why (measured 2026-07-21):** 2,501 of the 3,274 clubs in the Transfermarkt
+snapshot never play a single league match in it — they exist only as cup
+opposition, and account for **512,380 lineup rows, 16% of all
+player-appearances**. A fourth-tier side in the DFB-Pokal is rated 0, which in
+this model means *exactly average*, not *unknown*. So the strength gap at
+kickoff is zero, expected GD over ninety minutes is zero, and the Bundesliga
+eleven collect a full +4 of unearned residual for beating a team the model
+believed was their equal. The minnows do sink afterwards (ADR 0006 gives them
+the largest update factor) but they often never play again, so the correction
+arrives too late to protect anyone and is never reused.
+
+**This is a ranking bias, not a level shift:** a player whose club reaches the
+final beats five or six unrated sides; one knocked out in round one beats none.
+
+**Direction:** this is item 9's rule-of-thumb (3) made concrete — seed debutants
+somewhere other than the population mean, e.g. at their competition's current
+average. Needs its own mini-grill; it is a change to the *metric*, not to
+ingestion. Accepted for now (ADR 0009) with a **diagnostic built alongside the
+first ingest**: report per player how much residual came from opposition with no
+league football in the data, so "is this a problem?" becomes a number.
+
+## 17. Match repair / manual entry GUI
+
+**Why (user, 2026-07-21):** ADR 0009 makes corrections **match-level
+replacements** — materialise a match into the sidecar, pre-filled from the
+vendor where possible, edit it, and your version wins outright. That collapses
+repairing a broken 2019 Premier League match and authoring a 1998 Belgian
+third-division match into *one operation*, so it is also one screen. ~11,000
+matches fail the ADR 0009 gate; cleaning even a fraction by hand needs a tool.
+
+**Design notes carried from the handover:** keyboard-first entry — header, two
+lineup columns, events timeline; a **ranked player picker** (rank 0 = has a
+spell at the selected club near the match date, rank 1 = ever linked, rank 2 =
+everyone else, rows showing DOB and last-seen club to split identical names,
+bottom row always "create '(typed name)'"); **roster prefill** from the club's
+most recent XI, which makes a chronologically-entered season a handful of edits
+per matchday; live validation as red field highlights. Manually created entities
+take IDs ≥ 1,000,000,000, a reserved range that cannot collide with real
+Transfermarkt IDs. This is also when the three-Maven-module split (declined in
+ADR 0009) earns its keep — JavaFX is the heavy dependency worth isolating, not
+`duckdb_jdbc`.
+
+**Prerequisite:** the sidecar has actual content, i.e. a repair you needed. Do
+not build the tool before the first real repair tells you what it must hold.
+
 ## 2. Store each player's date of birth
 
 **Why:** Enables age-aware analysis — comparing a player against peers in the
@@ -40,6 +271,14 @@ country only). Realizing this item will require a *second* data source for DOB
 data-source question we closed in
 [ADR 0001](../docs/adr/0001-statsbomb-open-data-as-source.md). Treat sourcing DOB
 as its own investigation before committing.
+
+**Largely resolved by [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md)
+(2026-07-21):** the Transfermarkt spine carries `date_of_birth`, and **2.86M of
+3.18M lineup rows (90%) resolve to one**. The residual gap is a long tail —
+69,943 players appear in lineups with no row in the `players` table at all
+(mostly cup appearances by clubs the vendor doesn't track). They still rate and
+still act as opponents; they simply cannot be plotted against age. The
+asymmetric-peak analysis this item exists for is now unblocked.
 
 ## 3. Time-integrated (clean-sheet-aware) residual source — DONE
 
@@ -422,6 +661,14 @@ be the natural target format for scraped/API data. The model itself derives team
 affiliation from lineups, so transfer registration is entry-UX/validation, not a
 model concept. Reopens ADR 0001; item 5 (player identity) is the hard part.
 
+**Superseded (2026-07-21) by
+[ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md)**, which
+settles the source question (Transfermarkt spine; StatsBomb demoted to fixtures
+and calibration), and by items **15** (scraping — for depth and fidelity, not
+freshness) and **17** (manual entry, now unified with match repair). The
+preference order recorded here was overtaken by events: a curated public dataset
+covering 65 competitions beat all three options.
+
 ## 4. Checkpoint + incremental persistence
 
 **Why:** Rule C recomputes ratings by replaying all history each run, which stays
@@ -439,3 +686,16 @@ moment a non-StatsBomb source is added (StatsBomb Open Data is limited, so this 
 expected), the same player will carry different IDs across sources and must be
 reconciled, or careers will fragment. Its own investigation before any second
 match/event source lands — related to the DOB sourcing question in item 2.
+
+**Deferred, not resolved, by
+[ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md) (2026-07-21):**
+the *Spine* rule sidesteps this entirely — exactly one source feeds a rating
+run, so there is no second ID space to reconcile. Transfermarkt's `player_id`
+*is* the profile-URL id, shared with the vendor's scraper, so the depth project
+(item 15) needs no matching either. This item goes live only if a genuinely
+different provider is ever pooled — at which point the handover's sketch
+applies: canonical IDs in base tables, native IDs in the raw layer, never
+overwritten in place; matching on DOB + normalised name, with club + shirt
+number settling almost everyone inside a fixture; leftovers to manual review.
+A `player_alias(old_id → canonical_id)` table is worth having sooner regardless,
+for Transfermarkt's own profile merges and redirects.

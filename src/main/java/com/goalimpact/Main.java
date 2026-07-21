@@ -2,6 +2,8 @@ package com.goalimpact;
 
 import com.goalimpact.credit.TimeIntegratedResidual;
 import com.goalimpact.data.DataLoader;
+import com.goalimpact.data.TransfermarktLoader;
+import com.goalimpact.data.UnusableMatchException;
 import com.goalimpact.engine.MatchProcessor;
 import com.goalimpact.engine.PlayerTally;
 import com.goalimpact.engine.PredictionQuality;
@@ -23,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 
 public class Main {
     // The empirical knobs of rule C + ADR 0006, grid-searched below:
@@ -48,57 +51,58 @@ public class Main {
     // recovers the venue-blind baseline.
     private static final double[] HOME_ADVANTAGES = {2.5};
 
-    // Item 11: the field-players-only Strength experiment. false = status
-    // quo (Goalkeepers count in Strength), true = field players only. Gate:
-    // the variant's best cell must strictly beat the all-players champion;
-    // a tie keeps Goalkeepers in Strength.
+    // Item 11: the field-players-only Strength experiment. kept as a flag
+    // because the experiment was run and lost. false = the shipped model
+    // (Goalkeepers count in Strength), true = field players only. Tested
+    // 2026-07-16 over an h sweep and an 81-cell (K0, H, h) grid: the
+    // variant's best cell is these very knobs at 0.6261, so a Goalkeeper's
+    // rating is worth 0.0002 of real predictive signal. Flip to {true} to
+    // re-run on it.
     private static final boolean[] FIELD_PLAYERS_ONLY = {false};
     // The tuned all-players model (ADR 0008) - the number item 11 must beat.
     private static final double CHAMPION = 0.6259;
+    
+    // ADR 0009: exactly one spine per run. The same match arriving under
+    // two sources' identities would be replayed twice, inflating exposure
+    // and double-counting residuals - so this is a switch, never a merge.
+    private enum Spine { STATSBOMB, TRANSFERMARKT }
+
+    private static final Spine SPINE = Spine.TRANSFERMARKT;
+
+    private static final Path STATSBOMB_DIR = Path.of(
+        "C:/Users/dockx/Documents/Programmeren/FootballData/statsbomb-open-data/data");
+    private static final Path SNAPSHOT = Path.of(
+        "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb");
+
+    // Increment 1's vertical slice: Premier League 2024/25, 380 matches.
+    private static final String COMPETITION_ID = "GB1";
+    private static final String SEASON = "2024";
+
 
     public static void main(String[] args) throws Exception {
         System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
-        Path dataDir = Path.of("C:/Users/dockx/Documents/Programmeren/FootballData/statsbomb-open-data/data");
-        DataLoader loader = new DataLoader(dataDir);
-
-        // Men's competitions only: women's football forms a disconnected
-        // rating island, so mixing the two in one ranking would be meaningless.
-        List<Match> matches = new ArrayList<>();
-        System.out.printf("%-24s %-10s %5s %8s%n", "competition", "season", "home", "neutral");
-        for (CompetitionSeason cs : loader.loadCompetitions()) {
-            if (!cs.gender().equals("male")) {
-                continue;
-            }
-            List<Match> loaded = loader.loadMatches(cs);
-            long neutral = loaded.stream().filter(m -> m.homeSide() == Match.HomeSide.NEITHER).count();
-            System.out.printf("%-24s %-10s %5d %8d%n",
-                cs.competitionName(), cs.seasonName(), loaded.size() - neutral, neutral);
-            matches.addAll(loaded);
-        }
-        System.out.println();
-
-        // Global replay order: date first; matchId as a deterministic tie-break
-        // for matches on the same day (kickoff times would be the upgrade).
-        matches.sort(Comparator.comparing(Match::date).thenComparingLong(Match::matchId));
-
-        // Parse every events file once; each grid cell then replays from memory.
+                List<Match> matches = new ArrayList<>();
         List<List<MatchEvent>> replays = new ArrayList<>();
-        long homeGoals = 0, awayGoals = 0; // scored by / conceded by home sides
+        switch (SPINE) {
+            case STATSBOMB -> loadStatsBomb(matches, replays);
+            case TRANSFERMARKT -> loadTransfermarkt(matches, replays);
+        }
+        System.out.printf("%nSpine: %s - %d matches replay (%s to %s).%n%n",
+            SPINE, replays.size(),
+            matches.get(0).date(), matches.get(matches.size() - 1).date());
+
+        // The home-goal share, over the matches that actually replayed and
+        // only where a home side exists at all.
+        long homeGoals = 0, awayGoals = 0;
         for (Match m : matches) {
-            if (loader.hasEvents(m.matchId())) {
-                replays.add(loader.loadEvents(m));
-                if (m.homeSide() == Match.HomeSide.HOME) {
-                    homeGoals += m.homeScore();
-                    awayGoals += m.awayScore();
-                } else if (m.homeSide() == Match.HomeSide.AWAY) {
-                    homeGoals += m.awayScore();
-                    awayGoals += m.homeScore();
-                }
+            if (m.homeSide() == Match.HomeSide.HOME) {
+                homeGoals += m.homeScore();
+                awayGoals += m.awayScore();
+            } else if (m.homeSide() == Match.HomeSide.AWAY) {
+                homeGoals += m.awayScore();
+                awayGoals += m.homeScore();
             }
         }
-        System.out.printf("Loaded %d of %d matches (%s to %s).%n%n",
-            replays.size(), matches.size(),
-            matches.get(0).date(), matches.get(matches.size() - 1).date());
         
         // Base scoring rate (ADR 0007): goals per team-minute of play across
         // the whole male dataset - a measured calibration constant, not a
@@ -182,6 +186,65 @@ public class Main {
         System.out.println();
         System.out.println("Full results written to " + csv.toAbsolutePath());
     }
+
+    
+    // The StatsBomb path, unchanged in behaviour: men's competitions only,
+    // since women's football forms a disconnected rating island.
+    private static void loadStatsBomb(List<Match> matches, List<List<MatchEvent>> replays)
+        throws Exception {
+
+        DataLoader loader = new DataLoader(STATSBOMB_DIR);
+        List<Match> all = new ArrayList<>();
+        System.out.printf("%-24s %-10s %5s %8s%n", "competition", "season", "home", "neutral");
+        for (CompetitionSeason cs : loader.loadCompetitions()) {
+            if (!cs.gender().equals("male")) {
+                continue;
+            }
+            List<Match> loaded = loader.loadMatches(cs);
+            long neutral = loaded.stream().filter(m -> m.homeSide() == Match.HomeSide.NEITHER).count();
+            System.out.printf("%-24s %-10s %5d %8d%n",
+                cs.competitionName(), cs.seasonName(), loaded.size() - neutral, neutral);
+            all.addAll(loaded);
+        }
+        // Global replay order: date first; matchId as a deterministic
+        // tie-break for matches on the same day.
+        all.sort(Comparator.comparing(Match::date).thenComparingLong(Match::matchId));
+        for (Match m : all) {
+            if (loader.hasEvents(m.matchId())) {
+                matches.add(m);
+                replays.add(loader.loadEvents(m));
+            }
+        }
+    }
+
+    // The Transfermarkt spine (ADR 0009). A match that cannot form a
+    // coherent replay is skipped and counted WITH ITS REASON: exposure
+    // drives the update factor, so quietly thin data manufactures
+    // false debutants.
+    private static void loadTransfermarkt(List<Match> matches, List<List<MatchEvent>> replays)
+        throws Exception {
+
+        try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT)) {
+            List<Match> all = loader.loadMatches(COMPETITION_ID, SEASON);
+            all.sort(Comparator.comparing(Match::date).thenComparingLong(Match::matchId));
+
+            Map<String, Integer> skipped = new TreeMap<>();
+            for (Match m : all) {
+                try {
+                    List<MatchEvent> events = loader.loadEvents(m);
+                    matches.add(m);
+                    replays.add(events);
+                } catch (UnusableMatchException e) {
+                    skipped.merge(e.getMessage(), 1, Integer::sum);
+                }
+            }
+            System.out.printf("%s %s: %d of %d matches replay, %d events dropped.%n",
+                COMPETITION_ID, SEASON, matches.size(), all.size(), loader.droppedEvents());
+            skipped.forEach((reason, count) ->
+                System.out.printf("  skipped %4d x %s%n", count, reason));
+        }
+    }
+
 
     // One full chronological replay of all matches with the given knobs;
     // returns the resulting tallies, pObserver hears every goal's expected P.

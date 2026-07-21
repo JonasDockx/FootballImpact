@@ -1,15 +1,27 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+**This repo has no labels.** The issue tracker is
+[`.scratch/backlog.md`](../../.scratch/backlog.md) — numbered sections in a
+markdown file — so there is nothing to attach a label to. Status is expressed as
+prose inside the item; see the status vocabulary in
+[issue-tracker.md](./issue-tracker.md).
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+The skills speak in terms of five canonical triage roles. Map them onto the
+backlog like this:
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
+| Role in the skills | How it appears here |
+|---|---|
+| `needs-triage` | A new item with a `**Why**` and nothing else. Untouched since it was filed. |
+| `needs-info` | A `**Data availability — CAUTION:**` note, or an open question in the body. The item cannot proceed until it is answered. |
+| `ready-for-agent` | `**Grill done (date), decisions in ADR NNNN … Ready to implement.**` — designed to the point where the work is mechanical. |
+| `ready-for-human` | Anything not yet grilled. In this repo design is interviewed before it is built, and the author hand-types the implementation. |
+| `wontfix` | `**Stage N run — REJECTED (date)**` or `**Superseded (date) by …**`. The item stays in the file as evidence; it is never deleted. |
 
-Edit the right-hand column to match whatever vocabulary you actually use.
+When a skill asks to apply a label, append the corresponding prose to the item
+instead, dated, following the house style. When a skill asks to *filter* by a
+label, read the file and match on these phrasings.
+
+Note that `ready-for-agent` is rarer here than in a typical repo: the working
+convention is that non-trivial design is grilled first and the resulting code is
+written by hand, so most items reach "designed" without ever becoming
+autonomous work.

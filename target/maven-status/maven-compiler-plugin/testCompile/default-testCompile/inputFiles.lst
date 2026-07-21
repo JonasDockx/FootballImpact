@@ -2,6 +2,9 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\cr
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\credit\ResidualCreditRuleTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\credit\TimeIntegratedResidualTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\DataLoaderTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\EventOrderingTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\SnapshotSmokeTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\TransfermarktLoaderTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\engine\MatchProcessorTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\engine\PredictionQualityTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\engine\SmoothFadeScheduleTest.java

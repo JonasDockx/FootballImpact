@@ -7,6 +7,9 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\cr
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\ResidualSource.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\TimeIntegratedResidual.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\DataLoader.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\EventOrdering.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\TransfermarktLoader.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\UnusableMatchException.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\MatchProcessor.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\PlayerTally.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\PredictionQuality.java

@@ -1,6 +1,9 @@
 com\goalimpact\engine\SmoothFadeScheduleTest.class
+com\goalimpact\data\EventOrderingTest.class
+com\goalimpact\data\TransfermarktLoaderTest.class
 com\goalimpact\engine\MatchProcessorTest$2.class
 com\goalimpact\credit\ResidualCreditRuleTest.class
+com\goalimpact\data\SnapshotSmokeTest.class
 com\goalimpact\engine\MatchProcessorTest$3.class
 com\goalimpact\credit\TimeIntegratedResidualTest.class
 com\goalimpact\engine\MatchProcessorTest$1.class

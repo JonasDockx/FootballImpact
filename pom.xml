@@ -25,6 +25,11 @@
             <artifactId>junit-jupiter</artifactId>
             <version>5.10.2</version>
         </dependency>
+        <dependency>
+            <groupId>org.duckdb</groupId>
+            <artifactId>duckdb_jdbc</artifactId>
+            <version>1.5.4.0</version>
+        </dependency>
     </dependencies>
 
     <build>
