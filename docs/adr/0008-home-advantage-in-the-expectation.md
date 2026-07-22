@@ -143,3 +143,33 @@ matches, converted via `ln(homeGoals/awayGoals)/gain`.
   home collapse and pays Barcelona a rout achieved against the venue.
   Leaderboard: home-heavy overperformers drop (Zlatan, Cavani), away
   performers rise (Pepe to #2).
+- **Re-tuned on the Transfermarkt spine (2026-07-22): `h = 2.0`.** From an
+  81-cell `(K0, H, h)` grid over 80,471 matches. Interior on a 0–4 sweep that
+  is a clean U — 0.6551 at `h = 0`, **0.6502** at `h = 2.0`, 0.6552 at
+  `h = 4` — and strictly better than a venue-blind baseline **measured in the
+  same run** as that grid's `h = 0` cell, rather than borrowed from another
+  population. `K0 = 1.0` and `H = 4,000` were reconfirmed unchanged. Like the
+  base rate, `h`, the baseline and the champion are now **per spine**;
+  StatsBomb keeps `h = 2.5` / 0.6326 / 0.6259 and reproduces byte-identically.
+- **The anchor is measured on domestic leagues only.** This ADR read the
+  home-goal share over every match with a home side. Pooled over the whole
+  spine that gives 55.0% → `h ≈ 2.03`, and it is **confounded by strength**:
+  in a cup the weaker club usually hosts, so the cup-only share is 48.3%,
+  implying a home *dis*advantage of −0.66 that nobody believes. A domestic
+  league is the one population where the confound vanishes by construction —
+  every club hosts every other club exactly once, so both sides are drawn
+  from the same distribution — giving **55.8% → `h ≈ 2.32`**, a third of a
+  rating point from the independently tuned 2.0. `h` is still *tuned* on the
+  whole pooled run, because the model already knows the away side is
+  stronger; only the sanity check is league-only.
+- **The gates print only for the population they were measured on.**
+  `VENUE_BLIND_BASELINE` and `CHAMPION` describe one specific run — the whole
+  StatsBomb corpus, or the whole Transfermarkt spine. Printed on a 547-match
+  slice they held it against 80,471 matches and reported "do not ship", which
+  is how a real failure eventually gets ignored.
+- **The 2024/25 Premier League is not a counter-example.** Increment 1
+  measured a 51.6% home share on that season alone and an anchor of 0.63,
+  which looked like evidence that modern football had lost its home
+  advantage. It was one unusual season: `GB1` runs 50.2%–57.4% across
+  2012–2025 with a median near 55.7%, and the spine-wide league figure is
+  55.8%. A single league-season is too small to re-measure this constant on.

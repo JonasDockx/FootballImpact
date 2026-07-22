@@ -4,10 +4,13 @@ com\goalimpact\model\MatchEvent$RedCard.class
 com\goalimpact\model\MatchEvent$Goal.class
 com\goalimpact\data\DataLoader$1.class
 com\goalimpact\engine\MatchProcessor.class
+com\goalimpact\data\TransfermarktLoader$EventRow.class
 com\goalimpact\report\Leaderboard.class
 com\goalimpact\data\TransfermarktLoader.class
 com\goalimpact\data\TransfermarktLoader$1.class
 com\goalimpact\data\TransfermarktLoader$Fixture.class
+com\goalimpact\Main$Slice.class
+com\goalimpact\data\TransfermarktLoader$LineupRow.class
 com\goalimpact\model\Team.class
 com\goalimpact\data\DataLoader$SeasonKey.class
 com\goalimpact\model\MatchEvent$MatchEnd.class
@@ -21,8 +24,10 @@ com\goalimpact\data\DataLoader.class
 com\goalimpact\credit\ResidualSource.class
 com\goalimpact\engine\PredictionQuality.class
 com\goalimpact\engine\PlayerTally.class
+com\goalimpact\Main$Scope.class
 com\goalimpact\data\EventOrdering.class
 com\goalimpact\report\CsvWriter.class
+com\goalimpact\Main$ScoringWindow.class
 com\goalimpact\model\CompetitionSeason.class
 com\goalimpact\credit\ResidualCreditRule.class
 com\goalimpact\engine\SmoothFadeSchedule.class

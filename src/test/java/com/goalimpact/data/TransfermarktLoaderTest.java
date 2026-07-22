@@ -307,11 +307,57 @@ class TransfermarktLoaderTest {
                     extraTime++;
                 }
             }
-            // 32 of 123 ties go to extra time - replays were abolished for
-            // 2024/25. appearances knows about only 16 of them.
-            assertEquals(32, extraTime);
+            // 33 of 123 ties go to extra time - replays were abolished for
+            // 2024/25. Neither signal alone finds them: appearances knows
+            // about 16, and the built events about 32. The 33rd is Stoke
+            // 3-3 Cardiff on 2025-02-08, which went to a shootout and so
+            // must have played 120 - but its only trace past minute 90 is
+            // a yellow card at 98', which never becomes an event, while
+            // appearances claims the longest stint was 87 minutes.
+            assertEquals(33, extraTime);
+
 
         }
     }
+    
+    @Test
+    void theClubWorldCupIsNeverAnyonesHomeFixture() {
+        // A tournament at a chosen host, and the host is not resolvable:
+        // most entrants play in leagues this snapshot does not carry.
+        // 148 replayable matches, every one of them neutral.
+        assertEquals(Match.HomeSide.NEITHER,
+            verdict("KLUB", "2025", null, "Group A", 1, 2));
+        assertEquals(Match.HomeSide.NEITHER,
+            verdict("KLUB", "2016", null, "First Round", 1, 2));
+    }
 
+    @Test
+    void theUkrainianSuperCupIsNeutralWhateverTheRoundIsCalled() {
+        // Nine of its ten rows are named "Final" and were already neutral
+        // through the finals rule; the tenth is "final decider" and was
+        // not. The fact is about the competition, so it is scoped to one.
+        assertEquals(Match.HomeSide.NEITHER,
+            verdict("UKRS", "2020", null, "final decider", 1, 2));
+        assertEquals(Match.HomeSide.NEITHER,
+            verdict("UKRS", "2015", null, "Final", 1, 2));
+    }
+
+    @Test
+    void saudiHostedSuperCupSemiFinalsAreNeutral() {
+        assertEquals(Match.HomeSide.NEITHER,
+            verdict("SUC", "2024", "other", "Semi-Finals", 1, 2));
+        assertEquals(Match.HomeSide.NEITHER,
+            verdict("SCI", "2024", "other", "Semi-Finals", 1, 2));
+    }
+
+    @Test
+    void theTwoLeggedSupercopaIsStillAGenuineHomeAndAway() {
+        // Pre-2020 the Supercopa was two legs at the clubs' own grounds.
+        // The competition changed shape; the data records both, and an
+        // exact match on "Final" leaves these alone.
+        assertEquals(Match.HomeSide.HOME,
+            verdict("SUC", "2016", "other", "final 1st leg", 1, 2));
+        assertEquals(Match.HomeSide.HOME,
+            verdict("SUC", "2016", "other", "final 2nd leg", 1, 2));
+    }
 }

@@ -432,4 +432,37 @@ class MatchProcessorTest {
             "segment A=[] B=[12]"), heard);
     }
 
+    @Test
+    void aSquadThatSitsOutIsUntouched() {
+        // The freeze covers this match's participants, not the population.
+        // Match 2 shares no player with match 1, so under the old whole-map
+        // freeze it was computed from a snapshot of players it never reads.
+        // Freezing only its own players must give the identical answer, and
+        // must leave match 1's squad bit-for-bit alone.
+
+        MatchProcessor processor = 
+            new MatchProcessor(new ResidualCreditRule(new LogisticLinkFunction(1.0)), m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_A)
+        ), tallies);
+
+        double ratingOfOne = rating(tallies, 1);
+        double minutesOfOne = tallies.get(1L).minutes();
+
+        processor.process(List.of(
+            xi(TEAM_A, 3, 4),
+            xi(TEAM_B, 14, 15),
+            goal(30, TEAM_A)
+        ), tallies);
+
+        assertEquals(ratingOfOne, rating(tallies, 1), 1e-12);
+        assertEquals(minutesOfOne, tallies.get(1L).minutes(), 1e-12);
+        // A pair meeting at all-zero ratings earns the same 0.5 the first
+        // pair did, whoever else the run happens to have on its books.
+        assertEquals(0.5, rating(tallies, 3), 1e-9);
+    }
 }

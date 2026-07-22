@@ -29,11 +29,27 @@ public class MatchProcessor {
         // pre-match values. Every goal is judged against the frozen ratings,
         // every update sized by the frozen exposure; updates apply only at
         // the final whistle.
+        //
+        // Only this match's own participants are frozen, never the whole
+        // population: preMatch is read only through Lineup, and frozenMinutes
+        // only for ids in matchResiduals - both of which hold on-pitch
+        // players, so freezing anyone else produces a value nothing reads.
+        // Freezing all of tallies costs matches x players: ~1.6M map writes
+        // over one season, ~8,9 billion over the full spine - per replay,
+        // per grid cell
         Map<Long, Double> frozen = new HashMap<>();
         Map<Long, Double> frozenMinutes = new HashMap<>();
-        for (Map.Entry<Long, PlayerTally> entry : tallies.entrySet()) {
-            frozen.put(entry.getKey(), entry.getValue().rating());
-            frozenMinutes.put(entry.getKey(), entry.getValue().minutes());
+        for (MatchEvent e : events) {
+            switch(e) {
+                case MatchEvent.StartingXI s -> {
+                    for (Player p : s.players()) {
+                        freeze(p.id(), tallies, frozen, frozenMinutes);
+                    }
+                }
+                case MatchEvent.Substitution sub ->
+                    freeze(sub.playerOn().id(), tallies, frozen, frozenMinutes);
+                default -> { }
+            }
         }
         RatingLookup preMatch = id -> frozen.getOrDefault(id, 0.0);
 
@@ -118,6 +134,19 @@ public class MatchProcessor {
             tallies.get(entry.getKey()).addSeconds(lastTime - entry.getValue());
         }
     }
+
+    // A player the run has not seen before has no tally yet, so there is
+    // nothing to freeze: the getOrDefault at both read sites supplies the
+    // debutant's 0.0, exactly as it did when this map held everybody.
+    private static void freeze(long id, Map<Long, PlayerTally> tallies,
+        Map<Long, Double> frozen, Map<Long, Double> frozenMinutes) {
+
+            PlayerTally tally = tallies.get(id);
+            if (tally != null) {
+                frozen.put(id, tally.rating());
+                frozenMinutes.put(id, tally.minutes());
+            }
+        }
 
     private void leavePitch(Map<Long, PlayerTally> tallies, Map<Long, Integer> enterTime, Player p, Team team, int t) {
         Integer start = enterTime.remove(p.id());

@@ -108,3 +108,19 @@ whistle) is untouched, exactly as ADR 0005 promised.
   Ronaldo docked least (−0.95, high exposure). Most visible leaderboard
   shift: defenders rise (Puyol into the top 10, Thiago Silva, Ramos, Umtiti
   up) — clean sheets finally pay.
+- **Re-measured on the Transfermarkt spine (2026-07-22).** This ADR's
+  instruction to re-measure "when large new eras/competitions land" came due
+  with [ADR 0009](0009-transfermarkt-as-the-rating-spine.md)'s full ingest:
+  **0.01532 goals per team-minute** — 223,810 goals over 14,610,840
+  team-minutes, from 80,471 matches spanning 2013-07-02 to 2026-07-06 across
+  65 competitions. Higher than StatsBomb's 0.01473 for two reasons at once: a
+  broader, less showcase-skewed population, and a nominal clock whose
+  denominator counts no stoppage time (ADR 0009). `K0 = 1.0` and `H = 4,000`
+  were re-confirmed **unchanged** on the new spine by an 81-cell grid, each
+  interior on its sweep.
+- **The base rate is now per spine, not one global constant.** It is a
+  property of a *population* — how often goals happen in a particular set of
+  matches — not of the model, and nothing about it is tuned. One shared
+  constant would have silently moved the pinned StatsBomb run the moment the
+  new number landed, destroying the regression check that proves the old path
+  is undisturbed. StatsBomb keeps 0.01473; Transfermarkt carries 0.01532.

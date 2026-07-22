@@ -13,6 +13,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -30,6 +31,25 @@ public class TransfermarktLoader implements AutoCloseable {
     // Two-legged finals are named "final 1st leg" / "final 2nd leg",
     // and are correctly untouched by an exact match on this.
     private static final String SINGLE_MATCH_FINAL = "Final";
+
+    // Competitions that are never anyone's home fixture, whatever the
+    // label or the round name says. The Club World Cup is a tournament at
+    // a chosen host - Japan, Morocco, the UAE, Qatar, and 63 games in the
+    // USA in 2025 - and the Ukrainian Super Cup is a one-off at a neutral
+    // ground, like the Community Shield.
+    //
+    // Scoped to the whole competition rather than to its rounds because
+    // that is what the fact is. UKRS proves the point: nine of its ten
+    // rows are named "Final" and the tenth "final decider", which a
+    // round-scoped rule would have missed.
+    //
+    // The Club World Cup's host is deliberately NOT resolved. Most
+    // entrants - Auckland City, Raja, Al-Ain - play in leagues this
+    // snapshot does not carry, so clubs.domestic_competition_id cannot
+    // name their country. No evidence, no advantage: the same posture
+    // classifyHomeSide already takes for an uncurated tournament edition.
+    private static final Set<String> NEUTRAL_COMPETITIONS = Set.of("KLUB", "UKRS");
+
 
     // One row of the games table, reduced to what the home-side rule
     // needs - so the rule stays a single testable function rather than a
@@ -60,16 +80,54 @@ public class TransfermarktLoader implements AutoCloseable {
 
     // Rounds a competition always plays at a chosen ground, whatever the
     // fixture label says. Scoped per competition on purpose: the FA Cup
-    // has played its semi-finals at Wembley since 2008, while the
-    // DFB-Pokal, KNVB Beker and Russian Cup play theirs at a club's own
-    // ground - a blanket rule on the round name would be wrong in eleven
-    // competitions to be right in one.
+    // has played its semi-finals at Wembley since 2008, and the Spanish
+    // and Italian super cups have played theirs in Saudi Arabia since
+    // 2020, while the DFB-Pokal, KNVB Beker and Russian Cup play theirs
+    // at a club's own ground - a blanket rule on the round name would be
+    // wrong in eleven competitions to be right in three.
     private static final Set<NeutralRound> NEUTRAL_ROUNDS = Set.of(
-        new NeutralRound("FAC", "Semi-Finals"));
+        new NeutralRound("FAC", "Semi-Finals"),
+        new NeutralRound("SUC", "Semi-Finals"),
+        new NeutralRound("SCI", "Semi-Finals"));
 
 
     private final Connection connection;
     private long droppedEvents = 0; // events the source could not place
+
+    // Batched vendor rows, keyed by game id and drained as loadEvents
+    // consumes them. Staging ACCUMULATES across loadMatches calls, so Main
+    // can load every slice and only then replay; it drains as replays are
+    // built, so staging and replays are never both held whole.
+    private final Map<Long, List<LineupRow>> stagedLineups = new HashMap<>();
+    private final Map<Long, Integer> stagedLength = new HashMap<>();
+    private final Map<Long, List<EventRow>> stagedEvents = new HashMap<>();
+    private final Map<Long, Integer> stagedLastMinute = new HashMap<>();
+    
+    // Which loaded matches are domestic league fixtures. Source-specific
+    // knowledge - "domestic_league" is Transfermarkt's word - so it lives
+    // here rather than on Match, which the engine and the StatsBomb loader
+    // also share (ADR 0004).
+    private final Set<Long> leagueMatches = new HashSet<>();
+
+    public Set<Long> leagueMatches() {
+        return leagueMatches;
+    }
+
+    // One game_lineups row, with the two string tests already decided.
+    // Deciding them here is the same Java judgement run when the row is
+    // read rather than when the match is assembled - it never moves into
+    // SQL - and it keeps 3.18M position/type strings out of the heap.
+    private record LineupRow(long clubId, long playerId, String playerName,
+        boolean starter, boolean goalkeeper) {
+    }
+
+    // One game_events row, with description already reduced to the two
+    // questions the loader ever asks of it. 1.26M description strings
+    // never reach the heap, and the rules that read them - isOwnGoal,
+    // isSendingOff - are unchanged and still in Java.
+    private record EventRow(int minute, String type, long clubId,
+        long playerId, long playerInId, boolean ownGoal, boolean sendingOff) {
+    }
 
     // ADR 0009: everything skipped is counted, never printed and forgotten
     public long droppedEvents() {
@@ -87,28 +145,44 @@ public class TransfermarktLoader implements AutoCloseable {
         connection.close();
     }
 
+    // The whole spine in one query. 630 competition-seasons exist, so the
+    // enumerated slice list was never going to reach them; the slice form
+    // below stays for the pinned regression runs and for reading one
+    // league by hand.
+    public List<Match> loadMatches() throws SQLException {
+        return loadMatches(null, null);
+    }
+
     public List<Match> loadMatches(String competitionId, String season) throws SQLException {
         String sql = """
-                SELECT game_id, date, round, competition_type,
+                SELECT game_id, date, competition_id, season, round, competition_type,
                 home_club_id, home_club_name,
                 away_club_id, away_club_name,
                 home_club_goals, away_club_goals
 
                 FROM games
-                WHERE competition_id = ? AND season = ?
+                %s
                 ORDER BY date, CAST(game_id AS BIGINT)
                 """;
         List<Match> matches = new ArrayList<>();
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, competitionId);
-            statement.setString(2, season);
+        try (PreparedStatement statement = prepare(sql,
+            "WHERE competition_id = ? AND season = ?", competitionId, season)) {
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    Fixture fixture = new Fixture(competitionId, season,
+                    // The fixture describes the ROW, never the arguments.
+                    // Under loadMatches() they are null, and the home-side
+                    // rule reads the competition id, the season and the
+                    // round to decide who, if anyone, is at home.
+                    Fixture fixture = new Fixture(
+                        rows.getString("competition_id"), rows.getString("season"),
                         rows.getString("competition_type"), rows.getString("round"),
                         rows.getLong("home_club_id"), rows.getLong("away_club_id"));
+                    long matchId = Long.parseLong(rows.getString("game_id"));
+                    if ("domestic_league".equals(fixture.competitionType())) {
+                        leagueMatches.add(matchId);
+                    }
                     matches.add(new Match(
-                        Long.parseLong(rows.getString("game_id")),
+                        matchId,
                         rows.getDate("date").toLocalDate(),
                         new Team(rows.getLong("home_club_id"), rows.getString("home_club_name")),
                         new Team(rows.getLong("away_club_id"), rows.getString("away_club_name")),
@@ -118,54 +192,136 @@ public class TransfermarktLoader implements AutoCloseable {
                 }
             }
         }
+        stage(competitionId, season);
         return matches;
     }
 
-    
+    // One edition, or all of them. The filter is spliced rather than bound
+    // as a nullable parameter, because a NULL parameter has to carry its
+    // own type through JDBC and nothing here is ever user input. Splicing
+    // nothing is what turns 630 queries into one.
+    private PreparedStatement prepare(String sql, String filter,
+        String competitionId, String season) throws SQLException {
+
+        if (competitionId == null) {
+            return connection.prepareStatement(sql.formatted(""));
+        }
+        PreparedStatement statement = connection.prepareStatement(sql.formatted(filter));
+        statement.setString(1, competitionId);
+        statement.setString(2, season);
+        return statement;
+    }
+
+
+    // The set-shaped half of the loader (ADR 0009): two queries fetch every
+    // row this predicate's matches will need, and Java keeps every judgement
+    // about what those rows mean. The batch unit is deliberately the same
+    // predicate loadMatches was just given, so a slice run stages a slice
+    // and the full run stages everything - and no caller has to remember to
+    // prefetch before loadEvents will work.
+    private void stage(String competitionId, String season) throws SQLException {
+        try (PreparedStatement statement = prepare(LINEUP_SQL,
+            "WHERE g.competition_id = ? AND g.season = ?", competitionId, season)) {
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    stagedLineups.computeIfAbsent(rows.getLong("gid"), key -> new ArrayList<>())
+                        .add(new LineupRow(
+                            rows.getLong("club_id"),
+                            rows.getLong("player_id"),
+                            rows.getString("player_name"),
+                            "starting_lineup".equals(rows.getString("type")),
+                            "Goalkeeper".equals(rows.getString("position"))));
+                }
+            }
+        }
+        try (PreparedStatement statement = prepare(LENGTH_SQL,
+            "WHERE g.competition_id = ? AND g.season = ?", competitionId, season)) {
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    stagedLength.put(rows.getLong("gid"), rows.getInt("longest"));
+                }
+            }
+        }
+        try (PreparedStatement statement = prepare(EVENT_SQL,
+            "AND g.competition_id = ? AND g.season = ?", competitionId, season)) {
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    long gid = rows.getLong("gid");
+                    int minute = rows.getInt("minute");
+                    // The latest minute the SOURCE stamps on this match,
+                    // recorded before any row is judged or discarded.
+                    stagedLastMinute.merge(gid, minute, Math::max);
+                    String description = rows.getString("description");
+                    stagedEvents.computeIfAbsent(gid, key -> new ArrayList<>())
+                        .add(new EventRow(
+                            minute,
+                            rows.getString("type"),
+                            rows.getLong("club_id"),
+                            rows.getLong("player_id"),
+                            rows.getLong("player_in_id"),
+                            isOwnGoal(description),
+                            isSendingOff(description)));
+                }
+            }
+        }
+    }
+
+
     // Both lineup types: the starters form the XI, and every row supplies a
     // name, which game_events never carries - so a substitute who comes on
     // is nameable only from his 'substitutes' row.
+    //
+    // The ORDER BY is load-bearing. It fixes the order of the starters list
+    // inside StartingXI, so it must stay exactly what the per-match query
+    // used - club_id then player_id - now preceded by the game id.
     private static final String LINEUP_SQL = """
-        SELECT club_id, player_id, player_name, position, type
-        FROM game_lineups
-        WHERE game_id = ?
-        ORDER BY club_id, player_id
+        SELECT CAST(l.game_id AS BIGINT) AS gid,
+               l.club_id, l.player_id, l.player_name, l.position, l.type
+        FROM game_lineups l
+        JOIN games g ON CAST(g.game_id AS BIGINT) = CAST(l.game_id AS BIGINT)
+        %s
+        ORDER BY gid, l.club_id, l.player_id
         """;
-
 
     // Half of the extra-time evidence. ADR 0009 pinned this as the whole
     // of it, on the reasoning that a quiet extra time leaves no event
     // trace - true of 28 matches, while appearances is missing entirely
     // for 1,174 that plainly played it, national-team football included.
+    //
+    // appearances.game_id is INTEGER where games.game_id is VARCHAR: the
+    // cast goes on the games side, so the join can still use the integer.
     private static final String LENGTH_SQL = """
-        SELECT max(minutes_played)
-        FROM appearances
-        WHERE game_id = ?
+        SELECT a.game_id AS gid, max(a.minutes_played) AS longest
+        FROM appearances a
+        JOIN games g ON CAST(g.game_id AS BIGINT) = a.game_id
+        %s
+        GROUP BY gid
         """;
 
     // One match's events on the playing clock (ADR 0009): nominal, so the
     // whistle is at 90 minutes, or 120 where extra time was played.
-    public List<MatchEvent> loadEvents(Match match) throws SQLException, UnusableMatchException {
+    public List<MatchEvent> loadEvents(Match match) throws UnusableMatchException {
+        // All three taken up front, and removed rather than read: a match
+        // that fails the gate below must not leave its rows behind.
+        List<LineupRow> lineup = stagedLineups.remove(match.matchId());
+        Integer longest = stagedLength.remove(match.matchId());
+        List<EventRow> eventRows = stagedEvents.remove(match.matchId());
+        Integer lastMinute = stagedLastMinute.remove(match.matchId());
+
         Map<Long, List<Player>> startersByClub = new HashMap<>();
         Map<Long, Player> goalkeeperByClub = new HashMap<>();
         Map<Long, Player> names = new HashMap<>();
-        try (PreparedStatement statement = connection.prepareStatement(LINEUP_SQL)) {
-            statement.setLong(1, match.matchId());
-            try (ResultSet rows = statement.executeQuery()) {
-                while (rows.next()) {
-                                        long clubId = rows.getLong("club_id");
-                    Player player = new Player(
-                        rows.getLong("player_id"), rows.getString("player_name"));
-                    names.put(player.id(), player);
-                    if (!"starting_lineup".equals(rows.getString("type"))) {
-                        continue;   // on the bench: a name, not a starter
-                    }
-                    startersByClub.computeIfAbsent(clubId, key -> new ArrayList<>()).add(player);
-                    if ("Goalkeeper".equals(rows.getString("position"))
-                        && goalkeeperByClub.put(clubId, player) != null) {
-                        throw new UnusableMatchException(
-                            "two starting goalkeepers for club " + clubId);
-                    }
+        if (lineup != null) {
+            for (LineupRow row : lineup) {
+                Player player = new Player(row.playerId(), row.playerName());
+                names.put(player.id(), player);
+                if (!row.starter()) {
+                    continue;   // on the bench: a name, not a starter
+                }
+                startersByClub.computeIfAbsent(row.clubId(), key -> new ArrayList<>()).add(player);
+                if (row.goalkeeper() && goalkeeperByClub.put(row.clubId(), player) != null) {
+                    throw new UnusableMatchException("two starting goalkeepers",
+                        "club " + row.clubId());
                 }
             }
         }
@@ -173,11 +329,12 @@ public class TransfermarktLoader implements AutoCloseable {
             throw new UnusableMatchException("no lineups");
         }
 
+
         List<MatchEvent> events = new ArrayList<>();
         events.add(startingXi(match, match.home(), startersByClub, goalkeeperByClub));
         events.add(startingXi(match, match.away(), startersByClub, goalkeeperByClub));
-        readEvents(match, names, events);
-        boolean extraTime = playedExtraTime(match.matchId(), events);
+        readEvents(match, eventRows, names, events);
+        boolean extraTime = playedExtraTime(longest, lastMinute);
         MatchEvent.MatchEnd whistle = extraTime
             ? new MatchEvent.MatchEnd(4, 120, 0)
             : new MatchEvent.MatchEnd(2, 90, 0);
@@ -190,8 +347,8 @@ public class TransfermarktLoader implements AutoCloseable {
         for (MatchEvent event : events) {
             int t = event.minute() * 60 + event.second();
             if (t > whistleTime) {
-                throw new UnusableMatchException("an event at " + t + "s but the whistle at "
-                    + whistleTime + "s - the clock would lie");
+                throw new UnusableMatchException("an event outlives the whistle",
+                    "event at " + t + "s, whistle at " + whistleTime + "s");
             }
         }
         events.add(whistle);
@@ -201,76 +358,75 @@ public class TransfermarktLoader implements AutoCloseable {
     }
 
     // Extra time on either signal, because neither alone suffices: the
-    // events miss a quiet extra time (28 matches), and appearances misses
-    // whole competitions (1,174). Checked in that order because the events
-    // are already in memory and settle most matches without a query.
-    private boolean playedExtraTime(long matchId, List<MatchEvent> events) throws SQLException {
-        for (MatchEvent event : events) {
-            if (event.minute() >= 90) {
-                return true;
-            }
-        }
-        try (PreparedStatement statement = connection.prepareStatement(LENGTH_SQL)) {
-            statement.setLong(1, matchId);
-            try (ResultSet rows = statement.executeQuery()) {
-                return rows.next() && rows.getInt(1) >= 120;
-            }
-        }
+    // source misses a quiet extra time (28 matches), and appearances
+    // misses whole competitions (1,174).
+    //
+    // lastMinute comes from the SOURCE ROWS, not from the events built
+    // out of them. A row that never becomes an event - an ordinary yellow
+    // card, a substitution whose arriving player has no name - still
+    // proves the match was being played at that minute. Reading the built
+    // events instead blew the whistle at 90 on 26 matches that played 120.
+    private static boolean playedExtraTime(Integer longest, Integer lastMinute) {
+        return (lastMinute != null && lastMinute > 90)
+            || (longest != null && longest >= 120);
     }
 
-    
     // Shootout rows are excluded by the glossary's Goal; minute -1 is the
     // vendor's "we cannot place this" stamp on 17,575 rows - and it is the
     // only non-positive minute in the database, so nothing legitimate is
     // lost by the filter.
+    //
+    // ORDER BY gid, minute reproduces the per-match ORDER BY minute. What
+    // neither query fixes is the order of two events sharing a minute:
+    // EventOrdering.sort ranks them and is stable, so same-rank ties keep
+    // whatever order the scan produced.
     private static final String EVENT_SQL = """
-        SELECT minute, type, club_id, player_id, player_in_id, description
-        FROM game_events
-        WHERE game_id = ? AND type <> 'Shootout' AND minute > 0
-        ORDER BY minute
+        SELECT CAST(e.game_id AS BIGINT) AS gid,
+               e.minute, e.type, e.club_id, e.player_id, e.player_in_id, e.description
+        FROM game_events e
+        JOIN games g ON CAST(g.game_id AS BIGINT) = CAST(e.game_id AS BIGINT)
+        WHERE e.type <> 'Shootout' and e.minute > 0
+        %s
+        ORDER BY gid, e.minute
         """;
 
     // Per-event interpretation - the domain judgement SQL must not do.
     // A row the loader cannot place costs that event, never the match's
     // other thousand player-minutes.
-    private void readEvents(Match match, Map<Long, Player> names, List<MatchEvent> events)
-        throws SQLException {
+    private void readEvents(Match match, List<EventRow> rows,
+        Map<Long, Player> names, List<MatchEvent> events) {
 
-        try (PreparedStatement statement = connection.prepareStatement(EVENT_SQL)) {
-            statement.setString(1, String.valueOf(match.matchId()));
-            try (ResultSet rows = statement.executeQuery()) {
-                while (rows.next()) {
-                    int minute = rows.getInt("minute");
-                    int t = (minute - 1) * 60 + 30;   // the labelled minute's midpoint
-                    int period = periodOf(minute);
-                    Team team = teamOf(match, rows.getLong("club_id"));
-                    Player player = names.get(rows.getLong("player_id"));
-                    String description = rows.getString("description");
-                    if (team == null) {
-                        droppedEvents++;   // credited to neither side of its own match
+        if (rows == null) {
+            return;   // a match the source records no events for
+        }
+        for (EventRow row : rows) {
+            int t = (row.minute() - 1) * 60 + 30;   // the labelled minute's midpoint
+            int period = periodOf(row.minute());
+            Team team = teamOf(match, row.clubId());
+            Player player = names.get(row.playerId());
+            if (team == null) {
+                droppedEvents++;   // credited to neither side of its own match
+                continue;
+            }
+            switch (row.type()) {
+                case "Goals" -> events.add(new MatchEvent.Goal(period, t / 60, t % 60,
+                    team, row.ownGoal() ? null : player));
+                case "Substitutions" -> {
+                    Player arriving = names.get(row.playerInId());
+                    if (player == null || arriving == null) {
+                        droppedEvents++;   // nobody arriving: 612 games
                         continue;
                     }
-                    switch (rows.getString("type")) {
-                        case "Goals" -> events.add(new MatchEvent.Goal(period, t / 60, t % 60,
-                            team, isOwnGoal(description) ? null : player));
-                        case "Substitutions" -> {
-                            Player arriving = names.get(rows.getLong("player_in_id"));
-                            if (player == null || arriving == null) {
-                                droppedEvents++;   // nobody arriving: 612 games
-                                continue;
-                            }
-                            events.add(new MatchEvent.Substitution(period, t / 60, t % 60,
-                                team, player, arriving));
-                        }
-                        case "Cards" -> {
-                            if (player != null && isSendingOff(description)) {
-                                events.add(new MatchEvent.RedCard(period, t / 60, t % 60,
-                                    team, player));
-                            }
-                        }
-                        default -> droppedEvents++;
+                    events.add(new MatchEvent.Substitution(period, t / 60, t % 60,
+                        team, player, arriving));
+                }
+                case "Cards" -> {
+                    if (player != null && row.sendingOff()) {
+                        events.add(new MatchEvent.RedCard(period, t / 60, t % 60,
+                            team, player));
                     }
                 }
+                default -> droppedEvents++;
             }
         }
     }
@@ -332,12 +488,12 @@ public class TransfermarktLoader implements AutoCloseable {
 
         List<Player> starters = startersByClub.get(team.id());
         if (starters == null || starters.size() != 11) {
-            throw new UnusableMatchException("starting lineup of " + team.name() + " has "
-                + (starters == null ? 0 : starters.size()) + " players, not 11");
+            throw new UnusableMatchException("XI is not 11", team.name() + " has "
+                + (starters == null ? 0 : starters.size()) + " players");
         }
         Player goalkeeper = goalkeeperByClub.get(team.id());
         if (goalkeeper == null) {
-            throw new UnusableMatchException("no starting goalkeeper for " + team.name());
+            throw new UnusableMatchException("no starting goalkeeper", team.name());
         }
         boolean home = switch (match.homeSide()) {
             case HOME -> team.id() == match.home().id();
@@ -356,6 +512,9 @@ public class TransfermarktLoader implements AutoCloseable {
     // name a real home fixture - domestic league, cup tie and European tie
     // alike - and only a chosen ground overturns it.
     static Match.HomeSide classifyHomeSide(Fixture fixture) {
+        if (NEUTRAL_COMPETITIONS.contains(fixture.competitionId())) {
+            return Match.HomeSide.NEITHER;   // never anyone's ground
+        }
         if ("national_team_competition".equals(fixture.competitionType())) {
             Long host = TOURNAMENT_HOSTS.get(
                 new Edition(fixture.competitionId(), fixture.season()));

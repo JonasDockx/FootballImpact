@@ -227,6 +227,196 @@ and events already agreed.
 per-match rows (World Cup 2026 is absent from the host table, so its matches are
 all neutral); rating history; any interface extracted from `DataLoader`.
 
+## 20. Transfermarkt loader, increment 3 — the full ingest — DONE
+
+**Why:** increments 1 and 2 (items 18, 19) proved the whole path on 547 matches
+and left **no untested fork in the loader**. Everything ADR 0009 lists under
+Consequences now waits on one thing: running the whole snapshot. The three
+calibration constants the model rests on — the base scoring rate, `h`, and the
+`(K0, H)` grid — are all still pinned to a Barcelona-heavy StatsBomb population
+and cannot honestly be re-measured on anything smaller than the full spine.
+**Ready to grill** — everything below was probed 2026-07-22, so no re-probing is
+needed.
+
+**Reading order for a fresh context:** CLAUDE.md → CONTEXT.md → ADR 0009 (note
+its 2026-07-22 amendment) → backlog items 18 and 19 → this item.
+
+### What is already built and must not regress
+
+`TransfermarktLoader` (matches, lineups, goals, substitutions, red cards,
+nominal whistle, three-way home side, curated host table, curated neutral
+rounds, post-whistle tripwire), `EventOrdering`, `UnusableMatchException`, and
+`Main`'s `Spine` switch with a `SLICES` list. 100 tests green. Pinned numbers:
+
+| Run | Must stay |
+|---|---|
+| StatsBomb spine | log-loss **0.6259**, anchor 2.69 |
+| `SLICES = [GB1/2024]` | **380 of 380**, log-loss **0.6685** |
+| `SLICES = [GB1, FAC, AFAC / 2024]` | **547 of 554**, 7 skips, HOME 504 / AWAY 3 / NEITHER 40 |
+
+### Size and cost, measured 2026-07-22
+
+- **88,958 games, 70 competition ids, 18 seasons.** ADR 0009's strict gate
+  leaves ~77,781 usable.
+- **1,256,894 event rows** survive the loader's filters (247,685 goals, 631,240
+  substitutions, 377,969 cards before the sending-off test), plus **1,780,759
+  starting-lineup rows**.
+- **Query cost is not the problem.** 380 matches through today's
+  three-queries-per-match path take 0.85 s — **~3 minutes extrapolated to all
+  88,958**. The same rows fetched batched per competition-season take 0.03 s, a
+  **26× speedup** (~8 seconds full ingest). Batching is an optimisation to
+  decide on, not a prerequisite.
+- **Memory is the open sizing question.** `Main` holds every replay in RAM so
+  each grid cell can replay from memory: order 1.2M `MatchEvent` objects and
+  ~1.7M `Player` instances (11 per XI, re-created per match, never
+  deduplicated). Unmeasured. The 81-cell grid multiplies replay *time*, not
+  memory.
+
+### Lineup coverage by competition type (the gate's shape)
+
+| Type | Games | With lineups |
+|---|---|---|
+| domestic_league | 63,382 | 58,366 |
+| domestic_cup | 12,904 | 11,805 |
+| other | 7,599 | 6,819 |
+| international_cup | 3,117 | 2,901 |
+| (null) | 1,214 | 1,106 |
+| national_team_competition | 742 | 200 |
+
+`competition_type` is **null for 1,214 games**, which `classifyHomeSide` treats
+as club football today — untested, and possibly wrong.
+
+### Questions the grill has to settle
+
+1. **Which competitions enter the run?** All 70 ids, or a filter. ADR 0009
+   deferred a `rating_eligible` flag because every competition is competitive
+   senior football — worth re-testing against the 1,214 null-type games and the
+   7,599 in the `other` bucket.
+2. **Batch or not**, given that 3 minutes is already tolerable and batching
+   changes the loader's shape.
+3. **How the grid runs at scale** — 81 cells over ~78,000 matches, and whether
+   all replays stay in memory.
+4. **In what order the constants are re-measured.** The base rate, `h` and
+   `(K0, H)` are not independent: the `h` anchor is expressed in rating points
+   through the link gain.
+5. **The `h` anomaly.** Both Transfermarkt slices measure 0.63–0.76 rating
+   points against the pinned 2.5, and a 51.9% home-goal share against
+   StatsBomb's 56.7%. Either modern club football has far less home advantage
+   than the StatsBomb-era mix, or something in the venue handling is wrong. The
+   full ingest is the instrument that separates those.
+6. **Left-censoring and burn-in** (glossary *Left-censored career*): lineups
+   start in 2013, so every career open in 2013 is censored and 2013–2014 is
+   burn-in for the whole run. ADR 0009 rejected a warm-up pass; the diagnostic
+   that reports the effect is unbuilt.
+7. **Unrated opponents** (item 16): 2,501 of 3,274 clubs never play a league
+   match and exist only as cup opposition — 16% of all player-appearances. The
+   pooled slice already shows the ranking bias; at full scale it is 12,904 cup
+   ties.
+
+### Deliberately still not built
+
+The sidecar; per-match home-side overrides; multi-host host rows (World Cup 2026
+is absent from the host table, so its matches are all neutral); rating history
+and `run_id`; any interface extracted from `DataLoader`; the GUI (item 17).
+
+### Grill (2026-07-22) — eight decisions
+
+The seven questions above were put in dependency order; one was retired before
+being asked, and three more were added that the list had missed.
+
+1. **All 70 competitions enter**, no `rating_eligible` flag — but the venue rule
+   needed a third curated set first (see 5).
+2. **Full batching**, not the per-match path. 630 competition-seasons exist, so
+   an enumerated slice list could never reach the spine; four queries replace
+   three-per-match. `loadEvents` keeps its signature and every domain rule.
+3. **`Player` interning declined** — measured at ~200 MB, but 1,075 ids carry
+   more than one name, so it would change CSV output for a saving 8.5 GB of
+   heap makes unnecessary.
+4. **The grid runs unparallelised.** Cost turned out to be a quadratic freeze in
+   `MatchProcessor`, not the grid; once fixed, 81 cells take under 3 minutes on
+   80,471 matches. 32 cores were available and not needed.
+5. **Q5, the `h` anomaly, was retired before the grill reached it.** Not an
+   anomaly: `GB1` 2024/25 was a genuinely unusual season at 51.6%, while the
+   spine-wide domestic-league share is 55.8%. Increment 1 happened to pick the
+   outlier.
+6. **The anchor is measured on leagues only.** Pooled it is confounded by
+   strength — the cup-only share is 48.3%, implying a home *dis*advantage of
+   −0.66. See [ADR 0008](../docs/adr/0008-home-advantage-in-the-expectation.md).
+7. **Base rate first, then a joint `(K0, H, h)` grid**, with `k` pinned at 0.10.
+   The base rate depends on nothing and is free from the first run; the other
+   two interact, so they are swept together rather than one at a time.
+8. **The grid is scored from 2015-07-01** — new
+   [ADR 0010](../docs/adr/0010-scoring-window.md). Q6's left-censoring
+   diagnostic is superseded by it.
+
+**Added to the list during the grill:** the loader's entry point (Q1/Q2 assumed
+`SLICES` could reach the whole spine — it cannot); what increment 3's *gate*
+even is, given that its purpose is to replace the constants the old gates were
+pinned to; and a pre-registered census, predicted from SQL before any Java ran,
+as the pass/fail condition.
+
+### Outcome (2026-07-22) — DONE, every gate met
+
+Landed in nine gated stages: (A) the freeze fix, byte-identical; (B1) the third
+venue set; (B2a/B2b) batched lineups+length, then events; (B3) no-argument
+`loadMatches()` and `Scope`; (C1) three defects the first full run exposed;
+(C2) the base rate pinned per spine, spine-aware gates, league-only anchor;
+(D1) the scoring window; (D2) the 81-cell grid and its winner.
+
+**The pre-registered census reproduced exactly.** Predicted from SQL before the
+first full run, and hit on every category:
+
+| Quantity | Predicted | Actual |
+|---|---|---|
+| games loaded | 88,958 | 88,958 |
+| **matches replayed** | 80,471 | **80,471** |
+| no lineups / XI≠11 / no GK / two GKs | 7,761 / 717 / 6 / 3 | same |
+| tripwire | 0 | 0 |
+| goals credited | 223,810 | 223,810 |
+| team-minutes | 14,610,840 | 14,610,840 |
+| **base scoring rate** | 0.01532 | **0.01532** |
+| venue HOME / AWAY / NEITHER | 79,795 / 8 / 668 | same |
+| league-only anchor `h` | ≈2.33 | **2.32** |
+
+ADR 0009's inherited "77,781 usable" was wrong and is corrected there.
+
+**Three defects the full scale exposed, all fixed in C1:**
+
+- **`CsvWriter` crashed on a null club name.** 86 clubs have none. The entire
+  run — replay, grid, leaderboard — completed and then threw on its last line.
+- **The skip report printed 576 lines**, because the club name was baked into
+  the message the counter grouped by. `UnusableMatchException` now carries a
+  short *reason* separate from its detail; four lines.
+- **Extra time was read from constructed events, not source rows.** 26 matches
+  that played 120 minutes got a 90-minute whistle. Amended in ADR 0009.
+
+The extra-time fix was caught by increment 2's own test
+(`theFaCupSliceIsFullOfExtraTime`, 32 → 33) — and investigating *why* confirmed
+the change instead of reverting it: Stoke 3–3 Cardiff went to a shootout, so it
+must have played extra time, but its only post-90 trace is a yellow card at 98'.
+
+**The champion, and the four runs now pinned:**
+
+| Run | Matches | Measured base rate | Log-loss |
+|---|---|---|---|
+| StatsBomb spine | 2,651 | 0.01473 | **0.6259** (byte-identical through all nine stages) |
+| **TM full ingest — designated** | **80,471** | **0.01532** | **0.6502** windowed / 0.6508 whole |
+| TM `GB1/2024` | 380 | 0.01630 | 0.6662 |
+| TM `GB1 + FAC + AFAC / 2024` | 547 | 0.01592 | 0.6742 |
+
+Winner `k = 0.10, K0 = 1.0, H = 4,000, floor = 0.05, h = 2.0`, interior on every
+swept axis; venue-blind (`h = 0`) in the same run is 0.6551. **`K0` and `H` did
+not move** — only `h`, 2.5 → 2.0. `Main` now defaults to `Scope.ALL`; the slice
+list survives as the fast regression path (2 s against 12 s).
+
+Full replay of 80,471 matches: **~12 s**. 81-cell grid: **~166 s**. 105 tests
+green.
+
+**Still not built:** the sidecar; per-match home-side overrides; multi-host host
+rows; rating history and `run_id`; any interface extracted from `DataLoader`;
+the GUI (item 17); item 16's unrated-opponent diagnostic (Q7 — a change to the
+metric, not to ingestion).
+
 ## 1. Store the date each match was played — DONE
 
 Implemented: `Match` now carries a `LocalDate date` parsed from `match_date`;

@@ -7,7 +7,24 @@ package com.goalimpact.data;
 // so a silently dropped match manufactures false debutants.
 public class UnusableMatchException extends Exception {
 
+    private final String reason;
+
+    // reason is the CATEGORY, counted across the run; detail identifies
+    // this one match and goes only into the message. Keeping them apart is
+    // what makes the skip report four lines instead of 576 - and ADR 0009
+    // wants skips written, which a wall of one-off lines is not.
+    public UnusableMatchException(String reason, String detail) {
+        super(reason + ": " + detail);
+        this.reason = reason;
+    }
+
     public UnusableMatchException(String reason) {
         super(reason);
+        this.reason = reason;
+    }
+
+    public String reason() {
+        return reason;
     }
 }
+

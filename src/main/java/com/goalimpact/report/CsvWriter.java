@@ -28,10 +28,17 @@ public class CsvWriter {
         }
     }
 
+    // 86 clubs in the snapshot have no name at all. An unnamed club is
+    // still a real club with a real rating; only its label is missing, so
+    // it gets an empty cell rather than stopping the run on its last line.
     private String escape(String value) {
+        if (value == null) {
+            return "";
+        }
         if (value.contains(",") || value.contains("\"")) {
             return "\"" + value.replace("\"", "\"\"") + "\"";
         }
         return value;
     }
+
 }

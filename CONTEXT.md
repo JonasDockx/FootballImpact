@@ -150,6 +150,17 @@ the age curve that is an artefact of where the data starts. Derived per run
 matches reclassifies it by itself.
 _Avoid_: cold start — that names the model's condition, not the career's
 
+**Scoring window**:
+The stretch of a run over which predictions are *graded*, which need not be the
+stretch that is *replayed*. Everything is always replayed, in date order, every
+rating still reading only matches before it; the window decides only which
+predictions count toward the run's log-loss. It exists so that the burn-in at a
+run's leading edge — where every rating is still near zero, so every prediction
+is near even, whatever the knobs are — does not decide which knobs win (see
+[ADR 0010](docs/adr/0010-scoring-window.md)). A pinned constant with a stated
+reason, never a tuned one.
+_Avoid_: training window, test set — nothing is held out and nothing is fitted
+
 **Value**:
 A player's current GoalImpact rating — an accumulated point total, not a
 per-match or per-90 average. Population totals are not conserved (per-player
