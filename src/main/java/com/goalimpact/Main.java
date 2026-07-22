@@ -4,6 +4,7 @@ import com.goalimpact.credit.TimeIntegratedResidual;
 import com.goalimpact.data.DataLoader;
 import com.goalimpact.data.TransfermarktLoader;
 import com.goalimpact.data.UnusableMatchException;
+import com.goalimpact.engine.MatchObserver;
 import com.goalimpact.engine.MatchProcessor;
 import com.goalimpact.engine.PlayerTally;
 import com.goalimpact.engine.PredictionQuality;
@@ -14,6 +15,7 @@ import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
 import com.goalimpact.report.CsvWriter;
 import com.goalimpact.report.Leaderboard;
+import com.goalimpact.report.RatingHistoryWriter;
 
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -146,6 +148,13 @@ public class Main {
     private static final Path SNAPSHOT = Path.of(
         "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb");
 
+    // ADR 0009's third file, ADR 0011's first use of it. Kept beside the
+    // snapshot and the sidecar so one DuckDB connection can attach all three,
+    // and out of the repo because it is rebuilt, not versioned.
+    private static final Path RESULTS = Path.of(
+        "C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-results.duckdb");
+
+
     // Increment 2's vertical slice (ADR 0009): the league season increment 1
     // proved, plus a domestic cup and a finals tournament - which between
     // them exercise AWAY, NEITHER, the club finals rule, the tournament-host
@@ -264,7 +273,7 @@ public class Main {
                             for (boolean fieldOnly : FIELD_PLAYERS_ONLY ) {
                                 ScoringWindow window = new ScoringWindow();
                                 replay(matches, replays, gain, home, fieldOnly,
-                                    new SmoothFadeSchedule(k0, h, floor), window);
+                                    new SmoothFadeSchedule(k0, h, floor), window, MatchObserver.NONE);
                                 double loss = window.windowed.meanLogLoss();
                                 double whole = window.whole.meanLogLoss();
                                 System.out.printf(Locale.US, "%8.2f %8.2f %8.0f %8.2f %8.2f %8s %10.4f %10.4f%n",
@@ -311,9 +320,20 @@ public class Main {
                     ? "adop field-player-only-Strength" : "keep Goalkeepers in Strength");
         }
 
-        // Final replay with the winning knobs; reports come from this one.
-        Map<Long, PlayerTally> tallies = replay(matches, replays, bestGain, bestHome, bestFieldOnly,
-            new SmoothFadeSchedule(bestK0, bestH, bestFloor), new ScoringWindow());
+        // Final replay with the winning knobs; the reports come from this one,
+        // and so does the rating history. ADR 0009: history belongs to ONE
+        // designated run, never to the grid. The run_id carries the knobs,
+        // which is what turns a spine-versus-spine comparison into a join.
+        String runId = String.format(Locale.ROOT, "%s-%s-k%.2f-K0%.2f-H%.0f-f%.2f-h%.2f",
+            SPINE, SCOPE, bestGain, bestK0, bestH, bestFloor, bestHome);
+        Map<Long, PlayerTally> tallies;
+        try (RatingHistoryWriter history = new RatingHistoryWriter(RESULTS, runId)) {
+            tallies = replay(matches, replays, bestGain, bestHome, bestFieldOnly,
+                new SmoothFadeSchedule(bestK0, bestH, bestFloor), new ScoringWindow(), history);
+            System.out.printf(Locale.US, "%nRating history: %,d rows -> %s (run %s)%n",
+                history.rows(), RESULTS.toAbsolutePath(), runId);
+        }
+
 
 
         new Leaderboard().print(tallies.values(), 20);
@@ -434,14 +454,15 @@ public class Main {
     // rating, and the replay order is untouched.
     private static Map<Long, PlayerTally> replay(List<Match> matches, List<List<MatchEvent>> replays,
         double linkGain, double homeAdvantage, boolean fieldPlayersOnly, UpdateSchedule schedule,
-        ScoringWindow window) {
+        ScoringWindow window, MatchObserver observer) {
 
         MatchProcessor processor = new MatchProcessor(
             new TimeIntegratedResidual(BASE_RATE, linkGain, homeAdvantage, fieldPlayersOnly, window), schedule);
         Map<Long, PlayerTally> tallies = new HashMap<>();
         for (int i = 0; i < replays.size(); i++) {
             window.openFrom(matches.get(i).date());
-            processor.process(replays.get(i), tallies);
+            observer.startMatch(matches.get(i).matchId(), matches.get(i).date());
+            processor.process(replays.get(i), tallies, observer);
         }
         return tallies;
     }

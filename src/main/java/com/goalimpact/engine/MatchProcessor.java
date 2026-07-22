@@ -24,7 +24,15 @@ public class MatchProcessor {
         this.schedule = schedule;
     }
 
+    // The two-argument form is the contract every existing caller has, and it
+    // keeps it: no history, no observer, no change. ADR 0011's seam is the
+    // overload below.
     public void process(List<MatchEvent> events, Map<Long, PlayerTally> tallies) {
+        process(events, tallies, MatchObserver.NONE);
+    }
+
+    public void process(List<MatchEvent> events, Map<Long, PlayerTally> tallies,
+        MatchObserver observer) {
         // Rating period: freeze every player's rating AND exposure at their
         // pre-match values. Every goal is judged against the frozen ratings,
         // every update sized by the frozen exposure; updates apply only at
@@ -56,6 +64,8 @@ public class MatchProcessor {
         Map<Long, Set<Player>> onPitch = new HashMap<>(); // teamId -> players currently on
         Map<Long, Integer> enterTime = new HashMap<>(); // playerId -> stint start (seconds)
         Map<Long, Double> matchResiduals = new HashMap<>(); // playerId -> summed residuals
+        Map<Long, Integer> playedSeconds = new HashMap<>(); // playerId -> on-pitch seconds THIS match
+
 
         int lastTime = 0;
         int segStart = 0;   // when the current lineup-constant segment began
@@ -83,7 +93,8 @@ public class MatchProcessor {
                     closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
                     segStart = t;
                     onPitch.get(sub.team().id()).remove(sub.playerOff());
-                    leavePitch(tallies, enterTime, sub.playerOff(), sub.team(), t);
+                    leavePitch(tallies, enterTime, playedSeconds, sub.playerOff(), sub.team(), t);
+
 
                     onPitch.get(sub.team().id()).add(sub.playerOn());
                     enterTime.put(sub.playerOn().id(), t);
@@ -94,7 +105,7 @@ public class MatchProcessor {
                     closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
                     segStart = t;
                     onPitch.get(rc.team().id()).remove(rc.player());
-                    leavePitch(tallies, enterTime, rc.player(), rc.team(), t);
+                    leavePitch(tallies, enterTime, playedSeconds, rc.player(), rc.team(), t);
                 }
                 case MatchEvent.Goal g -> {
                     long scoringId = g.scoringTeam().id();
@@ -132,8 +143,24 @@ public class MatchProcessor {
         // ...and close out on-pitch time for everyone still on the pitch.
         for (Map.Entry<Long, Integer> entry : enterTime.entrySet()) {
             tallies.get(entry.getKey()).addSeconds(lastTime - entry.getValue());
+            playedSeconds.merge(entry.getKey(), lastTime - entry.getValue(), Integer::sum);
+        }
+        // ADR 0011: the match's per-player story, told after both loops so the
+        // tally already carries the post-match rating. playedSeconds holds
+        // everyone who was on the pitch and nobody else - a player either
+        // leaves through leavePitch or is closed out by the loop above, and
+        // both record here.
+        for (Map.Entry<Long, Integer> entry : playedSeconds.entrySet()) {
+            long id = entry.getKey();
+            observer.playerMatch(id,
+                frozenMinutes.getOrDefault(id, 0.0),
+                frozen.getOrDefault(id, 0.0),
+                matchResiduals.getOrDefault(id, 0.0),
+                entry.getValue() / 60.0,
+                tallies.get(id).rating());
         }
     }
+
 
     // A player the run has not seen before has no tally yet, so there is
     // nothing to freeze: the getOrDefault at both read sites supplies the
@@ -148,12 +175,15 @@ public class MatchProcessor {
             }
         }
 
-    private void leavePitch(Map<Long, PlayerTally> tallies, Map<Long, Integer> enterTime, Player p, Team team, int t) {
+    private void leavePitch(Map<Long, PlayerTally> tallies, Map<Long, Integer> enterTime,
+        Map<Long, Integer> playedSeconds, Player p, Team team, int t) {
         Integer start = enterTime.remove(p.id());
         if (start != null) {
             tallies.computeIfAbsent(p.id(), k -> new PlayerTally(p, team)).addSeconds(t - start);
+            playedSeconds.merge(p.id(), t - start, Integer::sum);
         }
     }
+
 
     private void closeSegment(Map<Long, Set<Player>> onPitch, long homeTeamId, RatingLookup ratings,
         Map<Long, PlayerTally> tallies, Map<Long, Double> matchResiduals, int from, int to) {

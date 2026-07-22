@@ -166,3 +166,15 @@ A player's current GoalImpact rating — an accumulated point total, not a
 per-match or per-90 average. Population totals are not conserved (per-player
 update factors let one side gain more than the other loses), so only rating
 *gaps* between players and lineups are meaningful, never absolute levels.
+
+**Impact index**:
+A player's Value placed on the population scale where the average player is 100
+(see [ADR 0011](docs/adr/0011-impact-index-and-the-career-chart.md)) — a linear
+rescale, and the only form in which a rating may be quoted as an absolute
+number. Value converges rather than accumulating, because a player's own rating
+raises the bar his side is expected to clear, so the index reads as a level and
+a veteran and a newcomer are directly comparable. Its centre and spread are
+pinned, dated constants measured once on one spine's population, never
+re-centred per season — a career must be read with a ruler that does not change
+length.
+_Avoid_: score, normalised rating

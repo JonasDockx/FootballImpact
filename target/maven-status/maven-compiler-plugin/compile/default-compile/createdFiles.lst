@@ -25,6 +25,7 @@ com\goalimpact\credit\ResidualSource.class
 com\goalimpact\engine\PredictionQuality.class
 com\goalimpact\engine\PlayerTally.class
 com\goalimpact\Main$Scope.class
+com\goalimpact\report\RatingHistoryWriter.class
 com\goalimpact\data\EventOrdering.class
 com\goalimpact\report\CsvWriter.class
 com\goalimpact\Main$ScoringWindow.class
@@ -33,6 +34,7 @@ com\goalimpact\credit\ResidualCreditRule.class
 com\goalimpact\engine\SmoothFadeSchedule.class
 com\goalimpact\model\Match$HomeSide.class
 com\goalimpact\data\TransfermarktLoader$Edition.class
+com\goalimpact\engine\MatchObserver.class
 com\goalimpact\Main$Spine.class
 com\goalimpact\engine\UpdateSchedule.class
 com\goalimpact\model\MatchEvent$Substitution.class

@@ -19,6 +19,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MatchProcessorTest {
@@ -465,4 +466,77 @@ class MatchProcessorTest {
         // pair did, whoever else the run happens to have on its books.
         assertEquals(0.5, rating(tallies, 3), 1e-9);
     }
+
+    // ADR 0011 stage 1: the history seam. It must hear every player who was on
+    // the pitch and nobody else, with minutes that match the tallies and the
+    // FROZEN pre-match rating - the last of which is what makes a career chart
+    // causal rather than a chart drawn with hindsight.
+    private record Heard(long id, double minutesBefore, double ratingBefore,
+        double residual, double minutesPlayed, double ratingAfter) {
+    }
+
+    @Test
+    void theObserverHearsEveryPlayerWhoWasOnThePitch() {
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+        Map<Long, Heard> heard = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            sub(10, TEAM_A, 2, 3),
+            goal(90, TEAM_A)
+        ), tallies, (id, mb, rb, res, mp, ra) -> assertNull(
+            heard.put(id, new Heard(id, mb, rb, res, mp, ra)), "player " + id + " heard twice"));
+
+        assertEquals(Set.of(1L, 2L, 3L, 12L, 13L), heard.keySet());
+
+        // Minutes agree with the tallies, including the man who left at 10'
+        // and the man who replaced him.
+        assertEquals(90.0, heard.get(1L).minutesPlayed(), 1e-9);
+        assertEquals(10.0, heard.get(2L).minutesPlayed(), 1e-9);
+        assertEquals(80.0, heard.get(3L).minutesPlayed(), 1e-9);
+
+        // Player 2 was off before the goal, so he earned no residual at all.
+        // He is heard anyway - being on the pitch is what qualifies you, not
+        // having something happen while you were there.
+        assertEquals(0.0, heard.get(2L).residual(), 1e-9);
+        assertEquals(1.0, heard.get(1L).residual(), 1e-9);
+        assertEquals(-1.0, heard.get(12L).residual(), 1e-9);
+
+        // Everyone debuted here and K = 1, so after is exactly the residual.
+        assertEquals(0.0, heard.get(1L).minutesBefore(), 1e-9);
+        assertEquals(0.0, heard.get(1L).ratingBefore(), 1e-9);
+        assertEquals(1.0, heard.get(1L).ratingAfter(), 1e-9);
+        assertEquals(rating(tallies, 12), heard.get(12L).ratingAfter(), 1e-12);
+    }
+
+    @Test
+    void whatTheObserverHearsBeforeIsWhatItHeardAfterLastTime() {
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+        List<Heard> heard = new ArrayList<>();
+        MatchObserver observer = (id, mb, rb, res, mp, ra) -> {
+            if (id == 1L) {
+                heard.add(new Heard(id, mb, rb, res, mp, ra));
+            }
+        };
+
+        List<MatchEvent> match = List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(90, TEAM_A));
+
+        processor.process(match, tallies, observer);
+        processor.process(match, tallies, observer);
+
+        assertEquals(2, heard.size());
+        // The rating period (ADR 0005): match 2 opens on exactly the value
+        // match 1 closed at, and its exposure is match 1's minutes. This is
+        // the property the whole career chart rests on - stitch the rows in
+        // date order and the line is continuous by construction.
+        assertEquals(heard.get(0).ratingAfter(), heard.get(1).ratingBefore(), 1e-12);
+        assertEquals(heard.get(0).minutesPlayed(), heard.get(1).minutesBefore(), 1e-12);
+    }
+
 }

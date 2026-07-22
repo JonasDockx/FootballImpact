@@ -541,6 +541,32 @@ as its own investigation before committing.
 still act as opponents; they simply cannot be plotted against age. The
 asymmetric-peak analysis this item exists for is now unblocked.
 
+**Grill done (2026-07-22), decisions in
+[ADR 0011](../docs/adr/0011-impact-index-and-the-career-chart.md).** Taken as one
+piece of work with item 8, because a rating cannot be plotted against time until
+it is a rate rather than a total. Three facts came out of probing the snapshot
+directly:
+
+- **DOBs are full dates**, not year placeholders — only 343 of 50,100 fall on
+  1 January. `players` has 50,149 rows and 50,100 carry one.
+- **Ages behave** — 2.86M lineup rows spread 14 to 45, peaking at 24–25.
+- **The relevance filter almost closes the coverage gap by itself.** 69,975 of
+  114,893 players in lineups have no `players` row at all, but of the 17,030
+  players past 1,000 minutes by the vendor's own count, **15** lack a DOB. The
+  missing-DOB set and the too-few-minutes set are nearly the same people.
+
+The grill also **narrowed what this item delivers**. Goalimpact's chart carries
+two lines: a thick one (the rating at that time, using no future games — which
+is exactly what our replay produces) and a thin dashed one (Peak Goalimpact,
+projected from the population ageing curve). This item now lands the thick line
+and the date-of-birth loading. The ageing curve itself — with the
+selection-corrected within-player comparison it needs — becomes item 21.
+
+An early proposal to plot **residuals per 90 taken before the update factor**
+was put up and withdrawn: it measures surprise relative to expectation, so a
+correctly rated player scores near zero however good he is. ADR 0011 records it
+under considered options.
+
 ## 3. Time-integrated (clean-sheet-aware) residual source — DONE
 
 **Why:** Rule C ships goals-only, so 0-0s and low-event matches carry no signal
@@ -889,6 +915,115 @@ real Goalimpact maps to a population-anchored scale with known reference
 points: world class >160 (~200 players worldwide), Bundesliga average 135,
 2. Bundesliga average 116–118, all-time top (Pogba, 2017) 200. Low priority —
 presentation only, after the model itself stabilizes.
+
+**Grill done (2026-07-22), decisions in
+[ADR 0011](../docs/adr/0011-impact-index-and-the-career-chart.md).** Promoted
+from low priority and merged with item 2: drawing a career chart forces the
+scale question rather than leaving it theoretical, because `Value` is a total
+and a total cannot be plotted against time. The shipped shape is the **Impact
+index** — Value per 90 minutes of exposure, on a frozen scale with mean 100 and
+15 points per standard deviation (measured 2026-07-22: mean 0.0087, sd 0.2395,
+over 25,334 players past 1,000 minutes).
+
+"Presentation only" turned out to be half right. The *stretch* is presentation;
+the *division by exposure* is not, and it is the whole reason a rating can be
+read as a level at all.
+
+Four of Goalimpact's published landmarks are reproduced without being fitted to:
+average 100, top 1% at 140 ("top-five European league"), ~top 0.4% at 150
+("world class"), single best at 212 against their all-time top of ~200. A spread
+of 20 points per standard deviation was tried first and puts the best player at
+250. The Bundesliga-135 and 2.Bundesliga-116 reference points above are **not**
+checkable yet — they need item 9's cross-division calibration to be trustworthy,
+since a league whose players mostly play each other floats at a false average.
+
+**Corrected the same day (2026-07-22) — the paragraph above is wrong, and is
+kept for the record.** It divides Value by exposure. The first rating history
+ever written refuted that on first contact: Value **converges** rather than
+accumulating, so dividing it by ever-growing career minutes decays as
+~1/exposure. Under the numbers above **Messi scores 102, van Dijk 96 and Müller
+105**, while a reserve goalkeeper with 1,044 minutes scores 212. The evidence is
+a fixed 234-player cohort followed through its own exposure — mean Value 11.54 →
+13.54 → 15.38 → 16.04 across 5,000 → 10,000 → 20,000 → 30,000 minutes, a level
+being approached. The earlier "flat rate at every career length" reading binned
+*different players* by career length and so measured survivorship.
+
+The shipped index is therefore **Value rescaled directly**: mean **1.8374**,
+sd **7.1729** over the 25,334 eligible players, **20 index points per standard
+deviation**. Chosen against Goalimpact's two countable landmarks rather than
+fitted to them — 150 of our players clear 160 against their ~200 worldwide, and
+our best is 196 against their all-time ~200. The top 20 reads Luis Díaz, Alaba,
+Müller, Inácio, Neuer, Neres, Undav, Carvajal, Jesus, Foden, Hummels, Otamendi,
+which is the eyeball gate ADR 0011 wrote for itself, passed on the second
+attempt and failed on the first.
+
+## 21. The ageing curve and Peak Impact (Goalimpact's second line)
+
+**Why:** A Goalimpact chart carries two lines. Item 2 lands the thick one — the
+Impact index at that moment, using no future games. This item is the thin dashed
+one: **Peak Impact**, a player's projected ceiling, obtained by reading his
+current index against the population's ageing curve. It is what turns the chart
+from a record into a forecast, and it is the half of item 2's original ambition
+(peak at ~26, an asymmetric curve rising faster than it declines) that ADR 0011
+deliberately deferred.
+
+**Data availability:** unblocked the moment ADR 0011's results file exists —
+per-match rows plus dates of birth is exactly the input. Nothing further is
+needed from the vendor.
+
+**Design already grilled (2026-07-22), decisions not yet ADR'd.** Three
+conclusions carried over from the item 2 grill and worth not re-deriving:
+
+- **Build it from each player against his own younger self**, not from averaging
+  different players at each age. The players still on a pitch at 34 are the ones
+  good enough to have survived; everyone who declined retired, so a plain
+  average per age answers "who gets selected" rather than "what happens to a
+  person as he ages". Chain year-on-year steps instead, weighting each step by
+  the smaller of the two years' minutes. Print the plain per-age averages
+  alongside: the gap between the two lines *is* the selection effect, and
+  showing it beats hiding it.
+- **A year is birthday to birthday.** This spine's 65 competitions do not share
+  a calendar — Scandinavian, Russian and Asian leagues are not on Europe's
+  August-to-May season — so "a season" has no single meaning here while a
+  birthday always does. Require ~900 minutes in both years for a step to count.
+- **Left-censoring poisons the young end, and the 1,000-minute filter does not
+  fix it.** The model rates an unseen player 0, which means *exactly average*
+  rather than *unknown*, so a good newcomer banks an unpriced bonus until
+  expectation catches up. That bonus lands at 18–20 for a genuine debutant and
+  at 28–30 for a career already underway when the data starts in July 2013 — a
+  fake peak in the middle of the curve. ADR 0011 lands an off-by-default knob
+  that drops each player's first ~2,000 minutes, so one run can tell whether a
+  peak at 19 is football or arithmetic. Glossary *Left-censored career* names
+  the condition.
+
+**Prerequisite:** item 2 / ADR 0011 stage 2 (the results file).
+
+## 22. Career chart viewer: every player searchable
+
+**Why:** The first viewer (2026-07-22, ADR 0011) is a self-contained HTML page
+with the data baked into it, which caps it at **1,302 of 94,807 players** —
+those past 20,000 career minutes, plus anyone past 3,000 minutes with an index
+of 150 or better. That was the right shape for answering "does the line look
+like football", and it is the wrong shape for use: the player you want to look
+up is usually the one you cannot.
+
+The constraint is that the page carries its own data. 1,302 careers sampled
+monthly is 0.75 MB; all 94,807 would be tens of megabytes, and most of them are
+cup opposition with a few hundred minutes and no line worth drawing.
+
+**Options, none grilled yet:** (1) raise the embedded set to everyone past the
+1,000-minute eligibility threshold — 25,334 players, still a big download but
+the honest population, possibly with coarser sampling for long careers;
+(2) serve the data instead of embedding it, which means the viewer stops being
+a single file; (3) keep the page small and generate it per player on demand
+from the results file.
+
+**Prerequisite:** none — the results file already holds every row. This is a
+delivery problem, not a data one.
+
+**Also worth folding in when it happens:** the fixed y-axis clamps at 70 and
+215, so a career that dips below 70 flattens against the floor without saying
+so; and Goalimpact's second line (item 21) will need somewhere to live.
 
 ## 9. Cross-division calibration (rating islands within one gender pool)
 
