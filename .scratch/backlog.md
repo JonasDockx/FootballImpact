@@ -540,6 +540,16 @@ GUI is built the sidecar's shape is already proven. A released match carries a
 safe. Decisions in [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md)'s
 2026-07-23 amendment.
 
+**Split again by the item 26 stage-4b grill (2026-07-23) into 4b-1 and 4b-2.**
+4b-1 is a *read-only* browser of the three-rung worklist; 4b-2 is the editor and
+the first code that ever writes the sidecar. The module split this item flagged
+above ("this is also when the three-Maven-module split earns its keep") was
+re-opened by that grill and **re-declined** — one module stands, JavaFX joins the
+existing pom, GUI code lives in `com.goalimpact.gui`. The ranked player picker,
+roster prefill and live validation described above all belong to **4b-2**, and are
+where the tested JavaFX-free view-model layer earns its keep. Full decisions and
+gate under item **26**, *Stage 4b split, and Stage 4b-1 plan*.
+
 ## 2. Store each player's date of birth
 
 **Why:** Enables age-aware analysis — comparing a player against peers in the
@@ -1476,6 +1486,166 @@ and it was implemented directly.
 
 **Still ahead (item 26):** stage 4b — the JavaFX repair GUI (item 17), which
 consumes this three-rung worklist. Grill its shape before building.
+
+### Stage 4b split, and Stage 4b-1 plan (grilled 2026-07-23)
+
+Stage 4b is itself two landings, split by the grill on the same inert-first
+rhythm every item-26 stage used: **4b-1**, a *read-only* worklist browser, lands
+first; **4b-2**, the editor plus the first code that ever **writes** the sidecar,
+lands after. The split exists because 4b carries two genuinely independent new
+risks — JavaFX is an unproven toolchain here, and the sidecar is a precious file
+outside the repo that a vendor refresh cannot restore — and bundling them means a
+failure names neither. 4b-1 proves the toolchain while the write risk is
+structurally zero: it never opens the sidecar.
+
+**Seven grill decisions, recommended option taken each time:**
+
+1. **One Maven module still.** The module question item 17 flagged (JavaFX as the
+   dependency that might finally justify the 3-way split ADR 0009 declined) was
+   re-opened here and **re-declined** — the split still enforces a rule nobody is
+   breaking, and inventing a reactor build in the same week as a first JavaFX
+   toolchain is two build problems where the work needs zero. JavaFX deps join the
+   existing pom; GUI code lives in a new `com.goalimpact.gui` package. ADR 0009
+   amended so the record cannot drift.
+2. **4b-1 is read-only.** Browse the worklist; edit nothing, write nothing.
+3. **The seam is `data/WorklistReader`** — all SQL, returns plain records; `gui`
+   holds no SQL and `data` no JavaFX. It belongs in `data` by CLAUDE.md's own rule
+   (the only package that may know what a database is) and sits beside
+   `TransfermarktLoader`. A separate tested view-model layer was **declined for
+   now**: a read-only list has no formatting judgement worth testing, since SQL
+   already knows the three ranking signals. It earns its keep at 4b-2, where
+   item 17's ranked picker (rank 0 = spell at the club near the date / rank 1 =
+   ever linked / rank 2 = everyone) is real, testable judgement.
+4. **Find a player by typing against the worklist's own names**, not the vendor
+   `players` table. The three tables already carry `player_name`, so this needs no
+   join, and it can never offer a player there is nothing to do for. The known
+   cost: an empty result cannot distinguish "career is complete" from "you
+   misspelled it", so the screen says exactly that rather than implying the former.
+   Searching vendor `players` instead only half-fixes it — ADR 0009 records 69,943
+   players who appear in lineups with **no row in `players` at all** — and doing it
+   properly *is* 4b-2's picker, so building half of it now is wasted work.
+5. **Three stacked sections, not one table with a tier column** — the same
+   argument stage 4a took when it chose two tables over one: a row's meaning
+   differs per rung, and each rung has its own ranking signal (`started`,
+   `minutes`, `nearby_matches`), so merging forces blank-when-not-applicable
+   columns and collapses three meanings into one column — the "confidence score"
+   mush glossary *Worklist tier* explicitly warns against. Date descending within
+   each section. The `run_id` and the results file's timestamp are shown, small,
+   so a stale worklist is always visible as such. (A master–detail layout is
+   4b-2's shape, once clicking a match has somewhere to go.)
+6. **Launch via `javafx-maven-plugin`** (`mvn javafx:run` → `gui.GuiMain`),
+   JavaFX pinned at **21** to match `maven.compiler.release`. Preferred over bare
+   deps with a `<classifier>win</classifier>`, which would bake this machine's
+   platform into a so-far platform-neutral pom and needs the fragile
+   launcher-class-that-is-not-the-Application trick. **Swing is the named
+   fallback** — zero dependencies, already in the JDK — if the JavaFX toolchain
+   costs more than about an hour; JavaFX is preferred because 4b-2's sortable
+   tables, type-ahead picker and live red-field validation are first-class there
+   and hand-rolled misery in Swing, and switching between the landings would mean
+   typing the shell twice.
+7. **Gate (four checks).** (i) `mvn javafx:run` opens the window. (ii) A new
+   `WorklistReaderTest` reproduces, for **Jan Vertonghen (player 43250)**,
+   **1 certain / 47 appeared / 12 maybe**, plus one row whose joined match facts
+   match `games`, plus a search that finds him and a nonsense search that returns
+   empty rather than throwing — the counts **recorded from SQL before any reader
+   code exists**, the same predict-then-build discipline that stopped stage 4a
+   grading its own homework. Skips when the database files are absent, like
+   `MissingMatchTest` and `SidecarOverrideTest`. (iii) The designated replay is
+   untouched — 80,472 / 0.01532 / **0.6502** / held 15,242 over 725 / leaderboard
+   unchanged; near-automatic since the GUI is a separate program that writes
+   nothing, but it is what "inert" means here and it catches the one real
+   regression available to this stage, a bad dependency breaking the build.
+   (iv) Vertonghen eyeballed on screen — the check no test provides.
+
+**Explicit non-goals for 4b-1**, so scope cannot creep: no editing, no sidecar
+write (the file is not even opened), no events timeline, no ranked picker, no
+roster prefill, no validation.
+
+**Shape the reader returns** (nested records, so the six match-fact columns are
+not typed out three times): `MatchFacts(gameId, date, competition, round,
+homeName, awayName)` — `games` carries `home_club_name`/`away_club_name`
+directly, so a row needs no club-table join — then `CertainRow(match, clubId,
+started, reason)`, `AppearedRow(match, clubId, minutes)`, `MaybeRow(match,
+clubId, nearbyMatches)`, gathered in `Worklist(playerId, playerName, certain,
+appeared, maybe)`.
+
+**Consequence to surface in the UI:** the GUI reads the three worklist tables out
+of the **disposable** results DB, so it depends on a designated run having
+happened. Missing file or empty tables must say "no worklist found — run
+`mvn compile exec:java` first", never a stack trace.
+
+**Deferred idea, worth four lines of SQL once the reader exists:** a "damage
+leaderboard" — the N careers with the most missing matches — as an entry point
+for "where should I spend my evening". A different tool from the per-player view
+items 25 and 17 both asked for, hence not 4b-1.
+
+The user hand-types the Java for this stage (the stage-4a waiver did not carry
+over); prose — backlog, ADR, SQL — is written directly as always.
+
+### Stage 4b-1 outcome (2026-07-23) — DONE, gate held
+
+The read-only worklist browser, built to the plan above. **The first JavaFX in
+the project, and the first screen of any kind.** Hand-typed by the user
+throughout (the 4a waiver did not carry over), in seven steps, red-before-green
+at step 4.
+
+**Toolchain.** One dependency (`org.openjfx:javafx-controls:21.0.2` — it pulls
+`javafx-graphics` and `javafx-base` itself) plus `javafx-maven-plugin:0.0.8`
+configured with `com.goalimpact.gui.GuiMain`, beside `exec-maven-plugin` as the
+project's second "how you run something" plugin. **The platform-neutral choice
+paid off immediately:** `dependency:tree` shows Maven resolving the `:win:`
+native jars for `controls`, `graphics` and `base` on its own, with no
+`<classifier>` anywhere in the pom. OpenJFX's published poms emit a cosmetic
+`6 problems ... effective model` warning that resolution is unaffected by.
+JavaFX 21 pinned to match `maven.compiler.release`.
+
+**The seam held exactly as designed.** `data/WorklistReader` (AutoCloseable, like
+`TransfermarktLoader`) opens the results DB read-only and `ATTACH`es the vendor
+snapshot `(READ_ONLY)`, exposing `searchPlayers`, `worklistFor` and `runId`. The
+`gui` package contains **no SQL** and `data` **no JavaFX**. Six new value types
+in `data` — `MatchFacts` plus `CertainRow` / `AppearedRow` / `MaybeRow` (each
+pairing the rung's own signal with the joined match facts), `Worklist`, and
+`WorklistPlayer` for the search hit. Two classes in `gui`: `GuiMain` (paths,
+guard messages, lifecycle) and `WorklistPane` (the widgets, ~200 lines, no
+judgement).
+
+**Three implementation notes worth keeping.** (i) Every join casts —
+`ON g.game_id = CAST(h.game_id AS VARCHAR)` — because the worklist tables store
+`game_id` as BIGINT while `games.game_id` is VARCHAR; forgetting it returns *zero
+rows silently* rather than erroring, so it is the first suspect for an empty
+screen. (ii) The search groups with `min(player_name)`, not `any_value`, because
+1,075 player ids carry more than one name (ADR 0009) and an arbitrary pick would
+make the list flicker between runs. (iii) `GuiMain` calls `runId()` at startup
+*because* it touches all three worklist tables — so a results file that has never
+had a designated run fails there with a plain sentence rather than on the user's
+first search. Records force per-column lambdas instead of JavaFX's
+`PropertyValueFactory` (records expose `date()`, not `getDate()`), which is why
+`addColumn` takes its `TableView` first: it lets the row type infer.
+
+**Gate met — all four checks.**
+
+| Check | Result |
+|---|---|
+| window opens (`mvn javafx:run`) | yes, first launch, no fallback to Swing needed |
+| `WorklistReaderTest` vs the SQL prediction | **122 tests green** (117 + 5); Vertonghen 43250 → **1 certain / 47 appeared / 12 maybe**, search hit 60, the certain row's joined `MatchFacts` exact, both lower rungs newest-first |
+| designated replay untouched | **80,472** replays, 717 / 7,761 / 5 / 3, held **15,242 / 725**, appeared 137,316 / 5,518, maybe 9,550 / 435, partition `7761 = 5518 + 2243`, HOME **79,796**, base rate `223811 / 14611020 = 0.01532`, champion log-loss **0.6502**, ship gate 0.6502 < 0.6551 |
+| eyeball | Vertonghen's three rungs read as a real career — Benfica 2021 (`XI is not 11`), Spurs 2012/13 (the pre-team-sheet season, 90 minutes a match), Anderlecht 2023 in the Conference League |
+
+The counts asserted in the test were **measured by SQL and written into the
+backlog before `WorklistReader` existed**, so the reader could not grade its own
+homework — the same discipline as stage 4a.
+
+**Known wart, deliberately left:** the two snapshot/results path constants are now
+duplicated between `Main` and `GuiMain`. A shared paths holder is a sensible
+tidy-up but is scope creep here; revisit at 4b-2, when the sidecar path becomes a
+third one that both programs need.
+
+**Still ahead (item 26):** stage **4b-2** — the editor: materialise a Held match
+into the sidecar pre-filled from the vendor, edit it, save as `draft`, `release`
+it. That is the first code that ever *writes* the sidecar, and it brings item
+17's ranked player picker, roster prefill and live validation, plus the tested
+JavaFX-free view-model layer 4b-1 deliberately declined to build empty. Grill it
+before building.
 
 ## 27. Weekly automated refresh of the spine database
 

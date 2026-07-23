@@ -5,3 +5,4 @@ CLAUDE.md
 *.csv
 .~lock*
 INGESTION-HANDOVER.md
+target/

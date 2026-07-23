@@ -303,6 +303,21 @@ the engine's classpath today and no engine class imports it. The split's real
 payoff is JavaFX, not `duckdb_jdbc`, and moving classes between modules later
 is mechanical.
 
+**Amended 2026-07-23 (item 26, stage 4b): JavaFX arrived, and the module stays
+one.** This decision named JavaFX as the split's only real payoff, and item 17
+carried that forward as "this is when the three-module split earns its keep" — so
+the question was deliberately re-opened when the repair GUI was grilled, and
+**re-declined**. The reasoning above did not weaken: no engine class imports
+JavaFX either, so the reactor would still enforce a rule nobody is breaking. What
+the grill added is a cost the original decision could only guess at — JavaFX is
+not a plain jar (platform-specific natives, its own launch and threading rules),
+so landing it *and* a first reactor build together produces two build problems in
+a stage whose actual work needs zero. JavaFX joins the existing pom via
+`javafx-maven-plugin`, pinned at **21** to match `maven.compiler.release`; GUI
+code lives in a new `com.goalimpact.gui` package, which holds no SQL exactly as
+`data` holds no JavaFX. The split remains mechanical whenever `mvn test` gets
+slow or someone actually imports JavaFX into the engine.
+
 ## Considered options
 
 - **Pool StatsBomb and Transfermarkt (rejected).** Requires cross-provider
@@ -351,7 +366,9 @@ is mechanical.
   matches where both sides have league football was also declined: it discards
   70% of cup ties to dodge a bias nobody has measured yet.
 - **Three Maven modules now (rejected).** Enforces a rule that isn't being
-  broken, and substitutes a build-tooling problem for a domain one.
+  broken, and substitutes a build-tooling problem for a domain one. *Re-opened
+  and re-rejected 2026-07-23 when JavaFX actually landed (item 26, stage 4b) —
+  see the amendment under "One Maven module".*
 - **A `rating_eligible` flag per competition (deferred).** Designed to exclude
   friendlies and youth football. This snapshot contains neither — all 65
   competitions are competitive senior football. Build it when something needs

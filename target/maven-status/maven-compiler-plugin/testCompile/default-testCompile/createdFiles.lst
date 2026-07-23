@@ -4,6 +4,7 @@ com\goalimpact\data\EventOrderingTest.class
 com\goalimpact\engine\MatchProcessorTest$3.class
 com\goalimpact\data\DataLoaderTest.class
 com\goalimpact\data\TransfermarktLoaderTest.class
+com\goalimpact\data\MissingMatchTest.class
 com\goalimpact\engine\MatchProcessorTest$2.class
 com\goalimpact\credit\ResidualCreditRuleTest.class
 com\goalimpact\data\SidecarOverrideTest.class

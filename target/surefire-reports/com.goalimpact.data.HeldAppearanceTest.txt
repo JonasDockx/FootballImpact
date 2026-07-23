@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: com.goalimpact.data.HeldAppearanceTest
 -------------------------------------------------------------------------------
-Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.498 s -- in com.goalimpact.data.HeldAppearanceTest
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.496 s -- in com.goalimpact.data.HeldAppearanceTest

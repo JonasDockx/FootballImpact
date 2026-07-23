@@ -1,4 +1,5 @@
 com\goalimpact\model\MatchEvent$Goal.class
+com\goalimpact\data\MaybePlayer.class
 com\goalimpact\data\DataLoader$1.class
 com\goalimpact\data\TransfermarktLoader$EventRow.class
 com\goalimpact\data\TransfermarktLoader.class
@@ -21,6 +22,7 @@ com\goalimpact\engine\MatchObserver.class
 com\goalimpact\model\MatchEvent$Substitution.class
 com\goalimpact\model\Match.class
 com\goalimpact\credit\RatingLookup.class
+com\goalimpact\report\MissingMatchWriter.class
 com\goalimpact\credit\Lineup.class
 com\goalimpact\model\Player.class
 com\goalimpact\model\MatchEvent$RedCard.class
@@ -32,6 +34,7 @@ com\goalimpact\data\TransfermarktLoader$LineupRow.class
 com\goalimpact\model\Team.class
 com\goalimpact\data\TransfermarktLoader$NeutralRound.class
 com\goalimpact\credit\FlatCreditRule.class
+com\goalimpact\data\TransfermarktLoader$NoLineupMatch.class
 com\goalimpact\credit\LinkFunction.class
 com\goalimpact\credit\LogisticLinkFunction.class
 com\goalimpact\Main.class
@@ -39,6 +42,7 @@ com\goalimpact\data\DataLoader.class
 com\goalimpact\report\RatingHistoryWriter.class
 com\goalimpact\report\CsvWriter.class
 com\goalimpact\Main$ScoringWindow.class
+com\goalimpact\data\AppearedPlayer.class
 com\goalimpact\Main$Spine.class
 com\goalimpact\data\HeldAppearance.class
 com\goalimpact\engine\UpdateSchedule.class
