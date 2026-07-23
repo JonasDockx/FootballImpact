@@ -5,12 +5,14 @@ import com.goalimpact.model.MatchEvent;
 import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -94,6 +96,15 @@ public class TransfermarktLoader implements AutoCloseable {
     private final Connection connection;
     private long droppedEvents = 0; // events the source could not place
 
+    // The sidecar (ADR 0009, item 26). Attached read-only beside the vendor
+    // snapshot when the file exists; absent, everything below is inert and
+    // the loader is exactly the vendor path. A RELEASED sidecar match wins
+    // over the vendor's copy of that game id outright - a whole-match
+    // replacement - while a draft is invisible and rates nowhere.
+    private final boolean hasSidecar;
+    private final Set<Long> released;       // game ids the sidecar has released
+    private boolean sidecarStaged = false;  // stageSidecar runs once, not per slice
+
     // Batched vendor rows, keyed by game id and drained as loadEvents
     // consumes them. Staging ACCUMULATES across loadMatches calls, so Main
     // can load every slice and only then replay; it drains as replays are
@@ -135,9 +146,38 @@ public class TransfermarktLoader implements AutoCloseable {
     }
 
     public TransfermarktLoader(Path snapshot) throws SQLException {
+        this(snapshot, null);
+    }
+
+    // The sidecar is optional and read-only. A null or absent file leaves
+    // hasSidecar false, so released is empty and every sidecar branch below
+    // is skipped - the byte-identical inert stage (item 26, stage 1).
+    public TransfermarktLoader(Path snapshot, Path sidecar) throws SQLException {
         Properties readOnly = new Properties();
         readOnly.setProperty("duckdb.read_only", "true");
         this.connection = DriverManager.getConnection("jdbc:duckdb:" + snapshot, readOnly);
+        this.hasSidecar = sidecar != null && Files.exists(sidecar);
+        if (hasSidecar) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("ATTACH '"
+                    + sidecar.toString().replace('\\', '/') + "' AS sidecar (READ_ONLY)");
+            }
+        }
+        this.released = hasSidecar ? loadReleasedIds() : Set.of();
+    }
+
+    // The released game ids, read once at construction. Draft rows are
+    // excluded here, so a draft never enters the override and rates nowhere.
+    private Set<Long> loadReleasedIds() throws SQLException {
+        Set<Long> ids = new HashSet<>();
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(
+                "SELECT game_id FROM sidecar.matches WHERE status = 'released'")) {
+            while (rows.next()) {
+                ids.add(rows.getLong("game_id"));
+            }
+        }
+        return ids;
     }
 
     @Override
@@ -169,32 +209,53 @@ public class TransfermarktLoader implements AutoCloseable {
             "WHERE competition_id = ? AND season = ?", competitionId, season)) {
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    // The fixture describes the ROW, never the arguments.
-                    // Under loadMatches() they are null, and the home-side
-                    // rule reads the competition id, the season and the
-                    // round to decide who, if anyone, is at home.
-                    Fixture fixture = new Fixture(
-                        rows.getString("competition_id"), rows.getString("season"),
-                        rows.getString("competition_type"), rows.getString("round"),
-                        rows.getLong("home_club_id"), rows.getLong("away_club_id"));
+                    // The fixture describes the ROW, never the arguments -
+                    // under loadMatches() they are null and the home-side
+                    // rule reads the row's own competition id, season, round.
                     long matchId = Long.parseLong(rows.getString("game_id"));
-                    if ("domestic_league".equals(fixture.competitionType())) {
-                        leagueMatches.add(matchId);
+                    if (released.contains(matchId)) {
+                        continue;   // the sidecar's released copy wins; skip the vendor's
                     }
-                    matches.add(new Match(
-                        matchId,
-                        rows.getDate("date").toLocalDate(),
-                        new Team(rows.getLong("home_club_id"), rows.getString("home_club_name")),
-                        new Team(rows.getLong("away_club_id"), rows.getString("away_club_name")),
-                        rows.getInt("home_club_goals"),
-                        rows.getInt("away_club_goals"),
-                        classifyHomeSide(fixture)));
+                    matches.add(buildMatch(rows, matchId));
+                }
+            }
+        }
+        if (hasSidecar) {
+            try (PreparedStatement statement = prepare(SIDECAR_MATCH_SQL,
+                "AND competition_id = ? AND season = ?", competitionId, season)) {
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) {
+                        matches.add(buildMatch(rows, rows.getLong("game_id")));
+                    }
                 }
             }
         }
         stage(competitionId, season);
         return matches;
     }
+
+    // The Fixture and the Match from one games/sidecar.matches row. Shared
+    // so the vendor row and the sidecar row are classified identically; the
+    // only difference between the two callers is how game_id is read (the
+    // vendor stores it VARCHAR, the sidecar BIGINT).
+    private Match buildMatch(ResultSet rows, long matchId) throws SQLException {
+        Fixture fixture = new Fixture(
+            rows.getString("competition_id"), rows.getString("season"),
+            rows.getString("competition_type"), rows.getString("round"),
+            rows.getLong("home_club_id"), rows.getLong("away_club_id"));
+        if ("domestic_league".equals(fixture.competitionType())) {
+            leagueMatches.add(matchId);
+        }
+        return new Match(
+            matchId,
+            rows.getDate("date").toLocalDate(),
+            new Team(rows.getLong("home_club_id"), rows.getString("home_club_name")),
+            new Team(rows.getLong("away_club_id"), rows.getString("away_club_name")),
+            rows.getInt("home_club_goals"),
+            rows.getInt("away_club_goals"),
+            classifyHomeSide(fixture));
+    }
+
 
     // One edition, or all of them. The filter is spliced rather than bound
     // as a nullable parameter, because a NULL parameter has to carry its
@@ -224,7 +285,11 @@ public class TransfermarktLoader implements AutoCloseable {
             "WHERE g.competition_id = ? AND g.season = ?", competitionId, season)) {
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    stagedLineups.computeIfAbsent(rows.getLong("gid"), key -> new ArrayList<>())
+                    long gid = rows.getLong("gid");
+                    if (released.contains(gid)) {
+                        continue;   // this match's lineup comes from the sidecar
+                    }
+                    stagedLineups.computeIfAbsent(gid, key -> new ArrayList<>())
                         .add(new LineupRow(
                             rows.getLong("club_id"),
                             rows.getLong("player_id"),
@@ -238,7 +303,11 @@ public class TransfermarktLoader implements AutoCloseable {
             "WHERE g.competition_id = ? AND g.season = ?", competitionId, season)) {
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    stagedLength.put(rows.getLong("gid"), rows.getInt("longest"));
+                    long gid = rows.getLong("gid");
+                    if (released.contains(gid)) {
+                        continue;
+                    }
+                    stagedLength.put(gid, rows.getInt("longest"));
                 }
             }
         }
@@ -247,6 +316,9 @@ public class TransfermarktLoader implements AutoCloseable {
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     long gid = rows.getLong("gid");
+                    if (released.contains(gid)) {
+                        continue;
+                    }
                     int minute = rows.getInt("minute");
                     // The latest minute the SOURCE stamps on this match,
                     // recorded before any row is judged or discarded.
@@ -264,8 +336,89 @@ public class TransfermarktLoader implements AutoCloseable {
                 }
             }
         }
+        if (hasSidecar && !sidecarStaged) {
+            stageSidecar();
+            sidecarStaged = true;
+        }
     }
 
+        // The sidecar overlay: the released matches' rows, keyed by game id into
+    // the same staging maps the vendor filled. Predicate-free and run once
+    // (sidecarStaged), because releases are few and independent of any slice.
+    // Draft rows are skipped in Java via released, mirroring loadReleasedIds.
+    private void stageSidecar() throws SQLException {
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(SIDECAR_LINEUP_SQL)) {
+            while (rows.next()) {
+                long gid = rows.getLong("gid");
+                if (!released.contains(gid)) {
+                    continue;   // a draft's rows never rate
+                }
+                stagedLineups.computeIfAbsent(gid, key -> new ArrayList<>())
+                    .add(new LineupRow(
+                        rows.getLong("club_id"),
+                        rows.getLong("player_id"),
+                        rows.getString("player_name"),
+                        "starting_lineup".equals(rows.getString("type")),
+                        "Goalkeeper".equals(rows.getString("position"))));
+            }
+        }
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(SIDECAR_EVENT_SQL)) {
+            while (rows.next()) {
+                long gid = rows.getLong("gid");
+                if (!released.contains(gid)) {
+                    continue;
+                }
+                int minute = rows.getInt("minute");
+                stagedLastMinute.merge(gid, minute, Math::max);
+                String description = rows.getString("description");
+                stagedEvents.computeIfAbsent(gid, key -> new ArrayList<>())
+                    .add(new EventRow(
+                        minute,
+                        rows.getString("type"),
+                        rows.getLong("club_id"),
+                        rows.getLong("player_id"),
+                        rows.getLong("player_in_id"),
+                        isOwnGoal(description),
+                        isSendingOff(description)));
+            }
+        }
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(SIDECAR_LENGTH_SQL)) {
+            while (rows.next()) {
+                long gid = rows.getLong("gid");
+                if (!released.contains(gid)) {
+                    continue;
+                }
+                stagedLength.put(gid, rows.getInt("longest"));
+            }
+        }
+    }
+
+    // The sidecar's rows go through the very same Java judgement as the
+    // vendor's - the same LineupRow/EventRow mapping, the same clock and
+    // ordering in loadEvents - so a released match is not a special replay,
+    // just a different source for the same shape. The event filter matches
+    // the vendor's: no shootout rows, no minute <= 0.
+    private static final String SIDECAR_LINEUP_SQL = """
+        SELECT game_id AS gid, club_id, player_id, player_name, position, type
+        FROM sidecar.game_lineups
+        ORDER BY gid, club_id, player_id
+        """;
+
+    private static final String SIDECAR_EVENT_SQL = """
+        SELECT game_id AS gid, minute, type, club_id, player_id, player_in_id, description
+        FROM sidecar.game_events
+        WHERE minute > 0 AND type <> 'Shootout'
+        ORDER BY gid, minute
+        """;
+
+    private static final String SIDECAR_LENGTH_SQL = """
+        SELECT game_id AS gid, max(minutes_played) AS longest
+        FROM sidecar.appearances
+        GROUP BY gid
+        """;
 
     // Both lineup types: the starters form the XI, and every row supplies a
     // name, which game_events never carries - so a substitute who comes on
@@ -296,6 +449,19 @@ public class TransfermarktLoader implements AutoCloseable {
         JOIN games g ON CAST(g.game_id AS BIGINT) = a.game_id
         %s
         GROUP BY gid
+        """;
+
+    // The sidecar's released matches (item 26). Same columns loadMatches
+    // reads from games, so buildMatch consumes either. game_id is BIGINT
+    // here, so it needs no cast. The %s takes the same optional slice
+    // predicate the vendor query uses, via prepare().
+    private static final String SIDECAR_MATCH_SQL = """
+        SELECT game_id, date, competition_id, season, round, competition_type,
+               home_club_id, home_club_name, away_club_id, away_club_name,
+               home_club_goals, away_club_goals
+        FROM sidecar.matches
+        WHERE status = 'released' %s
+        ORDER BY date, game_id
         """;
 
     // One match's events on the playing clock (ADR 0009): nominal, so the

@@ -148,6 +148,12 @@ public class Main {
     private static final Path SNAPSHOT = Path.of(
         "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb");
 
+    // ADR 0009's second file (item 26). Absent today, so the loader attaches
+    // nothing and the run is byte-identical; stage 3 creates it with the
+    // first real repair, and this same wiring picks it up unchanged.
+    private static final Path SIDECAR = Path.of(
+        "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-sidecar.duckdb");
+
     // ADR 0009's third file, ADR 0011's first use of it. Kept beside the
     // snapshot and the sidecar so one DuckDB connection can attach all three,
     // and out of the repo because it is rebuilt, not versioned.
@@ -381,7 +387,7 @@ public class Main {
     private static void loadTransfermarkt(List<Match> matches, List<List<MatchEvent>> replays,
         Set<Long> leagueMatches) throws Exception {
 
-        try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT)) {
+        try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT, SIDECAR)) {
             List<Match> all = new ArrayList<>();
             switch (SCOPE) {
                 case ALL -> {

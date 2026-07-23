@@ -216,6 +216,46 @@ costs no ETL and no second database engine. Keeping repairs beside vendor rows
 would guarantee eventually losing hand-made work to a refresh; keeping derived
 output beside repairs would put it one rebuild bug away from the same loss.
 
+**Amended 2026-07-23 (item 26): the sidecar's working shape, settled by grill.**
+This ADR promised a sidecar but left its mechanics open; realising it — so that
+incomplete matches can be *ingested and inspected without ever touching a
+rating* — pinned five decisions:
+
+- **A match has three states, and rates in two of them.** *Clean* (passes the
+  usability gate → rates on vendor data), *Released* (present in the sidecar and
+  approved → rates on the sidecar's copy), *Held* (fails the gate and is not in
+  the sidecar → ingested and visible, but moves no rating). The invariant the
+  user asked for: **a rating moves only on a match that is clean-from-vendor or
+  released-by-hand** — nothing half-broken is ever trusted. **The gate is never
+  loosened to auto-admit imperfect data** (grilled 2026-07-23): the 717 "XI is
+  not 11" matches spread evenly across 1–10 starters rather than clustering at
+  10, so there are no near-complete near-misses a looser rule would rescue — it
+  would only wave through nonsense. Not-perfect always means Held.
+- **The Held list is recomputed every run, never stored** — the same posture as
+  left-censoring above. The gate already produces the skip set for free on every
+  replay; storing a second copy only lets it drift. The sidecar holds *decisions*
+  (repairs, releases), never *problems*.
+- **The override is wide.** The sidecar wins for *any* match it contains, clean
+  or broken — one rule, "if it's in your file, yours wins," extending the
+  match-level-replacement decision above. The worklist merely *surfaces* Held
+  matches; it does not limit what the override can reach.
+- **A sidecar match carries a `draft`/`released` status, and only `released`
+  rates.** A draft is as inert as a Held match, which lets a long manual entry
+  (two lineups and a timeline authored from nothing) be saved half-finished
+  without any risk of a partial match reaching a rating.
+- **The repair GUI (item 17) is decoupled from the rating engine.** It edits the
+  sidecar only; a release takes effect on the next batch replay — the full
+  re-run that backlog item 4's absence already mandates (a released 2019 match
+  slots into its 2019 place from scratch). The engine stays the single producer
+  of ratings; the GUI stays a testable data editor.
+
+Per-player attribution of Held matches (item 25) reads the *broken* lineup where
+one exists, and otherwise the `appearances` table's `player_club_id` by date —
+**not** `transfers`, which covers only 4,345 players against `appearances`'
+per-match club on every row. Staged inert-first, gate byte-identical on an empty
+sidecar; the first `released` row is the repair this ADR always said must come
+before the tool.
+
 **SQL does set-shaped work, Java does per-match interpretation.** SQL joins,
 unions the sidecar over the vendor, and computes the usability gate across all
 matches at once. Java owns the clock, the ordering comparator, card

@@ -37,6 +37,27 @@ supply reference facts, or serve as a calibration set the spine is measured
 against, without ever entering a run.
 _Avoid_: pooling sources
 
+**Sidecar**:
+The store of hand-made facts kept beside the vendor snapshot — match repairs,
+matches authored from nothing, curated home-side facts. It holds only
+*decisions*, never problems: the set of unusable matches is recomputed from the
+gate on every run, not saved. A match present here and *released* replaces the
+vendor's copy of that match outright, wholesale rather than field by field (see
+[ADR 0009](docs/adr/0009-transfermarkt-as-the-rating-spine.md)). Precious —
+never auto-wiped when the vendor snapshot is refreshed.
+_Avoid_: patch, override — a sidecar match is a whole-match replacement
+
+**Match state**:
+Which of three conditions a match is in for a run, and whether it moves ratings.
+**Clean** — passes the usability gate, so it rates automatically on vendor data.
+**Held** — fails the gate and has not been released, so it is ingested and
+listed but moves no rating. **Released** — checked and approved by hand in the
+*Sidecar* (possibly after repair), so it rates on the sidecar's copy. A rating
+moves only on a Clean or Released match; nothing half-broken is ever trusted.
+The gate is never loosened to auto-admit imperfect data, and Held is recomputed
+every run, never stored.
+_Avoid_: skipped — a Held match is kept and visible, not dropped
+
 **Playing clock**:
 The single time axis a match's events sit on: seconds of play since kickoff,
 running continuously across halves rather than restarting each one. Nominal by

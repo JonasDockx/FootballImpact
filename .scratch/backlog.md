@@ -469,6 +469,12 @@ any refresh.
 rate, cache everything, and a multi-year backfill is a once-off batch left
 running for days. Very old match sheets differ in markup; spot-check per era.
 
+**Split out (2026-07-23):** this item stays the *motivation* — pre-2013 depth,
+international qualifiers, and the stoppage/running-score fidelity only a re-scrape
+can restore. The *mechanism* (editing `transfermarkt-datasets`' `config.yml`
+season and competition lists and re-running the scraper + dbt) and the weekly
+freshness job are now items **26** and **27**.
+
 ## 16. A prior for unrated players (the cup-minnow inflation)
 
 **Why (measured 2026-07-21):** 2,501 of the 3,274 clubs in the Transfermarkt
@@ -515,6 +521,24 @@ ADR 0009) earns its keep — JavaFX is the heavy dependency worth isolating, not
 
 **Prerequisite:** the sidecar has actual content, i.e. a repair you needed. Do
 not build the tool before the first real repair tells you what it must hold.
+
+**Framed per-player (2026-07-23, user):** the tool is wanted *per player* —
+driven from item **25**'s per-player missing-data overview, so you clean the
+matches that gap one specific career rather than trawling a global skip list of
+~8,500. It is also the landing spot for item **26**'s loosened gate: matches
+admitted "for manual check later" queue here. The sidecar-content prerequisite
+above still holds.
+
+**Placed by the item 26 grill (2026-07-23) as stage 4 — the GUI lands last.** It
+is **decoupled** from the rating engine: it edits the sidecar only, and a release
+takes effect on the next full batch replay, never inside the tool (the engine
+stays the single producer of ratings; the GUI stays a testable data editor). Its
+worklist is item **25**. Its prerequisite — a first real repair — is deliberately
+manufactured by item 26 stage 3 (hand-fix one match, no GUI), so by the time the
+GUI is built the sidecar's shape is already proven. A released match carries a
+`draft`/`released` status; only `released` rates, so a half-finished entry is
+safe. Decisions in [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md)'s
+2026-07-23 amendment.
 
 ## 2. Store each player's date of birth
 
@@ -1095,3 +1119,221 @@ overwritten in place; matching on DOB + normalised name, with club + shirt
 number settling almost everyone inside a fixture; leftovers to manual review.
 A `player_alias(old_id → canonical_id)` table is worth having sooner regardless,
 for Transfermarkt's own profile merges and redirects.
+
+## 23. Club-team bands on the career chart
+
+**Why (user, 2026-07-23):** the career chart (item 22,
+[ADR 0011](../docs/adr/0011-impact-index-and-the-career-chart.md)) plots the
+Impact index over time but shows nothing about *where* the player was, so a dip
+that coincides with a transfer reads as unexplained. Add each contiguous spell
+at a club as a tag with its own shaded background band along the horizontal
+(time) axis, so the eye ties a rating change to a move.
+
+**Data availability:** club-per-match is in the spine — a lineup names the club,
+and `appearances`/`games` carry `club_id`. First thing to check: whether ADR
+0011's results file already carries the club per player-match row or it must be
+added. A "spell" is a run of consecutive matches at one club; decide up front how
+to treat loans, mid-season moves, and interleaved national-team caps (band club
+only, or club + country).
+
+**Prerequisite:** item 2 / ADR 0011 results file; overlaps item 22's viewer.
+
+## 24. Per-player match log — which matches moved the rating
+
+**Why (user, 2026-07-23):** every match a player was on pitch for is a *rating
+period* (glossary) that moved their Value at the whistle, but there is no way to
+open one player and read the per-match ledger — this match, this residual, this
+Value before and after. Wanted as an inspection tool to understand why a rating
+sits where it does, and as the natural drill-down from the chart (item 22/23).
+
+**Data availability:** low-cost — the ADR 0011 results file already holds
+per player-match rows, so the Value delta per match is derivable; the residual
+and the drained expectation behind it may need emitting alongside. This is a
+*view* over what the full ingest (item 20) already produced, not a model change.
+Complements item 25 exactly (matches that counted vs. matches that could not).
+
+## 25. Per-player overview of matches missing data
+
+**Why (user, 2026-07-23):** the full ingest (item 20) skips 8,487 of 88,958
+matches — no lineups, XI≠11, no GK, two GKs — and more are missing outright
+because the vendor never carried them. Today the skip report is a global
+four-line count (item 20, C1). A player-scoped view — "these matches your player
+was in did not count, and why" — is what tells you whether a given career is
+under-measured by gaps, and it is the worklist the cleaning GUI (item 17)
+consumes.
+
+**Data availability:** the loader already raises `UnusableMatchException` with a
+short reason per skipped match. Two kinds of gap must both be surfaced:
+match **present-but-skipped** (group its would-be lineup by player — but note a
+match skipped *for having no lineup* has no player rows to group by), and match
+**absent entirely** (visible only as "the club played, the player has no row").
+The second kind is the harder half and the one item 26 will grow.
+
+**Grilled with item 26 (2026-07-23).** This item *is* stage 2 of item 26's
+staging: the read-only per-player worklist. Present-but-skipped is the **certain**
+tier (read the broken lineup, which names the player); absent-entirely is the
+**maybe** tier (the player's club played that day, from `appearances.player_club_id`
+by date — **not** `transfers`, too sparse at 4,345 players). Certain ships first,
+its counts reconciling to the existing four-line skip report; maybe follows with
+the GUI (stage 4). It is the worklist item 17 consumes.
+
+## 26. Widen the match range — loosen the gate, and rebuild the spine wider
+
+**Why (user, 2026-07-23, explicit):** "widen the range of matches. I don't care
+if this makes us include matches that I will need to manually check afterwards."
+Two independent levers:
+
+1. **Loosen the ADR 0009 strict gate on the *existing* snapshot.** Admit some of
+   the ~8,487 currently-skipped matches (e.g. XI≠11, missing GK) as best-effort
+   replays *flagged for manual check*, instead of dropping them. Trades
+   cleanliness for coverage, which the user explicitly accepts. Every admitted
+   borderline match is still trusted in full by the residual model, so this needs
+   its own mini-grill before building.
+2. **Rebuild the snapshot itself wider** from
+   [dcaribou/transfermarkt-datasets](https://github.com/dcaribou/transfermarkt-datasets).
+   Its `config.yml` pins seasons **2012–2025** and **74 competition ids**; adding
+   seasons and ids and re-running the scraper + dbt emits a bigger duckdb of the
+   **same shape**, so the read path never learns it grew — the whole premise of
+   ADR 0009. This is the mechanism item **15** named; item 15 stays the *why we
+   want more* (pre-2013 depth, qualifiers, fidelity), this item is the *how*.
+
+**Clarified by user (2026-07-23) — a third match state, not a looser gate.**
+Lever 1 above is reframed: an incomplete match must **not** enter rating at all
+until a human has checked it. Every match is *ingested and kept*, but a
+skipped/incomplete one sits in a "waiting room" touching nobody's rating; you
+inspect it in the GUI (item 17), correct it, and *release* it, and only then does
+it count. So a rating only ever moves on a match that is either clean from the
+vendor or fixed-and-approved — the strict gate stands *for rating*, but rejects
+are no longer discarded. This is the sidecar (ADR 0009) doing what it was for.
+The mini-grill this needs is scheduled.
+
+**Data availability (guidance captured 2026-07-23):** the pipeline is two repos.
+`transfermarkt-scraper` (scrapy; `-s <season>`, `-p <parents.json>`; crawl chain
+confederations → competitions → clubs → players → appearances, plus a `games`
+crawler) acquires raw JSON; `transfermarkt-datasets` (a dbt project) transforms it
+into the curated `games`/`appearances`/`game_events`/`game_lineups` tables and
+writes the duckdb. Widening pre-2013 hits item 15's hard caveat: **no lineups
+exist before 2013**, so those seasons still cannot seed a career.
+
+**Reading order for a fresh context:** CLAUDE.md → CONTEXT.md (the new *Sidecar*
+and *Match state* terms) → ADR 0009's 2026-07-23 amendment (the sidecar's working
+shape and the never-loosen rule) → this item → items 25 and 17. The design is
+fully grilled; implement to it rather than re-opening the decisions.
+
+**Grill done (2026-07-23), decisions amended into
+[ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md).** The grill
+was on lever 1 — the "third match state" the user reframed above — not on lever 2
+(rebuilding wider, which is mechanical once the pipeline runs). Six decisions,
+all in simple terms with a recommendation taken each time:
+
+1. **The waiting room is recomputed, not stored.** The gate already emits the
+   skip set every run; the sidecar holds only decisions (repairs + releases). No
+   stored "needs-check" list to drift.
+2. **Three states — Clean / Held / Released — rating in two.** A rating moves
+   only on a match that is clean-from-vendor or released-by-hand. Held matches are
+   ingested and visible but move nothing.
+3. **Wide override.** The sidecar wins for any match it contains; the worklist
+   only *surfaces* the Held ones. One rule, not two.
+4. **Drafts allowed** — a `draft`/`released` status; only `released` rates, so a
+   half-finished manual entry is as inert as a Held match.
+5. **Per-player worklist is certain-then-maybe.** Certain = the player is in a
+   broken lineup (free). Maybe = the match has no lineup but the player's *club*
+   played that day — sourced from `appearances.player_club_id` by date (dense),
+   **not** `transfers` (only 4,345 players, verified 2026-07-23). Build certain
+   first.
+6. **The GUI (item 17) is decoupled** — it edits the sidecar; a release takes
+   effect on the next full batch replay, which item 4's absence already mandates.
+7. **The gate is never loosened** (grilled 2026-07-23). Lever 1 does *not* auto-
+   admit any imperfect category — verified that the "XI is not 11" matches spread
+   evenly across 1–10 starters, so there are no near-complete near-misses worth
+   waving through; loosening would only rate nonsense. Not-perfect always means
+   Held. So "widen the range" = keep the strict gate for auto-rating, stop
+   discarding the rejects, and let a human release them — never relax the gate.
+
+**Staging (gate each):** (1) sidecar read path, inert — empty sidecar is
+byte-identical, log-loss 0.6502, still 80,471 matches; (2) the read-only
+per-player worklist = item **25**, certain tier, its counts reconciling to the
+existing skip report; (3) **the first real repair** end to end — hand-fix one
+broken match (no GUI), release it, census moves by exactly one, rest
+byte-identical; (4) the GUI (item **17**) + the maybe tier. The GUI lands last on
+purpose: stage 3 hand-makes the first repair ADR 0009 always said must exist
+before item 17 is built.
+
+### Stage 1 outcome (2026-07-23) — DONE, gate held
+
+The inert sidecar read path. `TransfermarktLoader` gained an optional second
+constructor arg — a sidecar DuckDB `ATTACH`ed read-only into the vendor
+connection when the file exists — and reads the set of `status = 'released'`
+game ids once. A released id is skipped in the four vendor queries and its rows
+re-loaded from the sidecar's four mirror tables (`matches`, `game_lineups`,
+`game_events`, `appearances`), so a released match is a **whole-match
+replacement keyed by game id**; a draft is never in the released set, so it is
+invisible and rates nowhere. The override is a Java skip-and-add rather than a
+SQL `UNION`: staging is per game id and `Main` re-sorts the match list, so
+sourcing one game wholly from one side keeps starter/event order intact. Both
+vendor and sidecar rows go through the same `LineupRow`/`EventRow` mapping,
+`buildMatch`, clock and `EventOrdering`, so a released match is not a special
+replay — just a different source for the same shape. The usability gate still
+applies uniformly: a release must be coherent (11 + goalkeeper) to rate.
+
+Inertness is structural: `Main` passes a `SIDECAR` path with no file behind it
+yet, so `hasSidecar` is false, `released` is empty, every guard is a no-op and
+no sidecar query runs. Stage 3 becomes "drop a file at that path".
+
+The physical sidecar schema (four mirror tables + `status`/`provenance`/
+`commit_hash` control columns on `matches`) was a free implementation choice —
+the grill pinned only the semantics — and stage 3 will cement it.
+
+**Gate met.** 110 tests green, including three new `SidecarOverrideTest` cases
+(released wins over the vendor; a draft does not rate; an empty sidecar behaves
+exactly as the vendor — all exercised against the real snapshot, 0.7 s). The
+designated `Scope.ALL` run is byte-identical: 80,471 of 88,958 replay, skip
+census 717 / 7,761 / 6 / 3, venue HOME 79,795 / AWAY 8 / NEITHER 668, base rate
+0.01532, champion log-loss **0.6502** windowed / 0.6508 whole, ship gate 0.6502
+< 0.6551. Leaderboard unchanged.
+
+**Still not built (this item):** stages 2–4 — the per-player worklist (item 25),
+the first real repair, the GUI (item 17) + the maybe tier.
+
+## 27. Weekly automated refresh of the spine database
+
+**Why (user, 2026-07-23):** once the spine is self-rebuildable (item 26), keep it
+current by pulling each week's new matches automatically — a scheduled job
+(Windows Task Scheduler) that runs the scraper's `games`/`appearances` crawlers
+for the current season on the chosen competitions, re-runs dbt to rebuild the
+duckdb, and drops it where `Main` reads it (the hardcoded path from item 18).
+
+**Design notes / caveats:**
+
+- **robots.txt disallows bots** (item 15) — personal use, slow rate, cache. A
+  weekly incremental (one season's latest fixtures) is small, unlike item 15's
+  multi-year backfill left running for days.
+- **Freshness only reaches what the vendor has entered** — lineups can lag a live
+  match by hours, so a Monday job may miss a Sunday-night game's XI.
+- **The rebuild must be atomic** — write a new file and swap, so `Main` never
+  reads a half-written duckdb.
+- **Item 4 (checkpoint / incremental replay)** is the eventual optimisation if a
+  weekly *full* replay of an ever-growing spine gets slow. Not needed yet — the
+  full 80,471-match replay is ~12 s today.
+
+## 28. Career validation pass — are the adjusted ratings right? (Messi, Scott Brown)
+
+**Why (user, 2026-07-23):** with the full ingest shipped (item 20), walk a few
+whole careers by eye to judge whether the numbers are believable, and chase two
+specific smells the user already flagged:
+
+- **Messi looks undervalued.** Hypothesis: his peak years (~2008–2012) predate
+  the 2013 lineup start, so the model meets an already-formed superstar and spends
+  his opening seasons *discovering* him rather than watching him rise — a
+  *Left-censored career* (glossary). The fix is item **15** (pre-2013 depth);
+  confirming the diagnosis is the off-by-default first-~2,000-minutes drop from
+  ADR 0011 / item **21**.
+- **Scott Brown looks overvalued.** Hypothesis: the Scottish top flight is a
+  rating island (item **9**) — Celtic dominate a division whose other clubs float
+  at a false average, with too few *bridges* (European ties, cups, transfers) to
+  price them, so beating under-rated opponents banks unearned residual — item
+  **16**'s cup-minnow inflation in league form.
+
+**Data availability:** none needed — the results file already holds both careers.
+This item is the *validation* that turns the hunches into evidence; the actual
+fixes live in items 9, 15, 16 and 21.
