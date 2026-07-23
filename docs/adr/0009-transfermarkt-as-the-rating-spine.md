@@ -256,6 +256,34 @@ per-match club on every row. Staged inert-first, gate byte-identical on an empty
 sidecar; the first `released` row is the repair this ADR always said must come
 before the tool.
 
+**Amended 2026-07-23 (item 26, stage 4a): the "maybe" tier is really two tiers.**
+The note above pinned a two-rung worklist — *certain* (named in a broken team
+sheet) then *maybe* (the club played that day). Probing the 7,761 `no lineups`
+Held matches before building split the second rung in two: **5,518 of them still
+carry per-game `appearances` rows** — a real roster with minutes, median 14
+players a club, 95% match-like — so those players are nameable *exactly*, not
+guessed. Only the remaining **2,243** have neither team sheet nor appearances and
+need the by-date inference the original note described. The worklist is therefore
+a three-rung ladder — **certain → appeared → maybe** (glossary *Worklist tier*) —
+and the `appearances`-by-date rule governs only the bottom rung. Decisions
+settled by grill: the *appeared* and *maybe* lists are **two new tables** in the
+disposable results DB beside `held_appearances`, rebuilt whole each designated
+run; the loader records each `no lineups` Held match *as the gate throws it* (same
+non-drift trick as the certain tier — the match set is the gate's verdict, names
+are joined on afterwards, releases excluded for free); the *appeared* row keeps
+the player's minutes, the *maybe* row keeps a "seen in N nearby matches" strength
+count and a **±1-month** squad window. SQL does the set-shaped join, Java holds
+the gate — unchanged from the division above. This tier is read-only and touches
+no rating, so the run stays byte-identical (80,472 / 0.6502); the gate is that
+the two lists **partition** the no-team-sheet matches exactly (7,761 = 5,518
+appeared + 2,243 maybe), counts reconciling to a SQL prediction made first:
+137,316 appeared rows (8,174 distinct players) and 9,550 maybe rows. The ±1-month
+window finds a squad for only 435 of the 2,243 no-appearances matches; the other
+1,808 have no other club game within a month, and widening to ±1 week (342
+matches) or ±4 months (652) moves that little — most are genuinely isolated in
+the snapshot (national teams, sparsely-covered clubs), which is why a modest,
+accurate window is chosen over a wide, noisy one.
+
 **SQL does set-shaped work, Java does per-match interpretation.** SQL joins,
 unions the sidecar over the vendor, and computes the usability gate across all
 matches at once. Java owns the clock, the ordering comparator, card

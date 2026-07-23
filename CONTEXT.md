@@ -199,3 +199,17 @@ pinned, dated constants measured once on one spine's population, never
 re-centred per season — a career must be read with a ruler that does not change
 length.
 _Avoid_: score, normalised rating
+
+**Worklist tier**:
+How sure the per-player missing-match worklist is that a player belongs to a
+*Held* match, on a three-rung ladder of shrinking confidence. **Certain** — the
+player is named in the match's broken team sheet, which the gate read before
+rejecting the match. **Appeared** — the match has no team sheet, but the vendor's
+`appearances` record names exactly who played it, with minutes. **Maybe** — the
+match has neither team sheet nor appearances; the player is only a candidate,
+drawn from the club's squad in the month around the match date and ranked by how
+many nearby matches they actually turned out for. A worklist is per player and
+is the input to the repair GUI (item 17); it holds candidates to *check*, never
+rating decisions — a rating still moves only on a Clean or Released match (see
+*Match state*, *Sidecar*).
+_Avoid_: confidence score — the tiers are ordinal rungs, not a number

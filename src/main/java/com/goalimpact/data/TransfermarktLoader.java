@@ -13,6 +13,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -131,6 +132,130 @@ public class TransfermarktLoader implements AutoCloseable {
 
     public List<HeldAppearance> heldAppearances() {
         return heldAppearances;
+    }
+
+    // The maybe-tier match set (item 26, stage 4a): every "no lineups" Held
+    // match, recorded as the gate throws it - so this set IS the gate's verdict,
+    // never a second SQL definition of "no lineups" that could drift from the
+    // skip report. A "no lineups" match names nobody (that is what it means), so
+    // unlike heldAppearances there are no player rows to keep here; the names are
+    // joined on afterwards from appearances (appearedPlayers / maybePlayers).
+    // Released matches never throw, so they are excluded for free.
+    private record NoLineupMatch(long gameId, long homeClubId, long awayClubId,
+        LocalDate date) {
+    }
+
+    private final List<NoLineupMatch> heldNoLineup = new ArrayList<>();
+
+    public int heldNoLineupCount() {
+        return heldNoLineup.size();
+    }
+
+    // The appeared tier (item 26, stage 4a): every player the vendor's
+    // appearances record names in a "no lineups" Held match. The match set is
+    // the gate's own (heldNoLineup), so appearances supplies only the names and
+    // minutes - set-shaped work, so SQL (ADR 0009). A game with no appearances
+    // contributes nothing here and falls to the maybe tier instead. The id list
+    // is spliced, not bound: every value is a game id the loader itself minted.
+    public List<AppearedPlayer> appearedPlayers() throws SQLException {
+        List<AppearedPlayer> appeared = new ArrayList<>();
+        if (heldNoLineup.isEmpty()) {
+            return appeared;
+        }
+        String sql = "SELECT game_id, player_club_id, player_id, player_name, minutes_played"
+            + " FROM appearances WHERE game_id IN (" + gameIdList() + ")"
+            + " ORDER BY game_id, player_club_id, player_id";
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(sql)) {
+            while (rows.next()) {
+                appeared.add(new AppearedPlayer(
+                    rows.getLong("game_id"),
+                    rows.getLong("player_club_id"),
+                    rows.getLong("player_id"),
+                    rows.getString("player_name"),
+                    rows.getInt("minutes_played")));
+            }
+        }
+        return appeared;
+    }
+
+    // The maybe tier (item 26, stage 4a): candidates for a "no lineups" Held
+    // match that carries no appearances either, so nobody is nameable at all -
+    // drawn from the club's squad in the month around the date (glossary
+    // 'Worklist tier'). nearby_matches counts how many nearby matches the player
+    // turned out for, so the repair GUI can rank a regular above a long shot.
+    // Only the games with no appearances reach here; a per-game (id, clubs, date)
+    // table is spliced inline so each match's window uses its own date and clubs.
+    public List<MaybePlayer> maybePlayers() throws SQLException {
+        List<MaybePlayer> maybe = new ArrayList<>();
+        Set<Long> appearedGames = appearedGameIds();
+        StringBuilder values = new StringBuilder();
+        for (NoLineupMatch m : heldNoLineup) {
+            if (appearedGames.contains(m.gameId())) {
+                continue;   // it has appearances: the appeared tier's, not maybe's
+            }
+            if (values.length() > 0) {
+                values.append(',');
+            }
+            values.append('(').append(m.gameId()).append(',')
+                .append(m.homeClubId()).append(',').append(m.awayClubId())
+                .append(",DATE '").append(m.date()).append("')");
+        }
+        if (values.length() == 0) {
+            return maybe;
+        }
+        String sql = "WITH nl(gid, home_club, away_club, gdate) AS (VALUES " + values + ")"
+            + " SELECT nl.gid, a.player_club_id, a.player_id,"
+            + " any_value(a.player_name) AS player_name, count(DISTINCT a.game_id) AS nearby"
+            + " FROM nl JOIN appearances a"
+            + "   ON (a.player_club_id = nl.home_club OR a.player_club_id = nl.away_club)"
+            + "  AND a.date BETWEEN nl.gdate - INTERVAL 30 DAY AND nl.gdate + INTERVAL 30 DAY"
+            + " GROUP BY nl.gid, a.player_club_id, a.player_id"
+            + " ORDER BY nl.gid, a.player_club_id, a.player_id";
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(sql)) {
+            while (rows.next()) {
+                maybe.add(new MaybePlayer(
+                    rows.getLong("gid"),
+                    rows.getLong("player_club_id"),
+                    rows.getLong("player_id"),
+                    rows.getString("player_name"),
+                    rows.getInt("nearby")));
+            }
+        }
+        return maybe;
+    }
+
+    // Which of the no-lineup Held matches carry any appearances at all - the
+    // line that splits the appeared tier from the maybe tier.
+    private Set<Long> appearedGameIds() throws SQLException {
+        Set<Long> ids = new HashSet<>();
+        if (heldNoLineup.isEmpty()) {
+            return ids;
+        }
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(
+                "SELECT DISTINCT game_id FROM appearances WHERE game_id IN ("
+                + gameIdList() + ")")) {
+            while (rows.next()) {
+                ids.add(rows.getLong("game_id"));
+            }
+        }
+        return ids;
+    }
+
+    // The no-lineup Held match ids as a comma-separated list for an IN clause.
+    // Splicing is safe: these are ids the loader recorded from its own gate,
+    // never user input.
+    private String gameIdList() {
+        StringBuilder ids = new StringBuilder();
+        for (NoLineupMatch m : heldNoLineup) {
+            if (ids.length() > 0) {
+                ids.append(',');
+            }
+            ids.append(m.gameId());
+        }
+        return ids.toString();
     }
 
     // How many matches the sidecar releases into this run - announced by Main
@@ -555,6 +680,11 @@ public class TransfermarktLoader implements AutoCloseable {
                         row.clubId(), row.playerId(), row.playerName(),
                         row.starter(), e.reason()));
                 }
+            } else if (e.reason().equals("no lineups")) {
+                // No team sheet, so nobody is nameable here; record the match
+                // (id, both clubs, date) for the appeared/maybe join to fill in.
+                heldNoLineup.add(new NoLineupMatch(match.matchId(),
+                    match.home().id(), match.away().id(), match.date()));
             }
             throw e;
         }

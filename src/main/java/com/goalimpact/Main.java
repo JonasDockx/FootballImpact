@@ -1,8 +1,10 @@
 package com.goalimpact;
 
 import com.goalimpact.credit.TimeIntegratedResidual;
+import com.goalimpact.data.AppearedPlayer;
 import com.goalimpact.data.DataLoader;
 import com.goalimpact.data.HeldAppearance;
+import com.goalimpact.data.MaybePlayer;
 import com.goalimpact.data.TransfermarktLoader;
 import com.goalimpact.data.UnusableMatchException;
 import com.goalimpact.engine.MatchObserver;
@@ -17,6 +19,7 @@ import com.goalimpact.model.MatchEvent;
 import com.goalimpact.report.CsvWriter;
 import com.goalimpact.report.HeldAppearanceWriter;
 import com.goalimpact.report.Leaderboard;
+import com.goalimpact.report.MissingMatchWriter;
 import com.goalimpact.report.RatingHistoryWriter;
 
 import java.io.PrintStream;
@@ -183,9 +186,12 @@ public class Main {
         List<List<MatchEvent>> replays = new ArrayList<>();
         Set<Long> leagueMatches = new HashSet<>();
         List<HeldAppearance> held = new ArrayList<>();
+        List<AppearedPlayer> appeared = new ArrayList<>();
+        List<MaybePlayer> maybe = new ArrayList<>();
         switch (SPINE) {
             case STATSBOMB -> loadStatsBomb(matches, replays);
-            case TRANSFERMARKT -> loadTransfermarkt(matches, replays, leagueMatches, held);
+            case TRANSFERMARKT -> loadTransfermarkt(
+                matches, replays, leagueMatches, held, appeared, maybe);
         }
         System.out.printf("%nSpine: %s - %d matches replay (%s to %s).%n%n",
             SPINE, replays.size(),
@@ -349,6 +355,12 @@ public class Main {
             long heldRows = HeldAppearanceWriter.write(RESULTS, runId, held);
             System.out.printf(Locale.US, "Held worklist: %,d rows -> %s%n",
                 heldRows, RESULTS.toAbsolutePath());
+            // The two lower rungs (item 26, stage 4a), written after the held
+            // block so no two writers hold the results file at once.
+            MissingMatchWriter.write(RESULTS, runId, appeared, maybe);
+            System.out.printf(Locale.US,
+                "Missing-match tiers: %,d appeared + %,d maybe rows -> %s%n",
+                appeared.size(), maybe.size(), RESULTS.toAbsolutePath());
         }
 
         new Leaderboard().print(tallies.values(), 20);
@@ -394,7 +406,8 @@ public class Main {
     // drives the update factor, so quietly thin data manufactures
     // false debutants.
     private static void loadTransfermarkt(List<Match> matches, List<List<MatchEvent>> replays,
-        Set<Long> leagueMatches, List<HeldAppearance> held) throws Exception {
+        Set<Long> leagueMatches, List<HeldAppearance> held,
+        List<AppearedPlayer> appeared, List<MaybePlayer> maybe) throws Exception {
 
         try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT, SIDECAR)) {
             List<Match> all = new ArrayList<>();
@@ -450,6 +463,30 @@ public class Main {
                 held.size(), heldMatchTotal);
             heldMatches.forEach((reason, ids) ->
                 System.out.printf("  %4d matches x %s%n", ids.size(), reason));
+
+            // The appeared + maybe tiers (item 26, stage 4a). They PARTITION the
+            // "no lineups" Held matches: every one is appeared (its players are
+            // named in appearances) xor maybe (nothing at all - candidates only).
+            // The split must reconcile to the skip report's "no lineups" line.
+            appeared.addAll(loader.appearedPlayers());
+            maybe.addAll(loader.maybePlayers());
+            Set<Long> appearedGames = new HashSet<>();
+            for (AppearedPlayer a : appeared) {
+                appearedGames.add(a.gameId());
+            }
+            Set<Long> maybeGames = new HashSet<>();
+            for (MaybePlayer m : maybe) {
+                maybeGames.add(m.gameId());
+            }
+            int appearedMatches = appearedGames.size();
+            int maybeMatches = loader.heldNoLineupCount() - appearedMatches;
+            System.out.printf("appeared tier: %,d rows over %d matches%n",
+                appeared.size(), appearedMatches);
+            System.out.printf(
+                "maybe tier: %,d rows over %d of %d matches (%d have no club game within a month)%n",
+                maybe.size(), maybeGames.size(), maybeMatches, maybeMatches - maybeGames.size());
+            System.out.printf("  no-lineup partition: %d = %d appeared + %d maybe%n",
+                loader.heldNoLineupCount(), appearedMatches, maybeMatches);
 
             // The venue verdict, which no test can eyeball for you.
             Map<Match.HomeSide, Integer> venues = new TreeMap<>();

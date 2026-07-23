@@ -1387,6 +1387,96 @@ is acknowledged, not gated; the leaderboard top-20 is visually unchanged.
 club-played-that-day signal from `appearances.player_club_id`). The
 sidecar-content prerequisite item 17 always named now exists.
 
+### Stage 4 split, and Stage 4a plan (grilled 2026-07-23)
+
+Stage 4 is two sub-projects, split by the grill: **4a**, the data increment that
+finishes the per-player worklist (item 25's harder half), lands **first**; **4b**,
+the JavaFX repair GUI (item 17), lands after, built against a worklist that
+already exists. 4a first because it is the smaller, testable, no-UI step and it
+*feeds* the GUI — the same inert-first rhythm every item-26 stage used.
+
+**The data reshaped the maybe tier.** Probing the 7,761 `no lineups` Held matches
+before building (2026-07-23): **5,518 still carry per-game `appearances` rows**
+(median 14 players a club, 95% match-like, 8,174 distinct players — mostly the
+2012 pre-team-sheet season, plus 209 in 2018 etc.), so those players are nameable
+*exactly*. Only **2,243** have neither team sheet nor appearances (spread out;
+727 in 2024, 214 in 2021) and need the by-date guess. So the worklist is a
+**three-rung ladder — certain → appeared → maybe** (glossary *Worklist tier*),
+not the two the ADR foresaw; the `appearances`-by-date rule governs only the
+bottom rung. ADR 0009 amended to match.
+
+**Nine grill decisions, recommended option taken each time:**
+
+1. **Split 4a/4b, 4a first.** (Above.)
+2. **Three rungs, not two** — recognise *appeared* as its own tier between certain
+   and maybe, because the data has two shapes and the GUI will rank them apart.
+3. **Match set from the gate's throw** — the loader records each `no lineups` Held
+   match (game id + both clubs + date) *as it throws*, exactly as it already
+   records held *appearances* for the broken-lineup reasons. So the maybe-tier
+   match set is the gate's own verdict, cannot drift from the skip report, and
+   released matches (which never throw) are excluded for free. `appearances`
+   supplies **names**, never the match set.
+4. **Two new tables**, one for *appeared*, one for *maybe*, beside
+   `held_appearances` in the disposable results DB, rebuilt whole each designated
+   run — kept separate because a row's meaning differs (an *appeared* row is "this
+   named player really played, with minutes"; a *maybe* row is "this player might
+   have been in it"), so no blank-when-not-applicable columns.
+5. **Maybe window = ±1 month** around the match date. Finds a squad for 435 of
+   the 2,243 no-appearances matches (9,550 candidate rows); the other 1,808 have
+   no other club game within a month. Widening barely helps — ±1 week reaches 342
+   matches, ±4 months only 652 — because most maybe matches are isolated in the
+   snapshot (national teams, sparsely-covered clubs). So a modest, accurate window
+   beats a wide, noisy one. (An earlier ≈43k-row estimate was a counting artifact;
+   the honest figure is 9,550.)
+6. **Maybe rows carry a strength count** — "seen in N nearby matches" — nearly
+   free from the same scan, so the GUI can rank regulars above long shots.
+7. **Appeared rows keep minutes** — free from the same `appearances` record, and a
+   genuine signal of how much a missing match dented a career.
+8. **Middle rung named "appeared"** — it names its own source (`appearances`) and
+   slots between certain and maybe.
+9. **Gate:** (i) run unchanged — 80,472 / 0.6502, leaderboard identical (the tier
+   is read-only and touches no rating, so this is near-automatic); (ii) the two
+   lists **partition** the no-team-sheet matches exactly — every one is *appeared*
+   xor *maybe*, counts reconciling to a SQL prediction made first (5,518 / 2,243
+   matches; 137,316 appeared rows / 8,174 distinct players; 9,550 maybe rows over
+   435 matches); (iii) a couple of known matches spot-checked, like the certain
+   tier's tests.
+
+Settled by precedent (say if any should be reopened): results DB / disposable /
+rebuilt each run; SQL does the set-shaped join (ADR 0009), Java holds the gate; a
+small `report` writer dumps the lists like `HeldAppearanceWriter`.
+
+### Stage 4a outcome (2026-07-23) — DONE, gate held
+
+The appeared and maybe tiers, built to the plan above. **Where the match set comes
+from:** the one gate — `loadEvents` now records each `no lineups` throw as a
+`NoLineupMatch` (game id + both clubs + date), so the tier's match set *is* the
+skip report's `no lineups` line and cannot drift; releases never throw, so they
+drop out for free. **How the names arrive:** two SQL joins in the loader over that
+set — `appearedPlayers()` joins `appearances` by game id (the exact roster, with
+minutes); `maybePlayers()` splices a per-game `(id, clubs, date)` table and joins
+`appearances` by club within **±30 days**, `count(DISTINCT game_id)` as the
+strength. **What it becomes:** two tables, `appeared_players` and `maybe_players`,
+in the disposable results DB beside `held_appearances`, written by a new
+`report/MissingMatchWriter` after the history + held blocks (never two writers on
+the file at once). New value types `data/AppearedPlayer`, `data/MaybePlayer`.
+
+**Gate met — all three checks.** 117 tests green (114 + three `MissingMatchTest`
+cases: DFB/2012 g2221641 → 14 appeared rows all club 42; NO1/2024 g4522747 → 37
+maybe rows in clubs {1100, 501}, all `nearby >= 1`; a clean season names nobody).
+The designated run is **byte-identical** — 80,472 replays, base rate 0.01532,
+champion log-loss **0.6502**, ship gate 0.6502 < 0.6551, held worklist 15,242 /
+725, venue HOME 79,796, leaderboard unchanged. The partition **reconciles exactly
+to the SQL prediction and the skip report**: `no-lineup partition: 7761 = 5518
+appeared + 2243 maybe`; tables landed at 137,316 appeared rows (8,174 distinct
+players) / 5,518 matches and 9,550 maybe rows / 435 matches (1,808 no-appearances
+matches have no other club game within a month — genuinely isolated in the
+snapshot, so they carry no candidates). The user waived hand-typing for this stage
+and it was implemented directly.
+
+**Still ahead (item 26):** stage 4b — the JavaFX repair GUI (item 17), which
+consumes this three-rung worklist. Grill its shape before building.
+
 ## 27. Weekly automated refresh of the spine database
 
 **Why (user, 2026-07-23):** once the spine is self-rebuildable (item 26), keep it
