@@ -430,6 +430,9 @@ public class Main {
             }
             System.out.printf("%d of %d matches replay, %d events dropped.%n",
                 matches.size(), all.size(), loader.droppedEvents());
+            if (loader.releasedCount() > 0) {
+                System.out.printf("  sidecar: %d released match(es)%n", loader.releasedCount());
+            }
             skipped.forEach((reason, count) ->
                 System.out.printf("  skipped %4d x %s%n", count, reason));
 

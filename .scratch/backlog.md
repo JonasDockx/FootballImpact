@@ -1338,6 +1338,55 @@ census 717 / 7,761 / 6 / 3, venue HOME 79,795 / AWAY 8 / NEITHER 668, base rate
 **Still not built (this item):** stages 2–4 — the per-player worklist (item 25),
 the first real repair, the GUI (item 17) + the maybe tier.
 
+### Stage 3 outcome (2026-07-23) — DONE, gate held
+
+The first real repair, end to end, and the proof that stages 1–2 were built well
+enough that a genuine repair needs **zero override code** — pure data plus one
+report line. Grilled first (five decisions, all the recommended option).
+
+**The repair:** game **2501210**, Olympiakos Volos 0–1 Panathinaikos (Greek Cup
+2014), Held for `no starting goalkeeper` because the vendor tagged goalkeeper
+**Luke Steele** (player 3539) as *Centre-Forward*, leaving Panathinaikos with no
+keeper. Self-repairable from the snapshot's own evidence — Steele is a
+`Goalkeeper` in the vendor `players` table and by fact — so no external match
+report was needed. The two-GK held matches were considered and rejected as the
+first case: each lists two career keepers in one XI, so the true 11th player
+isn't in the snapshot and repair would need the real lineup (deferred to the
+GUI).
+
+**How:** a checked-in `scripts/first-repair.sql` `ATTACH`es the vendor snapshot
+read-only, `CREATE`s the four sidecar tables (**cementing the physical schema**
+stage 1 only sketched in tests), and materialises the whole match from the
+vendor — both full lineups (36 rows), 13 events, 14 appearance rows — as one
+`status = 'released'` row, correcting exactly Steele's position via an inline
+`CASE WHEN player_id = 3539`. Provenance is free text; `commit_hash`
+(`59fa295c…`) is stamped from the vendor `version` table; the loader records but
+does not enforce it (version-drift detection deferred to item 27). The generated
+`.duckdb` lives at the `SIDECAR` path, out of the repo like the snapshot and
+results. Code change: `TransfermarktLoader.releasedCount()` + a `sidecar: N
+released match(es)` line in `Main`; the override itself needed nothing.
+
+**Gate met (census deltas + file-toggle).** 114 tests green. With the sidecar in
+place the designated run moved by exactly one match and nothing else:
+
+| Quantity | Stage 2 | Stage 3 |
+|---|---|---|
+| replays | 80,471 | **80,472** |
+| skip `no starting goalkeeper` | 6 | **5** |
+| held worklist | 726 / 15,278 | **725 / 15,242** (−1 match, −36 rows) |
+| venue HOME | 79,795 | **79,796** |
+| base rate | 223,810 / 14,610,840 = 0.01532 | 223,811 / 14,611,020 = **0.01532** |
+| log-loss | 0.6502 | **0.6502** |
+
+2501210 gained 28 `rating_history` rows and left `held_appearances` (0 rows).
+Moving the sidecar file aside restored every stage-2 number exactly (same
+binary, two states). The CSV ripples — a rated match feeds later Strength — which
+is acknowledged, not gated; the leaderboard top-20 is visually unchanged.
+
+**Still ahead (item 26):** stage 4 — the GUI (item 17) + the maybe tier (the
+club-played-that-day signal from `appearances.player_club_id`). The
+sidecar-content prerequisite item 17 always named now exists.
+
 ## 27. Weekly automated refresh of the spine database
 
 **Why (user, 2026-07-23):** once the spine is self-rebuildable (item 26), keep it

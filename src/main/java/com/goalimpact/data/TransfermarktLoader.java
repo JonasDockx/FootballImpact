@@ -133,6 +133,13 @@ public class TransfermarktLoader implements AutoCloseable {
         return heldAppearances;
     }
 
+    // How many matches the sidecar releases into this run - announced by Main
+    // so a released override never moves the census silently (ADR 0009: every
+    // skip is counted and printed, and a release is the same principle).
+    public int releasedCount() {
+        return released.size();
+    }
+
     // One game_lineups row, with the two string tests already decided.
     // Deciding them here is the same Java judgement run when the row is
     // read rather than when the match is assembled - it never moves into
