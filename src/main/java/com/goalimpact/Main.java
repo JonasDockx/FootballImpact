@@ -2,6 +2,7 @@ package com.goalimpact;
 
 import com.goalimpact.credit.TimeIntegratedResidual;
 import com.goalimpact.data.DataLoader;
+import com.goalimpact.data.HeldAppearance;
 import com.goalimpact.data.TransfermarktLoader;
 import com.goalimpact.data.UnusableMatchException;
 import com.goalimpact.engine.MatchObserver;
@@ -14,6 +15,7 @@ import com.goalimpact.model.CompetitionSeason;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
 import com.goalimpact.report.CsvWriter;
+import com.goalimpact.report.HeldAppearanceWriter;
 import com.goalimpact.report.Leaderboard;
 import com.goalimpact.report.RatingHistoryWriter;
 
@@ -180,9 +182,10 @@ public class Main {
                 List<Match> matches = new ArrayList<>();
         List<List<MatchEvent>> replays = new ArrayList<>();
         Set<Long> leagueMatches = new HashSet<>();
+        List<HeldAppearance> held = new ArrayList<>();
         switch (SPINE) {
             case STATSBOMB -> loadStatsBomb(matches, replays);
-            case TRANSFERMARKT -> loadTransfermarkt(matches, replays, leagueMatches);
+            case TRANSFERMARKT -> loadTransfermarkt(matches, replays, leagueMatches, held);
         }
         System.out.printf("%nSpine: %s - %d matches replay (%s to %s).%n%n",
             SPINE, replays.size(),
@@ -340,7 +343,13 @@ public class Main {
                 history.rows(), RESULTS.toAbsolutePath(), runId);
         }
 
-
+        // The worklist is Transfermarkt's (its gate produced it). Written after
+        // the history block so the two never hold the results file at once.
+        if (SPINE == Spine.TRANSFERMARKT) {
+            long heldRows = HeldAppearanceWriter.write(RESULTS, runId, held);
+            System.out.printf(Locale.US, "Held worklist: %,d rows -> %s%n",
+                heldRows, RESULTS.toAbsolutePath());
+        }
 
         new Leaderboard().print(tallies.values(), 20);
 
@@ -385,7 +394,7 @@ public class Main {
     // drives the update factor, so quietly thin data manufactures
     // false debutants.
     private static void loadTransfermarkt(List<Match> matches, List<List<MatchEvent>> replays,
-        Set<Long> leagueMatches) throws Exception {
+        Set<Long> leagueMatches, List<HeldAppearance> held) throws Exception {
 
         try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT, SIDECAR)) {
             List<Match> all = new ArrayList<>();
@@ -423,6 +432,21 @@ public class Main {
                 matches.size(), all.size(), loader.droppedEvents());
             skipped.forEach((reason, count) ->
                 System.out.printf("  skipped %4d x %s%n", count, reason));
+
+            // The certain-tier worklist, reconciled against the skip report
+            // above: these match counts must equal its three lineup-bearing
+            // lines (XI is not 11 / no GK / two GKs), because they are the same
+            // throw counted two ways.
+            held.addAll(loader.heldAppearances());
+            Map<String, Set<Long>> heldMatches = new TreeMap<>();
+            for (HeldAppearance h : held) {
+                heldMatches.computeIfAbsent(h.reason(), r -> new HashSet<>()).add(h.gameId());
+            }
+            int heldMatchTotal = heldMatches.values().stream().mapToInt(Set::size).sum();
+            System.out.printf("held worklist: %d player-rows over %d matches%n",
+                held.size(), heldMatchTotal);
+            heldMatches.forEach((reason, ids) ->
+                System.out.printf("  %4d matches x %s%n", ids.size(), reason));
 
             // The venue verdict, which no test can eyeball for you.
             Map<Match.HomeSide, Integer> venues = new TreeMap<>();

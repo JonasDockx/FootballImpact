@@ -8,6 +8,7 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\cr
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\credit\TimeIntegratedResidual.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\DataLoader.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\EventOrdering.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\HeldAppearance.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\TransfermarktLoader.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\UnusableMatchException.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\MatchObserver.java
@@ -23,5 +24,6 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\mo
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\Player.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\Team.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\CsvWriter.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\HeldAppearanceWriter.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\Leaderboard.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\RatingHistoryWriter.java

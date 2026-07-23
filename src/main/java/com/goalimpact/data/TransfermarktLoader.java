@@ -124,6 +124,15 @@ public class TransfermarktLoader implements AutoCloseable {
         return leagueMatches;
     }
 
+    // The certain-tier worklist (item 25): every player named in a Held match,
+    // recorded as the gate throws. Reusing the one gate means this list and the
+    // skip report are one decision recorded twice, so they cannot drift.
+    private final List<HeldAppearance> heldAppearances = new ArrayList<>();
+
+    public List<HeldAppearance> heldAppearances() {
+        return heldAppearances;
+    }
+
     // One game_lineups row, with the two string tests already decided.
     // Deciding them here is the same Java judgement run when the row is
     // read rather than when the match is assembled - it never moves into
@@ -464,6 +473,13 @@ public class TransfermarktLoader implements AutoCloseable {
         ORDER BY date, game_id
         """;
 
+    // The Held reasons whose matches HAVE a starting XI, so their players are
+    // nameable (item 25, certain tier). "no lineups" names nobody (that career
+    // is the maybe tier's job), and the post-whistle tripwire fires on an
+    // otherwise-valid match - neither belongs here.
+    private static final Set<String> HELD_REASONS = Set.of(
+        "XI is not 11", "no starting goalkeeper", "two starting goalkeepers");
+
     // One match's events on the playing clock (ADR 0009): nominal, so the
     // whistle is at 90 minutes, or 120 where extra time was played.
     public List<MatchEvent> loadEvents(Match match) throws UnusableMatchException {
@@ -474,53 +490,67 @@ public class TransfermarktLoader implements AutoCloseable {
         List<EventRow> eventRows = stagedEvents.remove(match.matchId());
         Integer lastMinute = stagedLastMinute.remove(match.matchId());
 
-        Map<Long, List<Player>> startersByClub = new HashMap<>();
-        Map<Long, Player> goalkeeperByClub = new HashMap<>();
-        Map<Long, Player> names = new HashMap<>();
-        if (lineup != null) {
-            for (LineupRow row : lineup) {
-                Player player = new Player(row.playerId(), row.playerName());
-                names.put(player.id(), player);
-                if (!row.starter()) {
-                    continue;   // on the bench: a name, not a starter
-                }
-                startersByClub.computeIfAbsent(row.clubId(), key -> new ArrayList<>()).add(player);
-                if (row.goalkeeper() && goalkeeperByClub.put(row.clubId(), player) != null) {
-                    throw new UnusableMatchException("two starting goalkeepers",
-                        "club " + row.clubId());
+        try {
+            Map<Long, List<Player>> startersByClub = new HashMap<>();
+            Map<Long, Player> goalkeeperByClub = new HashMap<>();
+            Map<Long, Player> names = new HashMap<>();
+            if (lineup != null) {
+                for (LineupRow row : lineup) {
+                    Player player = new Player(row.playerId(), row.playerName());
+                    names.put(player.id(), player);
+                    if (!row.starter()) {
+                        continue;   // on the bench: a name, not a starter
+                    }
+                    startersByClub.computeIfAbsent(row.clubId(), key -> new ArrayList<>()).add(player);
+                    if (row.goalkeeper() && goalkeeperByClub.put(row.clubId(), player) != null) {
+                        throw new UnusableMatchException("two starting goalkeepers",
+                            "club " + row.clubId());
+                    }
                 }
             }
-        }
-        if (startersByClub.isEmpty()) {
-            throw new UnusableMatchException("no lineups");
-        }
-
-
-        List<MatchEvent> events = new ArrayList<>();
-        events.add(startingXi(match, match.home(), startersByClub, goalkeeperByClub));
-        events.add(startingXi(match, match.away(), startersByClub, goalkeeperByClub));
-        readEvents(match, eventRows, names, events);
-        boolean extraTime = playedExtraTime(longest, lastMinute);
-        MatchEvent.MatchEnd whistle = extraTime
-            ? new MatchEvent.MatchEnd(4, 120, 0)
-            : new MatchEvent.MatchEnd(2, 90, 0);
-
-        // Tripwire: the whistle must be the last thing that happens. An
-        // event beyond it means the length verdict and the stamps
-        // contradict each other, and a replay of it would silently
-        // accrue time after the match ended.
-        int whistleTime = whistle.minute() * 60 + whistle.second();
-        for (MatchEvent event : events) {
-            int t = event.minute() * 60 + event.second();
-            if (t > whistleTime) {
-                throw new UnusableMatchException("an event outlives the whistle",
-                    "event at " + t + "s, whistle at " + whistleTime + "s");
+            if (startersByClub.isEmpty()) {
+                throw new UnusableMatchException("no lineups");
             }
-        }
-        events.add(whistle);
-        EventOrdering.sort(events);
-        return events;
 
+
+            List<MatchEvent> events = new ArrayList<>();
+            events.add(startingXi(match, match.home(), startersByClub, goalkeeperByClub));
+            events.add(startingXi(match, match.away(), startersByClub, goalkeeperByClub));
+            readEvents(match, eventRows, names, events);
+            boolean extraTime = playedExtraTime(longest, lastMinute);
+            MatchEvent.MatchEnd whistle = extraTime
+                ? new MatchEvent.MatchEnd(4, 120, 0)
+                : new MatchEvent.MatchEnd(2, 90, 0);
+
+            // Tripwire: the whistle must be the last thing that happens. An
+            // event beyond it means the length verdict and the stamps
+            // contradict each other, and a replay of it would silently
+            // accrue time after the match ended.
+            int whistleTime = whistle.minute() * 60 + whistle.second();
+            for (MatchEvent event : events) {
+                int t = event.minute() * 60 + event.second();
+                if (t > whistleTime) {
+                    throw new UnusableMatchException("an event outlives the whistle",
+                        "event at " + t + "s, whistle at " + whistleTime + "s");
+                }
+            }
+            events.add(whistle);
+            EventOrdering.sort(events);
+            return events;
+        } catch (UnusableMatchException e) {
+            // The same throw that counts the skip fills the worklist. A Held
+            // match with a starting XI names its players (starters and bench);
+            // the raw lineup rows are still in hand because they were removed
+            // up front, before the gate ran.
+            if (HELD_REASONS.contains(e.reason()) && lineup != null) {
+                for (LineupRow row : lineup) {
+                    heldAppearances.add(new HeldAppearance(match.matchId(),
+                        row.clubId(), row.playerId(), row.playerName(),
+                        row.starter(), e.reason()));
+                }
+            }
+            throw e;
+        }
     }
 
     // Extra time on either signal, because neither alone suffices: the

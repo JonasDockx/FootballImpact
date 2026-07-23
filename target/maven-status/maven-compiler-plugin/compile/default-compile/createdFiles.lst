@@ -17,6 +17,7 @@ com\goalimpact\model\MatchEvent$MatchEnd.class
 com\goalimpact\model\MatchEvent$StartingXI.class
 com\goalimpact\data\TransfermarktLoader$NeutralRound.class
 com\goalimpact\credit\FlatCreditRule.class
+com\goalimpact\report\HeldAppearanceWriter.class
 com\goalimpact\credit\LinkFunction.class
 com\goalimpact\credit\LogisticLinkFunction.class
 com\goalimpact\Main.class
@@ -36,6 +37,7 @@ com\goalimpact\model\Match$HomeSide.class
 com\goalimpact\data\TransfermarktLoader$Edition.class
 com\goalimpact\engine\MatchObserver.class
 com\goalimpact\Main$Spine.class
+com\goalimpact\data\HeldAppearance.class
 com\goalimpact\engine\UpdateSchedule.class
 com\goalimpact\model\MatchEvent$Substitution.class
 com\goalimpact\model\Match.class

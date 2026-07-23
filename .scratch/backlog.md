@@ -1177,6 +1177,49 @@ by date — **not** `transfers`, too sparse at 4,345 players). Certain ships fir
 its counts reconciling to the existing four-line skip report; maybe follows with
 the GUI (stage 4). It is the worklist item 17 consumes.
 
+### Certain tier outcome (2026-07-23) — DONE, gate held
+
+The read-only certain-tier worklist, grilled first (seven decisions, all the
+recommended option). **Where the truth comes from:** the one Java gate. As
+`loadEvents` throws, it also records the broken lineup, so the worklist and the
+skip report are one decision counted twice and cannot drift — reconciliation
+stops being a test that can fail and becomes structural. **What it becomes:** a
+`held_appearances` table in the disposable results DB beside `rating_history`,
+one row per player *named* in a Held match, rebuilt whole each designated run
+(honours item 26's "recomputed, not stored" — nothing durable to drift). **Which
+players:** everyone named — starters *and* bench — each with a `started` flag,
+because a Held match is unreplayable so we cannot know who was truly on the
+pitch; "named in the lineup" is the only certain fact, and the flag lets item 17
+rank a starter above an unused sub without guessing now. **Which matches:** the
+three lineup-bearing reasons only (`XI is not 11`, `no starting goalkeeper`,
+`two starting goalkeepers`); `no lineups` names nobody and is deferred to the
+maybe tier. **Row shape:** lean pointers + the gate verdict
+(`run_id, player_id, player_name, club_id, game_id, reason, started`); match
+facts (date, competition, opponent) stay in the vendor `games` table and are
+joined at display time, so a snapshot refresh can never leave the worklist
+quoting a stale date.
+
+**Plumbing:** the loader accumulates and exposes `heldAppearances()` (same shape
+as `leagueMatches()` / `droppedEvents()`); `UnusableMatchException` stays a lean
+signal. A dedicated `report/HeldAppearanceWriter` (static one-shot bulk write)
+`DROP`/`CREATE`s the table and appends, sequenced *after* the history block so
+the two never hold the results file at once. Transfermarkt-only by construction.
+New value type `data/HeldAppearance`. Capture is a catch-record-rethrow around
+`loadEvents`' gate section, keyed on the reason being one of the three; the raw
+lineup rows are still in hand because they were removed up front.
+
+**Gate met.** 114 tests green — four new `HeldAppearanceTest` cases against known
+held matches (`two GKs` DKP/2022 g3906312 → 34 rows / 22 starters; `no GK`
+NLP/2017 g2904555 → 34 / 22; `XI is not 11` SFA/2025 g4808142 → 37 / 21; a clean
+match names nobody). The designated run prints the reconciliation and it is
+exact: **15,278 player-rows over 726 matches = 717 / 6 / 3**, matching the skip
+report line-for-line; 9,909 distinct players; `started` split 10,199 / 132 / 66.
+Replay byte-identical (80,471, 0.01532, log-loss 0.6502, leaderboard unchanged).
+
+**Still ahead (item 26):** stage 3 (the first real repair, end to end) and stage
+4 (the GUI + the maybe tier — the club-played-that-day signal from
+`appearances.player_club_id`).
+
 ## 26. Widen the match range — loosen the gate, and rebuild the spine wider
 
 **Why (user, 2026-07-23, explicit):** "widen the range of matches. I don't care
