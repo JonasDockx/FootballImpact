@@ -17,8 +17,10 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 
 // The sidecar's write path (item 26, stage 4b-2), and the first code in the
 // project that ever writes it. It bridges the two worlds CLAUDE.md keeps apart:
@@ -135,6 +137,60 @@ public final class SidecarStore {
             }
             return reconstructAppeared(c, gameId);
         }
+    }
+
+    private static final String APPEARED_IDS_SQL = """
+        SELECT DISTINCT CAST(a.game_id AS BIGINT) AS gid
+        FROM appearances a
+        WHERE NOT EXISTS (
+            SELECT 1 FROM game_lineups gl WHERE CAST(gl.game_id AS BIGINT) = a.game_id)
+        ORDER BY gid
+        """;
+
+    // Every appeared game - appearances present, no vendor team sheet - the bulk
+    // reconstruction's candidate set (stage 4b-4), read from the vendor once.
+    public List<Long> appearedGameIds() throws SQLException {
+        List<Long> out = new ArrayList<>();
+        try (Connection c = openReadOnly(snapshot);
+            PreparedStatement ps = c.prepareStatement(APPEARED_IDS_SQL);
+            ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                out.add(rs.getLong("gid"));
+            }
+        }
+        return out;
+    }
+
+    // The game ids already in the sidecar, any status, so the batch can skip them
+    // and never overwrite a hand-made or already-released match. Empty when the
+    // sidecar is absent or has no matches table.
+    public Set<Long> sidecarGameIds() throws SQLException {
+        Set<Long> out = new HashSet<>();
+        if (!Files.exists(sidecar)) {
+            return out;
+        }
+        try (Connection c = openReadOnly(sidecar);
+            Statement s = c.createStatement();
+            ResultSet rs = s.executeQuery("SELECT game_id FROM matches")) {
+            while (rs.next()) {
+                out.add(rs.getLong(1));
+            }
+        } catch (SQLException noSuchTable) {
+            // A file with no matches table holds no releases.
+        }
+        return out;
+    }
+
+    // Reconstruct many appeared matches over a single vendor connection - far
+    // cheaper than one open per game for a batch of thousands.
+    public List<EditableMatch> reconstructAppeared(List<Long> gameIds) throws SQLException {
+        List<EditableMatch> out = new ArrayList<>(gameIds.size());
+        try (Connection c = openReadOnly(snapshot)) {
+            for (long id : gameIds) {
+                out.add(reconstructAppeared(c, id));
+            }
+        }
+        return out;
     }
 
     private boolean hasVendorLineup(Connection c, long gameId) throws SQLException {
@@ -278,6 +334,38 @@ public final class SidecarStore {
                 insertLineups(c, gameId, match.lineup());
                 insertEvents(c, gameId, match.events());
                 insertAppearances(c, gameId, match.appearances());
+                c.commit();
+            } catch (SQLException failed) {
+                c.rollback();
+                throw failed;
+            }
+        }
+    }
+
+    // The batch write (stage 4b-4): every match released in one transaction over
+    // one connection, so thousands of reconstructions cost one open, one commit_hash
+    // read and one all-or-nothing commit. Each match keeps its own generated
+    // provenance with provenanceSuffix appended, so the whole set is queryable and
+    // undoable by that tag. Reuses the same per-match inserts as save, so a batch
+    // row is byte-identical to one written through the editor.
+    public void saveAll(List<EditableMatch> matches, String status, String provenanceSuffix)
+        throws SQLException {
+        try (Connection c = openWritable(sidecar)) {
+            ensureSchema(c);
+            String commitHash = vendorCommitHash(c);
+            c.setAutoCommit(false);
+            try {
+                for (EditableMatch match : matches) {
+                    long gameId = match.header().gameId();
+                    String provenance = provenanceSuffix.isEmpty()
+                        ? match.provenanceSummary()
+                        : match.provenanceSummary() + " " + provenanceSuffix;
+                    deleteGame(c, gameId);
+                    insertMatch(c, match.header(), status, provenance, commitHash);
+                    insertLineups(c, gameId, match.lineup());
+                    insertEvents(c, gameId, match.events());
+                    insertAppearances(c, gameId, match.appearances());
+                }
                 c.commit();
             } catch (SQLException failed) {
                 c.rollback();

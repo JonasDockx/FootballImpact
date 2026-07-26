@@ -2055,6 +2055,132 @@ rest open Held for the two existing buttons — no invention anywhere.
 name players the record does not contain; that, and the sparse 15% of appeared
 games, are item 17's remaining slice.
 
+### Stage 4b-4 plan (grilled 2026-07-26)
+
+Bulk-release every appeared game that reconstructs cleanly, rather than one
+double-click at a time. Asked by the user once 4b-3 shipped; three forks put to the
+grill, all three recommendations taken.
+
+**Why it is defensible - but only for the clean subset.** 4b-3's safety rested on
+the reconstruction deriving cleanly *and* a human verifying each one. Bulk removes
+the human, which is acceptable only where there is nothing for a human to add: a
+game whose reconstruction passes the gate (`problems()` empty) has its eleven
+derived mechanically from the substitution events, and the generated provenance
+already *fully* describes the method - unlike the Écija case, whose "Sanz is the
+keeper" needed outside knowledge. The ~950 appeared games that do not derive
+cleanly are exactly the ones still needing eyes, and are excluded by definition.
+The residual risk, recorded as accepted: a gate pass proves eleven-and-one-GK, not
+that they are the *right* eleven, so miscoded substitution data could seat a wrong
+XI silently; and a released match shadows the vendor forever, so a later vendor
+backfill of a real sheet is masked. Mitigated by the batch tag (auditable, undoable
+as one set), a file backup, a dry-run count and an eyeballed sample.
+
+**Decisions:**
+
+1. **Scope = every appeared game that reconstructs clean** (recommended option).
+   The batch is exactly the appeared games where `reconstruct(game).problems()` is
+   empty - defined by the real reconstruction path, not an SQL proxy, so it can
+   never diverge from what the editor would accept. ~4,570 by the 2026-07-26
+   measurement (4,569 after 3839821, released by hand at 4b-3's check 5).
+2. **Guard = back up, stamp, dry-run, sample** (recommended). The sidecar file is
+   copied before any write; each provenance carries a dated tag
+   `[bulk reconstruction <date>]` so the set is queryable and undoable in one
+   `DELETE ... WHERE provenance LIKE`; the runner dry-runs by default (counts and
+   prints a random sample of reconstructed XIs, writes nothing) and only writes on
+   an explicit `commit`. The batch never touches a game already in the sidecar
+   (`sidecarGameIds()` exclusion), so no hand-made release is overwritten.
+3. **Model impact = measure and report, do not gate** (recommended). Adding ~4,570
+   rated matches changes the population the log-loss and calibration are measured
+   over; the replay is re-run and the new census and log-loss recorded, but the
+   batch is not rolled back for a small drift - these are legitimately rated
+   matches, not a model tweak. Calibration constants are re-pinned only if they
+   move materially (ADR 0009's re-measure rule).
+
+**No new glossary terms; no ADR.** The batch releases *Released* matches by the
+same whole-match `save` ADR 0009 already describes; it is an operational tool, not
+a new decision about the sidecar's meaning. Recorded so the ADR's absence is a
+choice.
+
+**The runner is headless and reuses everything.** `com.goalimpact.BulkRelease`
+(an entry point beside `Main` and `GuiMain`, importing `data` + `repair`, no
+JavaFX) enumerates appeared ids, reconstructs them over one vendor connection,
+keeps the clean ones, and on `commit` writes them in one transaction. New
+`SidecarStore` methods - `appearedGameIds()`, `sidecarGameIds()`,
+`reconstructAppeared(List)`, `saveAll(...)` - do the I/O; the per-game `load`/`save`
+logic is untouched, so a batch row equals a GUI row.
+
+**Gate:**
+
+1. **Selection unit tests** - `appearedGameIds()` contains a known appeared game
+   (3839821) and excludes a game with a vendor sheet; `saveAll` stamps the suffix
+   and `sidecarGameIds()` reflects the write; a reconstructed batch match reloads
+   from the sidecar.
+2. **Dry run, eyeballed** - the runner reports the clean count and a random sample
+   of reconstructed XIs; the count is sane (~4,569) and the sample reads correctly
+   by eye. Writes nothing.
+3. **Backup exists** before any write, and the batch tag makes the set reversible.
+4. **One measured replay after the commit** - census moves by exactly the number
+   released (each held→rated): replays up by N, `sidecar released` up by N, appeared
+   tier down by N matches, no-lineup partition rebalanced, HOME up by the home-venue
+   share, held worklist unmoved, log-loss re-reported. Numbers recorded in the
+   outcome block.
+
+**Explicit non-goals:** no maybe tier, no sparse/one-sided games, no picker, no
+re-tuning the model to chase the new population, no automatic re-release of games
+the vendor later backfills.
+
+### Stage 4b-4 outcome (shipped 2026-07-26)
+
+Built to the plan; all four gate checks passed. Test count **147 → 150**. The
+runner `com.goalimpact.BulkRelease` and four `SidecarStore` methods
+(`appearedGameIds`, `sidecarGameIds`, `reconstructAppeared(List)`, `saveAll`) were
+the whole of it - the per-game `load`/`save` were untouched, so a batch row equals
+an editor row.
+
+**The dry run caught a surprise and reconciled it.** It reported 62 games already
+in the sidecar, not the 4 the last replay showed: between 4b-3's check 5 and this
+run the user had hand-released 58 more clean appeared games through the editor. The
+numbers then closed exactly - 4,570 clean appeared total = 59 already released by
+hand (incl. 3839821) + 4,511 batched + 0 missed; 948 imperfect left for the editor;
+5,518 = 4,570 + 948. The `sidecarGameIds()` exclusion meant the batch added to the
+59 without touching one of them, which is the guard working as designed. The sample
+of ten read correctly by eye (Čech/Chelsea, De Gea/United, Handanović/Inter).
+
+**The four checks, as measured:**
+
+1. **Selection units** (`BulkReconstructionTest`, 3 tests) - `appearedGameIds()`
+   holds an appeared game and excludes a sheet game; `saveAll` stamps the suffix
+   and `sidecarGameIds()` reflects the write; a batched match reloads from the
+   sidecar. Plus the reconstruction and writer suites unchanged.
+2. **Dry run, eyeballed** - 4,511 clean and releasable, 948 left for the editor,
+   sample correct; nothing written.
+3. **Backup and reversibility** - the sidecar was copied to
+   `transfermarkt-sidecar.bak-20260726-144801.duckdb` before any write, and every
+   released row carries `[bulk reconstruction 2026-07-26]`, so
+   `DELETE … WHERE provenance LIKE '%[bulk reconstruction 2026-07-26]%'` undoes the
+   whole batch.
+4. **One measured replay after the commit** - the census moved by the whole clean
+   appeared set: replays **80,474 → 85,044** (+4,570: 59 by hand + 4,511 batched),
+   `sidecar: 62 → 4,573 released`, appeared tier **5,518 → 948 matches** (11,361
+   rows), no-lineup partition **3,191 = 948 + 2,243**, venue HOME **79,798 →
+   84,342**, held worklist **15,186 / 723 unmoved** (it is the certain tier). The
+   spine now spans **2012-07-09 → 2026-07-06** (the appeared games reach back a
+   season before the lineup era).
+
+**Model impact, measured and accepted (decision 3).** Log-loss moved **0.6502 →
+0.6503** - one ten-thousandth, the price of +4,570 rated matches, not a model
+change; the ship gate is still strictly better (0.6503 < 0.6551). The champion
+constants (k=0.10, K0=1.00, H=4000, floor=0.05, home=2.00) and the base scoring
+rate (0.01531 vs 0.01532) are effectively unchanged, so ADR 0009's calibration is
+**not re-pinned** - the new population is scattered across existing eras, not a new
+one. Recorded rather than gated on.
+
+**Accepted risks now live in the data.** 4,511 matches entered the spine with no
+human review of any single one; the defence is that each passed the gate mechanically
+and the provenance fully describes the method, and the batch is reversible as one
+set. The vendor-shadow risk (a later real sheet masked by a reconstruction) is now
+real for 4,570 games; item 27's refresh is where a reconciliation would live.
+
 ## 27. Weekly automated refresh of the spine database
 
 **Why (user, 2026-07-23):** once the spine is self-rebuildable (item 26), keep it
