@@ -550,6 +550,19 @@ roster prefill and live validation described above all belong to **4b-2**, and a
 where the tested JavaFX-free view-model layer earns its keep. Full decisions and
 gate under item **26**, *Stage 4b split, and Stage 4b-1 plan*.
 
+**4b-2's first slice is narrower than this item (grilled 2026-07-23).** The
+editor lands as *position-only repair* — open a certain-tier Held match pre-filled
+from the vendor, change a position or move a player between XI and bench, save,
+release — because 4b-2 carries two independent new risks (the first sidecar
+*write*, and the picker's real judgement) and bundling them means a wrong sidecar
+names neither. So the **ranked player picker, roster prefill and event editing
+described above are still unbuilt** after 4b-2 lands, and with them every repair
+that needs a player *added*: the 57 matches where a side has 10 starters, the ~380
+with 1–9, and the 139 where one side is absent entirely. What 4b-2 does deliver is
+the write path, the `com.goalimpact.repair` judgement layer these features will be
+built in, and live validation. Decisions and gate under item **26**, *Stage 4b-2
+plan*.
+
 ## 2. Store each player's date of birth
 
 **Why:** Enables age-aware analysis — comparing a player against peers in the
@@ -1646,6 +1659,233 @@ it. That is the first code that ever *writes* the sidecar, and it brings item
 17's ranked player picker, roster prefill and live validation, plus the tested
 JavaFX-free view-model layer 4b-1 deliberately declined to build empty. Grill it
 before building.
+
+### Stage 4b-2 plan (grilled 2026-07-23)
+
+The editor, and **the first code in the project that ever writes the sidecar**.
+Twelve grill decisions; the recommended option was taken on ten, and the user
+chose otherwise on two (2 and 9, both recorded below with the reasoning that
+lost).
+
+**What the certain tier actually asks a repair to do**, measured before the grill
+so the slice could be cut against evidence rather than intuition:
+
+| Held reason | Matches | What a repair must do |
+|---|---|---|
+| `no starting goalkeeper` | 5 | change one player's **position** |
+| `two starting goalkeepers` | 3 | change a position, or bench one — *and* name the missing 11th |
+| `XI is not 11`, a side has 12–15 starters | 5 sides | **remove** a starter |
+| `XI is not 11`, a side has 10 starters | 57 | **add one** player — needs the picker |
+| `XI is not 11`, a side has 1–9 starters | ~380 | add several |
+| `XI is not 11`, one side absent entirely | 139 | author **11 from nothing** |
+
+Only the top and third rows need no player picker, which is what cuts the slice.
+
+**The twelve decisions:**
+
+1. **First slice = position-only repair.** Open a certain-tier Held match
+   pre-filled from the vendor, change a player's position or move them between XI
+   and bench, save, release. No picker, no roster prefill, no event editing, no
+   authoring from nothing. Chosen because 4b-2 carries two independent new risks —
+   the first sidecar *write*, and the picker's real judgement — and bundling them
+   means a wrong sidecar names neither. It also inherits an unusually strong gate:
+   this is exactly what `scripts/first-repair.sql` did by hand at stage 3, so the
+   writer can be diffed against a repair already known to work.
+2. **`save(match, status)` — status is an argument** (user's choice; the
+   recommendation was a separate one-column `release(gameId)`). The argument that
+   won: the Release button then always writes exactly what is on screen, so a
+   release can never publish content that has drifted from what you are looking
+   at. The argument that lost: a separate release would have made the moment that
+   changes what rates a one-line, separately assertable operation. A save is a
+   whole-match replacement either way (ADR 0009).
+3. **The writer creates the four tables itself**, `CREATE TABLE IF NOT EXISTS`,
+   with the schema `first-repair.sql` cemented at stage 3. Opening the real
+   sidecar is then a no-op and opening a temp path builds an empty one, which is
+   what makes every write test a one-liner. The schema is consequently written
+   down twice; that is accepted rather than deduplicated, because the backlog rule
+   is that a stage's evidence is never rewritten — `first-repair.sql` stays the
+   record of stage 3 and the Java becomes the live definition. The risk auto-create
+   carries (a wrong path silently yields an empty sidecar instead of an error) is
+   retired by decision 7.
+4. **The gate rule is stated in the view-model, and a test pins the agreement.**
+   The screen must say "fixed" exactly when the loader would rate the match; a
+   disagreement is the worst available failure, silent until an 18-second replay.
+   Rejected: extracting a shared gate class. The loader's gate is not a standalone
+   rule — it is welded into `startingXi(...)`, which simultaneously builds
+   `Player`s, resolves the home side and constructs a `StartingXI`, and throws
+   typed reasons — so extraction means surgery on a path every stage so far has
+   held byte-identical, for the benefit of one screen. The rule is two sentences
+   (11 starters; exactly one of them `position = 'Goalkeeper'`), so stating it
+   twice is cheap and a test makes the duplication honest: a lineup the view-model
+   calls clean must replay through `TransfermarktLoader`, and one it rejects must
+   throw the matching reason.
+5. **A new `com.goalimpact.repair` package**, charter: **imports neither `javafx`
+   nor `java.sql`**. `gui` stays pure widgets, `data` stays pure I/O, and the
+   middle layer is testable by construction rather than by discipline. Rejected:
+   putting it in `gui` (nothing then stops a JavaFX import creeping in later, at
+   which point it silently stops being testable — and this is precisely the layer
+   4b-1 declined to build early *because* it would matter here) and in `data`
+   (whose charter is knowing what a file or database is, which this layer does
+   not). One-class packages are already the house style — `credit` is one.
+6. **The sidecar is opened per operation and closed immediately.** DuckDB allows
+   one writer, and `Main` reads the sidecar on every replay, so a session-long
+   read-write handle would make "close the GUI before replaying" a second hard
+   rule — one you eventually forget at the worst moment. Opening for milliseconds
+   means the exact locking rules never have to be known. The same class also
+   **loads an existing draft**, falling back to the vendor when there is none;
+   without that, "save as draft" is write-only and you cannot see your own work.
+7. **One path holder in `data`** — snapshot, results, sidecar — read by both
+   `Main` and `GuiMain`. This is the wart 4b-1 deliberately parked here, and it
+   stopped being cosmetic the moment something writes: if the two programs ever
+   disagreed about the sidecar path, the GUI would file repairs into a file the
+   replay never reads. `data` is the right home by CLAUDE.md's own charter.
+   Configurable paths were declined as scope creep and left for a backlog line.
+8. **Master–detail, and only *certain* rows open.** The 4b-1 grill already
+   recorded master–detail as 4b-2's shape. Appeared and maybe matches have no team
+   sheet at all, so repairing one is the 11-from-nothing case decision 1 scoped
+   out; those two sections carry a one-line hint saying so rather than opening an
+   editor that cannot finish the job.
+9. **Provenance is pre-filled with a generated summary, editable** (user's choice;
+   the recommendation was a blank box that blocks release). The argument that lost
+   is recorded because it is the risk being accepted: a pre-filled box is easy to
+   accept unedited, and then every repair records *what changed* — the one part a
+   diff can reconstruct — and none records *why*, which is the part it cannot.
+   Stage 3's provenance is the bar (it named the vendor's error, the fix, and the
+   evidence: `players.position`). The discipline now rests on the user, not the
+   tool. `commit_hash` is stamped automatically from the vendor `version` table.
+10. **Gate = five checks** (below).
+11. **Events and appearance rows are always copied through, and shown read-only.**
+    Copying is not optional: a released match replaces the vendor's copy outright,
+    so dropping the events would release a 0–0 with no substitutions and the replay
+    would go quietly wrong. Displaying them costs one non-editable table and is the
+    cheapest available guard against materialising the wrong game id.
+12. **The user hand-types the Java**; prose — backlog, ADR, SQL — is written
+    directly, as always. The stage-4a waiver did not carry over, and did not here
+    either.
+
+**No new glossary terms.** *Sidecar*, *Match state* (Clean/Held/Released) and
+*Worklist tier* already carry every concept this stage uses; the editor is a tool
+for producing a *Released* match, not a new idea. Recorded so the absence is a
+decision rather than an omission.
+
+**Gate (five checks):**
+
+1. **Reproduction of the known-good repair.** Drive the editor to rebuild game
+   **2501210** into a *temp* sidecar and diff its four tables against the real
+   sidecar's rows: every column identical except `provenance`. Proves the writer
+   against a repair already known to work, with no external evidence needed and no
+   risk to the precious file.
+2. **`repair` unit tests** — the loader-agreement test above, applying a position
+   edit, prefill from vendor rows, the generated provenance summary.
+3. **Writer tests on a temp sidecar** — creates the four tables from nothing; a
+   second save of the same match *replaces* rather than duplicates; `draft` and
+   `released` land in the status column; a saved draft loads back identically.
+4. **The designated replay is untouched** with the sidecar as it stands today —
+   80,472 replays, base rate 0.01532, champion log-loss **0.6502**, ship gate
+   0.6502 < 0.6551, held worklist 15,242 / 725, venue HOME 79,796.
+5. **One real repair, end to end** — the check no test provides. Repair and
+   release one of the 5 `no starting goalkeeper` matches in the GUI; the next
+   replay must move by **exactly one**: 80,472 → **80,473**, `no starting
+   goalkeeper` **5 → 4**, held worklist down by that match's rows, log-loss
+   re-reported. Same shape as stage 3's gate, and the only check that proves GUI →
+   sidecar → engine as one chain.
+
+**A finding that shapes check 5: none of the 5 remaining `no starting goalkeeper`
+matches is self-repairable from the snapshot.** Measured 2026-07-23: all ten
+club-sides carry a full 11 starters, and **9–11 of each 11 have no row in
+`players` at all** — they are obscure Spanish and Dutch lower-league ties
+(2367585, 2367595, 2756524, 2874408, 2904555) where the vendor knows the names
+and nothing else. Luke Steele was repairable at stage 3 precisely because he was a
+known player with a `position`; that was the lucky case, not the typical one. So
+check 5 needs an **external lookup** — the tool's normal mode of operation, and
+exactly what free-text provenance exists to record. (A first pass at this used an
+inner join to `players` and appeared to show sides of 0–2 starters; the left join
+corrects it. Worth remembering: joining `players` silently drops 69,943 lineup
+players, per ADR 0009.)
+
+**Build order** — prose first, per CLAUDE.md: (0) this block and the ADR 0009
+amendment; (1) the path holder, replay byte-identical; (2) the `repair` package,
+tests first; (3) the sidecar writer, tests on a temp sidecar; (4) the 2501210
+reproduction test; (5) the `gui` master–detail wiring and editor pane; (6) the
+real repair and the census; (7) outcome block and commit.
+
+**Explicit non-goals for 4b-2's first slice**, so scope cannot creep: no ranked
+player picker, no roster prefill, no adding or removing players, no event editing,
+no authoring a match from nothing, no configurable paths.
+
+### Stage 4b-2 outcome (shipped 2026-07-26)
+
+Built in the grilled order, tests first, and all five gate checks passed. Test
+count 132 → 141. The files, by layer:
+
+- `data/DataFiles` — the three DuckDB paths in one holder; `Main` and `GuiMain`
+  read it. (step 1)
+- `repair/` — `LineupEntry`, `MatchHeader`, `EventRow`, `AppearanceRow`,
+  `EditableMatch`. Pure, imports neither `javafx` nor `java.sql`. Carries
+  `problems()` (the gate restated), the position/bench edits, and
+  `provenanceSummary()`. (step 2)
+- `data/SidecarStore` — the first code that writes the sidecar. One read shape
+  serves both files (only the header table name differs, `matches` vs `games`);
+  save is a whole-match replacement in one transaction, `CREATE TABLE IF NOT
+  EXISTS` from first-repair.sql's schema, `commit_hash` stamped from
+  `vendor.version`. (step 3)
+- `gui/RepairEditor` + `WorklistPane` wiring — double-click a CERTAIN row opens
+  the editor; appeared/maybe carry the no-team-sheet hint (decision 8). (step 5)
+
+**Two refinements from the plan, recorded because the plan is append-only:**
+
+1. **`save` took three arguments, not two:** `save(match, status, provenance)`.
+   Decision 2's status-as-argument (no separate `release()`) is honored exactly;
+   provenance is the third on-screen field, authored at save time and seeded from
+   `provenanceSummary()`, which is cleaner than threading an editable string
+   through every lineup edit.
+2. **The loader-agreement test moved from step 2 to step 4.** It drives real
+   matches through the real `TransfermarktLoader`, so it needs the vendor→repair
+   load path (step 3's `SidecarStore.load`) to build its fixtures. Step 2 stayed
+   pure and DB-free; the agreement landed beside the reproduction test.
+
+**A measurement that shaped the writer:** of the three copied-through tables, only
+`game_events.player_in_id` is ever null (630,547 of 1,274,469 rows; `club_id` and
+`player_id` never null, lineups and appearances never null). So `EventRow.playerInId`
+is the one boxed (`Long`) field — a vendor NULL must survive the round trip as
+NULL, not become 0, or the reproduction diff would flag it.
+
+**The five gate checks, as measured:**
+
+1. **Reproduction** (`RepairReproductionTest`, 1 test) — the editor rebuilds game
+   2501210 from the vendor, retags the keeper, saves released to a temp sidecar;
+   all four tables match the real stage-3 sidecar byte-for-byte via `EXCEPT ALL`
+   both ways, every column except `provenance` (`commit_hash` included).
+2. **Repair units + loader agreement** (`LoaderAgreementTest`, 4 tests) — the
+   editor's `problems()` agrees with the real loader on a clean match (4361261),
+   `no starting goalkeeper` (2367585), `two starting goalkeepers` (2465452) and
+   `XI is not 11` (2326902): empty exactly when the loader rates, first reason
+   equal to the reason the loader throws. Decision 4 is now a checked invariant.
+3. **Writer tests** (`SidecarStoreTest`, 4 tests) — creates the four tables from
+   nothing; a second save replaces rather than duplicates; `draft`/`released` land
+   in the status column; a saved draft reloads identically (which also proves the
+   `player_in_id` null survives).
+4. **Replay untouched** — byte-identical at step 1 (80,472 replays, base rate
+   0.01532, log-loss 0.6502, held 15,242 / 725, HOME 79,796); steps 2–5 touched
+   no engine code and wrote only to temp files.
+5. **One real repair, end to end** — passed, and exceeded: two matches released,
+   the census moving by exactly two. Écija Balompié's two no-goalkeeper Copa del
+   Rey ties (**2367585**, 2013-09-04; **2367595**, 2013-09-11) both had their
+   keeper **Sergio Sanz (246981)** tagged Centre-Forward; retagged to Goalkeeper
+   in the GUI and released. Result: replay **80,472 → 80,474**, `no starting
+   goalkeeper` **5 → 3**, `sidecar: 1 → 3 released`, held worklist **15,242 / 725 →
+   15,186 / 723**, HOME **79,796 → 79,798**, rating history **+56 rows**, champion
+   log-loss **0.6502 unchanged** (ship gate still 0.6502 < 0.6551). This is the
+   only check that proves GUI → sidecar → engine as one chain, and it did.
+
+**Decision 9's accepted risk materialised on first use, recorded as evidence:**
+both real repairs were released with the *bare generated provenance seed* — e.g.
+"Game 2367585: Sergio Sanz (246981): position Centre-Forward -> Goalkeeper" —
+carrying no note of how Sanz was established as the keeper. The seed records
+*what* changed, not *why*; the discipline rests on the person, and on the first
+real use the box was accepted unedited. Named here rather than fixed silently.
+Because a save is a whole-match replacement, provenance can be enriched later by
+re-opening and re-releasing without moving the census.
 
 ## 27. Weekly automated refresh of the spine database
 

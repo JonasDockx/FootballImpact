@@ -9,12 +9,14 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\cr
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\AppearedPlayer.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\AppearedRow.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\CertainRow.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\DataFiles.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\DataLoader.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\EventOrdering.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\HeldAppearance.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\MatchFacts.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\MaybePlayer.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\MaybeRow.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\SidecarStore.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\TransfermarktLoader.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\UnusableMatchException.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\data\Worklist.java
@@ -27,6 +29,7 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\en
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\SmoothFadeSchedule.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\engine\UpdateSchedule.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\gui\GuiMain.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\gui\RepairEditor.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\gui\WorklistPane.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\Main.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\CompetitionSeason.java
@@ -34,6 +37,11 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\mo
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\MatchEvent.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\Player.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\model\Team.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\repair\AppearanceRow.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\repair\EditableMatch.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\repair\EventRow.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\repair\LineupEntry.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\repair\MatchHeader.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\CsvWriter.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\HeldAppearanceWriter.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\main\java\com\goalimpact\report\Leaderboard.java

@@ -1,5 +1,7 @@
 package com.goalimpact.gui;
 
+import com.goalimpact.data.DataFiles;
+import com.goalimpact.data.SidecarStore;
 import com.goalimpact.data.WorklistReader;
 
 import javafx.application.Application;
@@ -10,7 +12,6 @@ import javafx.scene.layout.BorderPane;
 import javafx.stage.Stage;
 
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.ZoneId;
 
 // The repair tool's entry point (item 17; item 26, stage 4b-1). Stage 4b-1 is
@@ -23,12 +24,6 @@ import java.time.ZoneId;
 // situation with a plain answer, not a stack trace.
 public class GuiMain extends Application {
 
-    // Mirrors Main's constants; the two programs read the same two files.
-    private static final Path SNAPSHOT = Path.of(
-        "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb");
-    private static final Path RESULTS = Path.of(
-        "C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-results.duckdb");
-
     private WorklistReader reader;
 
     @Override
@@ -39,17 +34,18 @@ public class GuiMain extends Application {
     }
 
     private Parent root() {
-        if (!Files.exists(RESULTS) || !Files.exists(SNAPSHOT)) {
+        if (!Files.exists(DataFiles.RESULTS) || !Files.exists(DataFiles.SNAPSHOT)) {
             return message("No worklist found. Run 'mvn compile exec:java' first.");
         }
         try {
-            reader = new WorklistReader(RESULTS, SNAPSHOT);
+            reader = new WorklistReader(DataFiles.RESULTS, DataFiles.SNAPSHOT);
             // Touches all three worklist tables, so an un-run results file
             // fails here with a clear message rather than on the first search.
             String stamp = "run " + reader.runId() + "   worklist written "
-                + Files.getLastModifiedTime(RESULTS).toInstant()
+                + Files.getLastModifiedTime(DataFiles.RESULTS).toInstant()
                     .atZone(ZoneId.systemDefault()).toLocalDateTime().withNano(0);
-            return new WorklistPane(reader, stamp);
+            return new WorklistPane(reader,
+                new SidecarStore(DataFiles.SIDECAR, DataFiles.SNAPSHOT), stamp);
         } catch (Exception e) {
             return message("Could not open the worklist: " + e.getMessage()
                 + "\nRun 'mvn compile exec:java' to build it.");

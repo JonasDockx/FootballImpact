@@ -4,6 +4,7 @@ import com.goalimpact.data.AppearedRow;
 import com.goalimpact.data.CertainRow;
 import com.goalimpact.data.MatchFacts;
 import com.goalimpact.data.MaybeRow;
+import com.goalimpact.data.SidecarStore;
 import com.goalimpact.data.Worklist;
 import com.goalimpact.data.WorklistPlayer;
 import com.goalimpact.data.WorklistReader;
@@ -15,6 +16,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
@@ -26,16 +28,27 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.function.Function;
 
-// The whole screen (item 26, stage 4b-1), and deliberately dumb: it holds no
-// SQL, makes no judgement, and draws only what WorklistReader hands it. The
-// three rungs are drawn as three sections and never merged - a row's meaning
-// differs per rung and each earns its own last column, the same reason stage 4a
-// wrote two tables rather than one with blank-when-not-applicable columns.
-// Read-only throughout: nothing here can reach the sidecar, which is not even
-// opened until stage 4b-2.
+// The whole screen (item 26, stage 4b-1, extended in 4b-2), and deliberately
+// dumb: it holds no SQL, makes no judgement, and draws only what WorklistReader
+// hands it. The three rungs are drawn as three sections and never merged - a
+// row's meaning differs per rung and each earns its own last column, the same
+// reason stage 4a wrote two tables rather than one with blank-when-not-applicable
+// columns.
+//
+// Stage 4b-2 gives the CERTAIN section, and only that section, a way through to
+// the editor: those matches have a team sheet, so a repair is a change to it.
+// Double-clicking a certain row opens RepairEditor on that game. Appeared and
+// maybe matches have no sheet at all, so repairing one means naming players from
+// nothing (decision 8); those sections carry a one-line hint saying so and stay
+// read-only.
 class WorklistPane extends BorderPane {
 
+    private static final String NO_SHEET_HINT =
+        "No team sheet exists for these, so a repair would mean naming players "
+        + "from nothing - not offered in this tool yet (stage 4b-2, decision 8).";
+
     private final WorklistReader reader;
+    private final SidecarStore store;
 
     private final TextField search = new TextField();
     private final ListView<WorklistPlayer> players = new ListView<>();
@@ -50,8 +63,9 @@ class WorklistPane extends BorderPane {
     private final TableView<AppearedRow> appeared = new TableView<>();
     private final TableView<MaybeRow> maybe = new TableView<>();
 
-    WorklistPane(WorklistReader reader, String stamp) {
+    WorklistPane(WorklistReader reader, SidecarStore store, String stamp) {
         this.reader = reader;
+        this.store = store;
 
         search.setPromptText("player name, then Enter");
         search.setPrefWidth(240);
@@ -82,13 +96,34 @@ class WorklistPane extends BorderPane {
         VBox.setVgrow(players, Priority.ALWAYS);
         setLeft(left);
 
-        VBox centre = new VBox(6, playerName,
-            certainHeader, certain, appearedHeader, appeared, maybeHeader, maybe);
+        Label editableHint = new Label("Double-click a CERTAIN row to repair it.");
+        Label appearedHint = hint();
+        Label maybeHint = hint();
+
+        VBox centre = new VBox(6, playerName, editableHint,
+            certainHeader, certain, appearedHeader, appeared, appearedHint,
+            maybeHeader, maybe, maybeHint);
         centre.setPadding(new Insets(8));
         VBox.setVgrow(certain, Priority.ALWAYS);
         VBox.setVgrow(appeared, Priority.ALWAYS);
         VBox.setVgrow(maybe, Priority.ALWAYS);
         setCenter(centre);
+    }
+
+    private static Label hint() {
+        Label label = new Label(NO_SHEET_HINT);
+        label.setWrapText(true);
+        return label;
+    }
+
+    // Only the certain table opens the editor (decision 8), and only on a
+    // double-click of a populated row.
+    private void openEditor(CertainRow row) {
+        try {
+            new RepairEditor(store, row.match().gameId()).showAndWait();
+        } catch (SQLException e) {
+            message.setText("Could not open the match: " + e.getMessage());
+        }
     }
 
     // Searching the worklist's own names can only offer a player there is work
@@ -142,6 +177,15 @@ class WorklistPane extends BorderPane {
 
     private void buildTables() {
         certain.setPlaceholder(new Label("none"));
+        certain.setRowFactory(table -> {
+            TableRow<CertainRow> row = new TableRow<>();
+            row.setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && !row.isEmpty()) {
+                    openEditor(row.getItem());
+                }
+            });
+            return row;
+        });
         addMatchColumns(certain, CertainRow::match);
         addColumn(certain, "club", 70, r -> String.valueOf(r.clubId()));
         addColumn(certain, "started", 70, r -> r.started() ? "yes" : "no");

@@ -318,6 +318,53 @@ code lives in a new `com.goalimpact.gui` package, which holds no SQL exactly as
 `data` holds no JavaFX. The split remains mechanical whenever `mvn test` gets
 slow or someone actually imports JavaFX into the engine.
 
+**Amended 2026-07-23 (item 26, stage 4b-2): the sidecar's write path.** Everything
+above describes reading the sidecar; this is the first code that ever writes it,
+and it pinned four decisions the earlier amendments left open.
+
+- **A save is one operation that takes the status as an argument** —
+  `save(match, draft|released)` — and remains a whole-match replacement: every row
+  for that game id is deleted across all four tables and re-inserted. A separate
+  one-column `release(gameId)` was considered and declined: with status as an
+  argument the Release button necessarily writes exactly what is on screen, so a
+  release can never publish content that has drifted from what the operator is
+  looking at. The cost is that releasing is no longer a separately assertable
+  one-cell change.
+- **The writer owns the schema.** It issues `CREATE TABLE IF NOT EXISTS` for
+  `matches`, `game_lineups`, `game_events` and `appearances` at open, so opening
+  the real sidecar is a no-op and opening a temp path yields an empty sidecar —
+  which is the whole of the write-path test strategy: the precious file is never
+  touched by a test. The schema is therefore stated both here in Java and in
+  `scripts/first-repair.sql`, deliberately: that script is stage 3's evidence and
+  is never rewritten, so the Java becomes the live definition and the script the
+  historical one.
+- **The sidecar is opened per operation and closed immediately.** DuckDB permits
+  one writer and `Main` reads the sidecar on every replay, so a session-long
+  read-write handle would make "close the GUI before replaying" a hard
+  prerequisite rather than a courtesy. A millisecond-wide window means the precise
+  locking semantics never need to be relied upon. Both programs now read one path
+  holder in `data` rather than their own copies of the constants — with a writer in
+  play, two programs disagreeing about the sidecar path would file repairs into a
+  file the replay never reads.
+- **The usability gate is stated a second time, in the editor, and the duplication
+  is pinned by a test.** The screen must call a match fixed exactly when the loader
+  would rate it; a divergence is silent until a full replay. Extracting a shared
+  gate was declined — the loader's gate is not a standalone predicate but is welded
+  into `startingXi(...)`, which builds `Player`s, resolves the home side and
+  constructs a `StartingXI` while throwing typed reasons, so extraction means
+  surgery on the one path every stage has held byte-identical. The rule is two
+  sentences (eleven starters; exactly one of them `position = 'Goalkeeper'`), and
+  an agreement test — a lineup the editor calls clean must replay through
+  `TransfermarktLoader`, one it rejects must throw the matching reason — converts
+  the duplication from a drift risk into a checked invariant.
+
+**The editing judgement lives in a new `com.goalimpact.repair` package**, whose
+charter is that it imports **neither `javafx` nor `java.sql`**. This is the tested
+view-model layer stage 4b-1 declined to build empty, and the seam ADR 0004 would
+predict: `data` knows what a database is, `gui` holds widgets, `repair` holds the
+judgement — the editable match, the gate rule, the provenance summary — and is
+unit-testable by construction rather than by discipline.
+
 ## Considered options
 
 - **Pool StatsBomb and Transfermarkt (rejected).** Requires cross-provider
@@ -369,6 +416,18 @@ slow or someone actually imports JavaFX into the engine.
   broken, and substitutes a build-tooling problem for a domain one. *Re-opened
   and re-rejected 2026-07-23 when JavaFX actually landed (item 26, stage 4b) —
   see the amendment under "One Maven module".*
+- **A shared usability-gate class, called by both the loader and the repair
+  editor (rejected 2026-07-23, item 26 stage 4b-2).** The obvious way to stop the
+  editor's verdict drifting from the loader's, and it would work — but the loader's
+  gate is not a predicate sitting on its own. It runs inside `startingXi(...)`
+  mid-assembly, over rows the loader has already staged, building `Player`s and a
+  `StartingXI` and resolving the home side as it goes, and reporting failures as
+  typed reasons the skip census and the worklist both key on. Extracting it means
+  inventing a shape common to the loader's staged rows and the editor's in-progress
+  ones, and operating on the single path every stage of this item has held
+  byte-identical, for the benefit of one screen. The rule restated is two
+  sentences; an agreement test makes the duplication a checked invariant instead.
+  Revisit if a third caller ever needs the gate.
 - **A `rating_eligible` flag per competition (deferred).** Designed to exclude
   friendlies and youth football. This snapshot contains neither — all 65
   competitions are competitive senior football. Build it when something needs

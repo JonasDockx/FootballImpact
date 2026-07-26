@@ -2,6 +2,7 @@ package com.goalimpact;
 
 import com.goalimpact.credit.TimeIntegratedResidual;
 import com.goalimpact.data.AppearedPlayer;
+import com.goalimpact.data.DataFiles;
 import com.goalimpact.data.DataLoader;
 import com.goalimpact.data.HeldAppearance;
 import com.goalimpact.data.MaybePlayer;
@@ -150,21 +151,6 @@ public class Main {
 
     private static final Path STATSBOMB_DIR = Path.of(
         "C:/Users/dockx/Documents/Programmeren/FootballData/statsbomb-open-data/data");
-    private static final Path SNAPSHOT = Path.of(
-        "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb");
-
-    // ADR 0009's second file (item 26). Absent today, so the loader attaches
-    // nothing and the run is byte-identical; stage 3 creates it with the
-    // first real repair, and this same wiring picks it up unchanged.
-    private static final Path SIDECAR = Path.of(
-        "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-sidecar.duckdb");
-
-    // ADR 0009's third file, ADR 0011's first use of it. Kept beside the
-    // snapshot and the sidecar so one DuckDB connection can attach all three,
-    // and out of the repo because it is rebuilt, not versioned.
-    private static final Path RESULTS = Path.of(
-        "C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-results.duckdb");
-
 
     // Increment 2's vertical slice (ADR 0009): the league season increment 1
     // proved, plus a domestic cup and a finals tournament - which between
@@ -342,25 +328,25 @@ public class Main {
         String runId = String.format(Locale.ROOT, "%s-%s-k%.2f-K0%.2f-H%.0f-f%.2f-h%.2f",
             SPINE, SCOPE, bestGain, bestK0, bestH, bestFloor, bestHome);
         Map<Long, PlayerTally> tallies;
-        try (RatingHistoryWriter history = new RatingHistoryWriter(RESULTS, runId)) {
+        try (RatingHistoryWriter history = new RatingHistoryWriter(DataFiles.RESULTS, runId)) {
             tallies = replay(matches, replays, bestGain, bestHome, bestFieldOnly,
                 new SmoothFadeSchedule(bestK0, bestH, bestFloor), new ScoringWindow(), history);
             System.out.printf(Locale.US, "%nRating history: %,d rows -> %s (run %s)%n",
-                history.rows(), RESULTS.toAbsolutePath(), runId);
+                history.rows(), DataFiles.RESULTS.toAbsolutePath(), runId);
         }
 
         // The worklist is Transfermarkt's (its gate produced it). Written after
         // the history block so the two never hold the results file at once.
         if (SPINE == Spine.TRANSFERMARKT) {
-            long heldRows = HeldAppearanceWriter.write(RESULTS, runId, held);
+            long heldRows = HeldAppearanceWriter.write(DataFiles.RESULTS, runId, held);
             System.out.printf(Locale.US, "Held worklist: %,d rows -> %s%n",
-                heldRows, RESULTS.toAbsolutePath());
+                heldRows, DataFiles.RESULTS.toAbsolutePath());
             // The two lower rungs (item 26, stage 4a), written after the held
             // block so no two writers hold the results file at once.
-            MissingMatchWriter.write(RESULTS, runId, appeared, maybe);
+            MissingMatchWriter.write(DataFiles.RESULTS, runId, appeared, maybe);
             System.out.printf(Locale.US,
                 "Missing-match tiers: %,d appeared + %,d maybe rows -> %s%n",
-                appeared.size(), maybe.size(), RESULTS.toAbsolutePath());
+                appeared.size(), maybe.size(), DataFiles.RESULTS.toAbsolutePath());
         }
 
         new Leaderboard().print(tallies.values(), 20);
@@ -409,7 +395,7 @@ public class Main {
         Set<Long> leagueMatches, List<HeldAppearance> held,
         List<AppearedPlayer> appeared, List<MaybePlayer> maybe) throws Exception {
 
-        try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT, SIDECAR)) {
+        try (TransfermarktLoader loader = new TransfermarktLoader(DataFiles.SNAPSHOT, DataFiles.SIDECAR)) {
             List<Match> all = new ArrayList<>();
             switch (SCOPE) {
                 case ALL -> {
