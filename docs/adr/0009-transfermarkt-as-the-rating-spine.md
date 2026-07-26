@@ -365,6 +365,23 @@ predict: `data` knows what a database is, `gui` holds widgets, `repair` holds th
 judgement — the editable match, the gate rule, the provenance summary — and is
 unit-testable by construction rather than by discipline.
 
+**Amended 2026-07-26 (item 26, stage 4b-3): the sidecar also holds *reconstructed*
+matches.** Everything above corrects a team sheet the vendor supplied. The appeared
+tier has no team sheet at all, yet the vendor's own records reconstruct one without
+invention: the roster is `appearances` (everyone who took the pitch), each player's
+position — and so the goalkeeper — is `players` (100% covered on the 4,695
+both-sides-complete games), and the starting eleven is the roster **minus** whoever
+a `Substitutions` event names coming on. Measured 2026-07-26, that derivation yields
+exactly eleven a side on 98.6% of sides and a clean eleven-and-eleven on 4,570 of
+4,695 games. The load path branches — draft, else vendor sheet, else reconstruct —
+so the editor stays ignorant of the tier, and an `EditableMatch` carries whether it
+came from a sheet or was reconstructed so its provenance says which. The property
+that makes this safe rather than a guess: the start/bench split is derived from the
+very substitution events that later drive the replay, so the reconstruction is
+consistent with the engine by construction. The sparse 15% (a side under eleven, or
+absent) still require naming players the record lacks and are deferred to the ranked
+picker, exactly as the certain tier deferred adding a player.
+
 ## Considered options
 
 - **Pool StatsBomb and Transfermarkt (rejected).** Requires cross-provider

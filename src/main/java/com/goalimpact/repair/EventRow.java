@@ -14,4 +14,10 @@ package com.goalimpact.repair;
 // stage-4 reproduction diff would catch as a spurious difference.
 public record EventRow(long gameId, int minute, String type, long clubId,
     long playerId, Long playerInId, String description) {
+
+    // The vendor's event-type string for a substitution (measured 2026-07-26:
+    // "Substitutions", the only sub-type in the 4,694 events-bearing appeared
+    // games). The appeared reconstruction reads it to tell a starter from a sub:
+    // a player named as this event's playerInId came on, so he did not start.
+    public static final String SUBSTITUTION = "Substitutions";
 }

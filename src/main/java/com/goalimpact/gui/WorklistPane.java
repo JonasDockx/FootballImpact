@@ -35,17 +35,23 @@ import java.util.function.Function;
 // reason stage 4a wrote two tables rather than one with blank-when-not-applicable
 // columns.
 //
-// Stage 4b-2 gives the CERTAIN section, and only that section, a way through to
-// the editor: those matches have a team sheet, so a repair is a change to it.
-// Double-clicking a certain row opens RepairEditor on that game. Appeared and
-// maybe matches have no sheet at all, so repairing one means naming players from
-// nothing (decision 8); those sections carry a one-line hint saying so and stay
-// read-only.
+// Stage 4b-2 gave the CERTAIN section a way through to the editor; stage 4b-3
+// adds the APPEARED section. Both open RepairEditor on a double-click - a certain
+// match edits its own team sheet, an appeared match is reconstructed from the
+// appearance record, and the editor tells them apart, not this pane. Only MAYBE
+// stays read-only: it has no roster to rebuild from, so a repair there means
+// naming players from nothing (the ranked picker, a later slice), and it carries
+// a one-line hint saying so.
 class WorklistPane extends BorderPane {
 
-    private static final String NO_SHEET_HINT =
-        "No team sheet exists for these, so a repair would mean naming players "
-        + "from nothing - not offered in this tool yet (stage 4b-2, decision 8).";
+    private static final String APPEARED_HINT =
+        "No team sheet exists for these, but the appearance record does: "
+        + "double-click an APPEARED row to rebuild the match from it.";
+
+    private static final String MAYBE_HINT =
+        "No team sheet and no appearance record for these, so a repair would mean "
+        + "naming players from nothing - the ranked picker, not offered yet "
+        + "(stage 4b-3, decision 2).";
 
     private final WorklistReader reader;
     private final SidecarStore store;
@@ -96,9 +102,9 @@ class WorklistPane extends BorderPane {
         VBox.setVgrow(players, Priority.ALWAYS);
         setLeft(left);
 
-        Label editableHint = new Label("Double-click a CERTAIN row to repair it.");
-        Label appearedHint = hint();
-        Label maybeHint = hint();
+        Label editableHint = new Label("Double-click a CERTAIN or APPEARED row to repair it.");
+        Label appearedHint = hint(APPEARED_HINT);
+        Label maybeHint = hint(MAYBE_HINT);
 
         VBox centre = new VBox(6, playerName, editableHint,
             certainHeader, certain, appearedHeader, appeared, appearedHint,
@@ -110,20 +116,34 @@ class WorklistPane extends BorderPane {
         setCenter(centre);
     }
 
-    private static Label hint() {
-        Label label = new Label(NO_SHEET_HINT);
+    private static Label hint(String text) {
+        Label label = new Label(text);
         label.setWrapText(true);
         return label;
     }
 
-    // Only the certain table opens the editor (decision 8), and only on a
-    // double-click of a populated row.
-    private void openEditor(CertainRow row) {
+    // Both the certain and appeared tables open the editor (stage 4b-3); only
+    // maybe stays read-only, having no roster to rebuild from. A double-click on a
+    // populated row opens the game; the editor reconstructs an appeared match on
+    // its own, so the pane needs only the game id and never learns the tier.
+    private void openEditor(long gameId) {
         try {
-            new RepairEditor(store, row.match().gameId()).showAndWait();
+            new RepairEditor(store, gameId).showAndWait();
         } catch (SQLException e) {
             message.setText("Could not open the match: " + e.getMessage());
         }
+    }
+
+    private <T> void openOnDoubleClick(TableView<T> table, Function<T, Long> gameId) {
+        table.setRowFactory(t -> {
+            TableRow<T> row = new TableRow<>();
+            row.setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && !row.isEmpty()) {
+                    openEditor(gameId.apply(row.getItem()));
+                }
+            });
+            return row;
+        });
     }
 
     // Searching the worklist's own names can only offer a player there is work
@@ -177,21 +197,14 @@ class WorklistPane extends BorderPane {
 
     private void buildTables() {
         certain.setPlaceholder(new Label("none"));
-        certain.setRowFactory(table -> {
-            TableRow<CertainRow> row = new TableRow<>();
-            row.setOnMouseClicked(e -> {
-                if (e.getClickCount() == 2 && !row.isEmpty()) {
-                    openEditor(row.getItem());
-                }
-            });
-            return row;
-        });
+        openOnDoubleClick(certain, r -> r.match().gameId());
         addMatchColumns(certain, CertainRow::match);
         addColumn(certain, "club", 70, r -> String.valueOf(r.clubId()));
         addColumn(certain, "started", 70, r -> r.started() ? "yes" : "no");
         addColumn(certain, "reason", 150, CertainRow::reason);
 
         appeared.setPlaceholder(new Label("none"));
+        openOnDoubleClick(appeared, r -> r.match().gameId());
         addMatchColumns(appeared, AppearedRow::match);
         addColumn(appeared, "club", 70, r -> String.valueOf(r.clubId()));
         addColumn(appeared, "minutes", 80, r -> String.valueOf(r.minutes()));

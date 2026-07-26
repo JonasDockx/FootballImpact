@@ -1887,6 +1887,174 @@ real use the box was accepted unedited. Named here rather than fixed silently.
 Because a save is a whole-match replacement, provenance can be enriched later by
 re-opening and re-releasing without moving the census.
 
+### Stage 4b-3 plan (grilled 2026-07-26)
+
+The **appeared tier** gets an editor. The user asked to repair appeared and maybe
+matches too; the grill split them, because the two tiers are not equally hard and
+because 4b-2's discipline is one new risk per stage. **This stage is appeared
+only; maybe stays read-only.** Two forks went to the user (both recommendations
+taken); the rest fell out of measurement and the 4b-2 decisions.
+
+**The measurement that cut the slice** (2026-07-26, over the 5,518 games that have
+`appearances` rows but no `game_lineups` — the appeared set):
+
+| Fact the gate needs | Source | Coverage on the 4,695 good games |
+|---|---|---|
+| Roster, both sides | `appearances` | 9,865 sides carry 12–17 (XI + subs), 50 exactly 11, **541 sides <11** |
+| Position → the goalkeeper | `players` (left join) | **100%** have a position; **one** started GK on 9,226 / 9,390 sides (98.3%), zero sides with none, 164 with a backup |
+| Who started vs subbed on | roster **minus** the `Substitutions` events' `player_in_id` | exactly **11** on 9,257 / 9,390 sides (98.6%); a clean **11-and-11** on **4,570 / 4,695** games (97.3%) |
+
+So an appeared match is **reconstructable from the data alone** — nothing invented.
+"Both sides ≥ 11" holds for **4,695 of 5,518 (85%)**; all of those carry events
+and 4,694 carry substitution events. This is *not* decision 8's "author 11 from
+nothing" — that is only the sparse 15%. Worked example, hand-verified: game
+**3839821** (Olympique Lyon 4–1 Troyes, FR1 2022-08-19) reconstructs to Lyon 11 +
+5 bench (GK Rémy Riou, Lacazette, Tagliafico, Tolisso…) and Troyes 11 + 4 bench
+(GK Gauthier Gallon, Rami…), every sub under 32 minutes.
+
+**Decisions:**
+
+1. **Reconstruct fully from the data** (user's choice, the recommended option).
+   On open, an appeared match is rebuilt: roster from `appearances`; each player's
+   position — and so the goalkeeper — from `players` (left join, 100% covered);
+   the 11 starters as *everyone the substitution events do not name coming on*.
+   ~97% open already gate-passing; the ~3% that do not add up open **Held** and are
+   fixed with the buttons 4b-2 already built. The key property, and why this is not
+   the guess decision 8 feared: the start/bench split is **derived from the very
+   substitution events that will drive the replay**, so the reconstruction is
+   internally consistent with the engine rather than an independent estimate.
+2. **The sparse 15% stay out, behind a hint** (user's choice, recommended). Only
+   the 4,695 both-sides-≥11 games reconstruct. The 823 with a side under 11 (or one
+   side absent) genuinely need naming players the record lacks — the ranked picker,
+   which is the next slice / item 17's remainder — exactly as the certain tier
+   deferred "add a player". Their appeared rows still open, but the reconstruction
+   is short an XI and `problems()` says so, so Release is disabled: the hint is the
+   live verdict, not a new worklist column.
+3. **No new editing moves and no picker this stage.** The 3% imperfect cases (10 or
+   12 derived starters) need only `asStarter` / `asBench`, already built, because a
+   roster ≥ 11 always has an 11th to promote or a 12th to bench. So the only new
+   surface is a read path, a reconstruction factory, and opening appeared rows.
+4. **The reconstruction judgement lives in `repair`, fed by rows from `data`** —
+   the 4b-2 seam, unchanged. `data` reads the raw roster (club, id, name, position)
+   and the events; a `repair` factory (`EditableMatch.fromAppearances`) sets
+   start/bench from the sub events. `SidecarStore.load(gameId)` branches: existing
+   draft → load it; else vendor lineup present → the certain path; else →
+   reconstruct. The editor calls `store.load` and never learns the tier.
+5. **`EditableMatch` carries an origin marker (vendor sheet vs reconstructed)** so
+   provenance reads honestly. For a reconstructed match the seed names the source
+   ("Reconstructed from appearances + substitution events; started = not subbed on;
+   home GK …, away GK …"), and `original` is the reconstruction itself, so a
+   released-as-is appeared match records "reconstructed, no hand edits" and any
+   tweak diffs against it. The vendor-sheet path and its diff are untouched.
+6. **Agreement with the loader is proved by the replay, not a unit test here.** The
+   loader never sees an appeared match (it holds them as no-lineup), so there is no
+   vendor lineup to feed it for a side-by-side `problems()` check. Instead check 5
+   is the proof: a match `problems()` calls clean must actually *rate* when the
+   engine replays it from the sidecar — if it did not, the two gates would have
+   disagreed. `LoaderAgreementTest` (4b-2) still guards the certain path.
+7. **The user hand-types the Java.** The 4b-2 waiver was scoped to 4b-2 and does
+   not carry. Prose — this block, the ADR amendment — is written directly.
+
+**No new glossary terms.** *Reconstructed* is described by *Match state* (a
+reconstructed-then-Released match is still just *Released*, a whole-match
+replacement) and *Worklist tier*. Recorded so the absence is a decision.
+
+**ADR 0009 amended:** the sidecar now also holds *reconstructed* matches (the
+appeared tier), built from `appearances` + substitution events, not only corrected
+vendor sheets; their provenance marks them so.
+
+**Build order** — prose first: (0) this block + the ADR 0009 amendment; (1) the
+`repair` layer — the origin marker and `fromAppearances`, unit tests first, pure;
+(2) the `data` layer — the appeared read and the `load` branch, writer untouched,
+a reconstruction test on real fixtures; (3) the `gui` — appeared rows open the
+editor, section hint reworded; (4) the replay-untouched regression, then one real
+appeared repair end to end; (5) outcome block and commit.
+
+**Gate (five checks):**
+
+1. **Reconstruction is exact** — a `repair` test rebuilds game **3839821** from
+   fixture rows and asserts Lyon 11 + 5 bench, Troyes 11 + 4 bench, GKs Riou
+   (18940) and Gallon (193256), starters = the eleven not named in a sub event.
+2. **`repair` units** — `fromAppearances` starter derivation; a 3%-shaped game
+   (10 or 12 derived starters) makes `problems()` report `XI is not 11`; the
+   reconstructed provenance seed names the source, not a vendor diff.
+3. **Writer / reload** — a reconstructed match saved as `draft` reloads identically
+   (its derived lineup and any null `player_in_id` survive), reusing 4b-2's writer
+   unchanged.
+4. **Replay untouched** with the sidecar as it stands after 4b-2 — **80,474**
+   replays, base rate 0.01532, log-loss **0.6502**, held **15,186 / 723**, HOME
+   **79,798**. Steps 1–3 touch no engine code and write only temp files.
+5. **One real appeared repair, end to end** — reconstruct and release one clean
+   appeared match (candidate **3839821**, Lyon v Troyes); the next replay must move
+   by **exactly one** (a held appeared match becomes rated): replays 80,474 →
+   **80,475**, the appeared worklist down by that match's rows, log-loss
+   re-reported. The only check that proves reconstruct → sidecar → engine as one
+   chain, and (per decision 6) that `problems()` and the loader agree on a
+   reconstructed match.
+
+**Explicit non-goals** for stage 4b-3: no maybe tier, no ranked player picker, no
+sparse/one-sided games, no synthesising substitution timings, no new editing
+moves beyond the two 4b-2 shipped.
+
+### Stage 4b-3 outcome (shipped 2026-07-26)
+
+Built in the grilled order, tests first, all five checks passed. Test count
+**141 → 147**. The stage was as small as the measurement promised: no new editing
+moves, no picker, one new read path and one factory. The files, by layer:
+
+- `repair/` — `EditableMatch.fromAppearances` (roster + events → a lineup whose
+  starters are everyone not subbed on) and an `Origin` marker (`VENDOR_SHEET` vs
+  `RECONSTRUCTED`) so `provenanceSummary()` reads as a correction or as a rebuild;
+  `EventRow.SUBSTITUTION` names the event type the derivation reads. Still pure.
+- `data/SidecarStore` — `load` gained a third branch: draft, else vendor sheet
+  (`hasVendorLineup`), else `reconstructAppeared`. The roster read joins vendor
+  `appearances` to `players` for a position, `COALESCE(…, 'Unknown')` so the
+  sidecar never stores a null. The writer is untouched — a released reconstruction
+  is written by the same whole-match `save` as any repair.
+- `gui/WorklistPane` — the appeared table now opens the editor too
+  (`openOnDoubleClick`, a small generic over both tables); `openEditor` takes a
+  game id, so the pane never learns the tier. The appeared hint changed from
+  "no team sheet" to "double-click to rebuild from the appearance record"; maybe
+  keeps the no-picker hint. `RepairEditor` needed no change at all.
+
+**The measurement that cut the slice held up in code** (the 4,695 both-sides-≥11
+appeared games): starters = roster minus substituted-in derives a clean 11-and-11
+on 4,570 of them (97.3%); positions from `players` cover 100%, singling out one
+started goalkeeper on 98.3% of sides. So ~97% open already gate-passing and the
+rest open Held for the two existing buttons — no invention anywhere.
+
+**The five gate checks, as measured:**
+
+1. **Reconstruction is exact** (`AppearedReconstructionTest`, 3 tests) — game
+   3839821 (Lyon 4–1 Troyes) loads through `SidecarStore` against a never-written
+   sidecar and reconstructs to Lyon 11 + 5 bench (GK Riou, 18940) and Troyes 11 +
+   4 bench (GK Gallon, 193256), `problems()` empty, the subbed-on benched.
+2. **`repair` units** (`EditableMatchTest`, +3 = 8) — `fromAppearances` marks the
+   subbed-on as bench and the rest as starters; an unexplained twelfth leaves the
+   side `XI is not 11` and the bench button clears it; the reconstructed provenance
+   names the source and both keepers rather than a vendor diff.
+3. **Writer / reload** — reused 4b-2's `SidecarStoreTest` unchanged; a saved match
+   reloads identically, and after any save the materialised `game_lineups` drives
+   reloads, so the reconstruction only ever runs on the first open.
+4. **Replay untouched** — byte-identical with the post-4b-2 sidecar: 80,474
+   replays, base rate 0.01532, log-loss 0.6502, held 15,186 / 723, HOME 79,798.
+   The reconstruction lives only in the GUI's `load` path; the engine reads
+   `game_lineups` and never sees it.
+5. **One real appeared repair, end to end** — reconstructed and released game
+   **3839821** (Olympique Lyon v ESTAC Troyes, FR1 2022-08-19) from the GUI; it
+   opened "ready to release" with nothing to fix. The next replay moved by exactly
+   one match: replays **80,474 → 80,475**, `sidecar: 3 → 4 released`, appeared tier
+   **137,316 / 5,518 → 137,285 / 5,517** (−31 rows, the game's whole worklist
+   roster), no-lineup partition **7,760 = 5,517 + 2,243**, venue HOME **79,798 →
+   79,799**, held worklist **15,186 / 723 unmoved** (it is the certain tier), champion
+   log-loss **0.6502** (whole 0.6508), ship gate strictly better. This is the check
+   no test provides — and, per decision 6, the loader accepting what `problems()`
+   called clean is the proof the two gates agree on a reconstructed match.
+
+**The maybe tier is still read-only.** Repairing one needs the ranked picker to
+name players the record does not contain; that, and the sparse 15% of appeared
+games, are item 17's remaining slice.
+
 ## 27. Weekly automated refresh of the spine database
 
 **Why (user, 2026-07-23):** once the spine is self-rebuildable (item 26), keep it

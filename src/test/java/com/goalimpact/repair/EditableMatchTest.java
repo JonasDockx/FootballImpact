@@ -89,4 +89,75 @@ class EditableMatchTest {
         assertTrue(provenance.contains("Centre-Forward"), provenance);
         assertTrue(provenance.contains("Goalkeeper"), provenance);
     }
+
+    // --- Stage 4b-3: the appeared reconstruction ------------------------------
+
+    private static LineupEntry rosterEntry(long club, long id, String position) {
+        // The type is irrelevant on the way in: fromAppearances sets start/bench
+        // from the events, so the caller's placeholder is overwritten.
+        return new LineupEntry(club, id, "P" + id, position, "substitutes");
+    }
+
+    // A full side's roster as appearances would hand it over: eleven who started
+    // plus the given number of substitutes, all before any start/bench is decided.
+    private static List<LineupEntry> rosterSide(long club, long base, int subs) {
+        List<LineupEntry> side = new ArrayList<>();
+        side.add(rosterEntry(club, base, "Goalkeeper"));
+        for (int i = 1; i < 11 + subs; i++) {
+            side.add(rosterEntry(club, base + i, "Midfield"));
+        }
+        return side;
+    }
+
+    private static EventRow subOn(long club, long playerInId) {
+        return new EventRow(2501210L, 70, EventRow.SUBSTITUTION, club, 0L, playerInId, "");
+    }
+
+    @Test
+    void reconstructionMarksTheSubbedOnAsBenchAndTheRestAsStarters() {
+        List<LineupEntry> roster = new ArrayList<>(rosterSide(HOME, 100, 3));
+        roster.addAll(rosterSide(AWAY, 200, 2));
+        // The last three home entries and last two away entries came on.
+        List<EventRow> events = List.of(
+            subOn(HOME, 111), subOn(HOME, 112), subOn(HOME, 113),
+            subOn(AWAY, 211), subOn(AWAY, 212));
+
+        EditableMatch match = EditableMatch.fromAppearances(header(), roster, events, List.of());
+
+        assertEquals(EditableMatch.Origin.RECONSTRUCTED, match.origin());
+        assertTrue(match.problems().isEmpty(), match.problems().toString());
+        long starters = match.lineup().stream().filter(LineupEntry::starter).count();
+        assertEquals(22, starters);
+        assertTrue(match.lineup().stream()
+            .filter(e -> e.playerId() == 111 || e.playerId() == 212)
+            .noneMatch(LineupEntry::starter));
+    }
+
+    // The ~3% the derivation cannot resolve: no substitution names the twelfth
+    // home player, so twelve are left starting and the count check fires - exactly
+    // the case the operator finishes with the bench button.
+    @Test
+    void anUnexplainedTwelfthLeavesTheSideHeld() {
+        List<LineupEntry> roster = new ArrayList<>(rosterSide(HOME, 100, 1));
+        roster.addAll(rosterSide(AWAY, 200, 0));
+        // Only the away game is fully explained; the home sub has no event.
+        EditableMatch match = EditableMatch.fromAppearances(header(), roster, List.of(), List.of());
+
+        assertEquals(List.of("XI is not 11"), match.problems());
+        assertTrue(match.asBench(111).problems().isEmpty());
+    }
+
+    @Test
+    void reconstructedProvenanceNamesTheSourceAndBothKeepers() {
+        List<LineupEntry> roster = new ArrayList<>(rosterSide(HOME, 100, 1));
+        roster.addAll(rosterSide(AWAY, 200, 1));
+        List<EventRow> events = List.of(subOn(HOME, 111), subOn(AWAY, 211));
+
+        String seed = EditableMatch.fromAppearances(header(), roster, events, List.of())
+            .provenanceSummary();
+
+        assertTrue(seed.contains("reconstructed"), seed);
+        assertTrue(seed.contains("P100"), seed);   // home keeper, id 100
+        assertTrue(seed.contains("P200"), seed);   // away keeper, id 200
+    }
 }

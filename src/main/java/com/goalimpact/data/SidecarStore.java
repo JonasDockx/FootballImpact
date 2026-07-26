@@ -103,9 +103,26 @@ public final class SidecarStore {
         WHERE CAST(game_id AS BIGINT) = ? ORDER BY minutes_played
         """;
 
+    // The appeared roster (stage 4b-3): everyone the vendor's appearances named,
+    // with a position looked up from players so the goalkeeper is known. The join
+    // is a LEFT join and drops no roster player (100% carry a position on the
+    // reconstructable games, measured 2026-07-26); a rare miss becomes 'Unknown'
+    // rather than null so the sidecar never stores a null position. The type here
+    // is a placeholder - fromAppearances decides start/bench from the events.
+    private static final String ROSTER_SQL = """
+        SELECT a.player_club_id AS club_id, a.player_id, a.player_name,
+               COALESCE(p.position, 'Unknown') AS position
+        FROM appearances a
+        LEFT JOIN players p ON p.player_id = a.player_id
+        WHERE CAST(a.game_id AS BIGINT) = ?
+        ORDER BY a.player_club_id, a.player_id
+        """;
+
     // Load a match for editing: the sidecar draft if one exists, else the vendor
     // (decision 6) - without which "save as draft" would be write-only and you
-    // could not see your own work.
+    // could not see your own work. A vendor match with a team sheet is the certain
+    // path; one without is the appeared tier, reconstructed from its records (stage
+    // 4b-3). The caller never learns which - it just gets an EditableMatch.
     public EditableMatch load(long gameId) throws SQLException {
         if (hasDraft(gameId)) {
             try (Connection c = openReadOnly(sidecar)) {
@@ -113,8 +130,45 @@ public final class SidecarStore {
             }
         }
         try (Connection c = openReadOnly(snapshot)) {
-            return readMatch(c, "games", gameId);
+            if (hasVendorLineup(c, gameId)) {
+                return readMatch(c, "games", gameId);
+            }
+            return reconstructAppeared(c, gameId);
         }
+    }
+
+    private boolean hasVendorLineup(Connection c, long gameId) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement(
+            "SELECT 1 FROM game_lineups WHERE CAST(game_id AS BIGINT) = ? LIMIT 1")) {
+            ps.setLong(1, gameId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    // Build an appeared match from the vendor's own records: the games header, the
+    // appearances roster, and the events (which fromAppearances reads to split
+    // starters from subs). The appearances minutes are copied through as for any
+    // released match.
+    private EditableMatch reconstructAppeared(Connection c, long gameId) throws SQLException {
+        return EditableMatch.fromAppearances(readHeader(c, "games", gameId),
+            readRoster(c, gameId), readEvents(c, gameId), readAppearances(c, gameId));
+    }
+
+    private List<LineupEntry> readRoster(Connection c, long gameId) throws SQLException {
+        List<LineupEntry> out = new ArrayList<>();
+        try (PreparedStatement ps = c.prepareStatement(ROSTER_SQL)) {
+            ps.setLong(1, gameId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new LineupEntry(rs.getLong("club_id"), rs.getLong("player_id"),
+                        rs.getString("player_name"), rs.getString("position"),
+                        LineupEntry.BENCH));
+                }
+            }
+        }
+        return out;
     }
 
     private boolean hasDraft(long gameId) throws SQLException {
