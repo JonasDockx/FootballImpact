@@ -150,6 +150,34 @@ public final class EditableMatch {
         return reasons;
     }
 
+    // Both sides as they stand, home first (item 17, user, 2026-07-27). problems()
+    // speaks the loader's words and so cannot name a side; this names it, counts
+    // it, and is shown whether or not anything is wrong.
+    public List<SideStatus> sides() {
+        return List.of(side(header.homeClubId(), header.homeClubLabel()),
+            side(header.awayClubId(), header.awayClubLabel()));
+    }
+
+    private SideStatus side(long clubId, String clubName) {
+        int starters = 0;
+        int bench = 0;
+        int goalkeepers = 0;
+        for (LineupEntry entry : lineup) {
+            if (entry.clubId() != clubId) {
+                continue;
+            }
+            if (!entry.starter()) {
+                bench++;
+                continue;
+            }
+            starters++;
+            if (entry.goalkeeper()) {
+                goalkeepers++;
+            }
+        }
+        return new SideStatus(clubId, clubName, starters, bench, goalkeepers);
+    }
+
     private void addSideProblems(long clubId, List<String> reasons) {
         if (starters(clubId) != 11) {
             reasons.add("XI is not 11");
@@ -274,7 +302,7 @@ public final class EditableMatch {
         Map<Long, String> reasons = new HashMap<>();
         for (LineupEntry entry : lineup) {
             String club = entry.clubId() == header.homeClubId()
-                ? header.homeClubName() : header.awayClubName();
+                ? header.homeClubLabel() : header.awayClubLabel();
             reasons.put(entry.playerId(), entry.starter()
                 ? "already in " + club + "'s XI"
                 : "already on " + club + "'s bench");

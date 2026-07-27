@@ -295,6 +295,73 @@ class EditableMatchTest {
         assertTrue(seed.contains("created"), seed);
     }
 
+    // --- Per-side status: which XI is short, without counting rows by hand ------
+
+    @Test
+    void bothSidesReportCompleteWhenTheyAre() {
+        List<SideStatus> sides = match(twoCleanSides()).sides();
+
+        assertEquals(2, sides.size());
+        assertEquals("Olympiakos Volos", sides.get(0).clubName());
+        assertEquals("Panathinaikos", sides.get(1).clubName());
+        assertTrue(sides.stream().allMatch(SideStatus::complete));
+        assertTrue(sides.stream().allMatch(s -> s.shortOfEleven() == 0));
+    }
+
+    // The whole point: the side that is short is named, and by how many, so the
+    // screen never asks the operator to count rows.
+    @Test
+    void aShortSideIsNamedAndCounted() {
+        List<SideStatus> sides = match(tenAndAFullSide()).sides();
+
+        SideStatus home = sides.get(0);
+        assertEquals(10, home.starters());
+        assertEquals(1, home.shortOfEleven());
+        assertFalse(home.complete());
+        assertTrue(home.summary().contains("Olympiakos Volos"), home.summary());
+        assertTrue(home.summary().contains("1 short"), home.summary());
+
+        assertTrue(sides.get(1).complete());
+    }
+
+    @Test
+    void addingTheMissingManClearsTheShortfall() {
+        EditableMatch filled = match(tenAndAFullSide()).add(HOME, 999, "Marc Dupont", "Winger");
+        assertEquals(0, filled.sides().get(0).shortOfEleven());
+        assertTrue(filled.sides().get(0).complete());
+    }
+
+    @Test
+    void aTwelfthStarterReadsAsOneTooMany() {
+        List<LineupEntry> lineup = twoCleanSides();
+        lineup.add(starter(HOME, 199, "Winger"));
+
+        SideStatus home = match(lineup).sides().get(0);
+        assertEquals(-1, home.shortOfEleven());
+        assertTrue(home.summary().contains("1 too many"), home.summary());
+    }
+
+    // The keeper is the other thing the gate checks, so the same line has to carry
+    // it - a side can be eleven strong and still Held.
+    @Test
+    void theStatusCarriesTheGoalkeeperCount() {
+        List<LineupEntry> broken = new ArrayList<>(cleanSide(HOME, 100));
+        broken.set(0, starter(HOME, 100, "Centre-Forward"));
+        broken.addAll(cleanSide(AWAY, 200));
+
+        SideStatus home = match(broken).sides().get(0);
+        assertEquals(0, home.startingGoalkeepers());
+        assertTrue(home.summary().contains("no starting goalkeeper"), home.summary());
+        assertTrue(match(broken).sides().get(1).summary().contains("1 goalkeeper"));
+    }
+
+    @Test
+    void theBenchIsCountedSeparatelyFromTheXi() {
+        EditableMatch match = match(twoCleanSides()).add(HOME, 999, "Marc Dupont", "Winger");
+        assertEquals(11, match.sides().get(0).starters());
+        assertEquals(1, match.sides().get(0).bench());
+    }
+
     // Decision 7 again: the picker greys a man already named, and the reason has to
     // say which side and which role, because the same name in the other XI is a
     // different mistake from the same name on this bench.

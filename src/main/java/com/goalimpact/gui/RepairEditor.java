@@ -5,6 +5,7 @@ import com.goalimpact.repair.EditableMatch;
 import com.goalimpact.repair.EventRow;
 import com.goalimpact.repair.LineupEntry;
 import com.goalimpact.repair.MatchHeader;
+import com.goalimpact.repair.SideStatus;
 
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -28,6 +29,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 // The editor (item 26, stage 4b-2), and the only window that can reach the
 // sidecar's write path. It stays as dumb as the read-only pane: every judgement
@@ -52,6 +54,7 @@ class RepairEditor extends Stage {
 
     private final TableView<LineupEntry> lineup = new TableView<>();
     private final Label problems = new Label();
+    private final Label sides = new Label();
     private final TextField position = new TextField();
     private final TextArea provenance = new TextArea();
     private final Button release = new Button("Release");
@@ -79,7 +82,7 @@ class RepairEditor extends Stage {
     private Parent build() {
         MatchHeader h = match.header();
         Label header = new Label(h.date() + "   " + h.competitionId() + " " + h.season()
-            + "   " + h.homeClubName() + " v " + h.awayClubName()
+            + "   " + h.homeClubLabel() + " v " + h.awayClubLabel()
             + "   (" + h.homeClubGoals() + "-" + h.awayClubGoals() + ")");
 
         buildLineupTable();
@@ -97,10 +100,10 @@ class RepairEditor extends Stage {
         HBox edits = new HBox(8, new Label("Selected player:"),
             position, setPosition, toXi, toBench, remove);
 
-        Button addHome = new Button("Add to " + h.homeClubName());
-        addHome.setOnAction(e -> addTo(h.homeClubId(), h.homeClubName()));
-        Button addAway = new Button("Add to " + h.awayClubName());
-        addAway.setOnAction(e -> addTo(h.awayClubId(), h.awayClubName()));
+        Button addHome = new Button("Add to " + h.homeClubLabel());
+        addHome.setOnAction(e -> addTo(h.homeClubId(), h.homeClubLabel()));
+        Button addAway = new Button("Add to " + h.awayClubLabel());
+        addAway.setOnAction(e -> addTo(h.awayClubId(), h.awayClubLabel()));
         HBox adds = new HBox(8, new Label("Add a player:"), addHome, addAway);
 
         provenance.setPrefRowCount(4);
@@ -119,8 +122,9 @@ class RepairEditor extends Stage {
         HBox buttons = new HBox(8, draft, release, cancel);
 
         problems.setWrapText(true);
+        sides.setWrapText(true);
 
-        VBox box = new VBox(8, header, problems, lineup, edits, adds,
+        VBox box = new VBox(8, header, sides, problems, lineup, edits, adds,
             new Label("Events (read-only - copied through unchanged):"), events,
             new Label("Provenance (seeded from the edits; add why before releasing):"),
             provenance, buttons);
@@ -197,6 +201,13 @@ class RepairEditor extends Stage {
                 .findFirst()
                 .ifPresent(e -> lineup.getSelectionModel().select(e));
         }
+
+        // Always on, not only when the match is Held: problems() speaks the
+        // loader's words and cannot name a side, and counting rows on screen is
+        // exactly what the operator should never have to do.
+        sides.setText(match.sides().stream()
+            .map(SideStatus::summary)
+            .collect(Collectors.joining("\n")));
 
         List<String> reasons = match.problems();
         if (reasons.isEmpty()) {
