@@ -23,6 +23,13 @@ public record LineupEntry(long clubId, long playerId, String playerName,
     public static final String BENCH = "substitutes";
     public static final String GOALKEEPER = "Goalkeeper";
 
+    // The stand-in when no source names a position: the vendor's players join
+    // misses (ROSTER_SQL coalesces to it), and a hand-made player has no vendor row
+    // at all. Pinned here with the other three because the sidecar must never store
+    // a null position, and because the picker, the reader and the editor all have
+    // to spell the miss the same way.
+    public static final String UNKNOWN_POSITION = "Unknown";
+
     public boolean starter() {
         return STARTER.equals(type);
     }

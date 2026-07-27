@@ -227,6 +227,31 @@ class EditableMatchTest {
             .anyMatch(e -> e.playerId() == ManualPlayer.FIRST_ID + 5));
     }
 
+    // The id counter only ever rises. Were it created.size(), a create, a remove
+    // and a second create would hand one id to two different men - the same split
+    // career ADR 0012 exists to prevent, arriving from the other side.
+    @Test
+    void anIdFreedByRemoveIsNeverHandedOutAgain() {
+        EditableMatch match = match(twoCleanSides())
+            .create(HOME, "Marc Dupont", "Winger", null, "")
+            .create(HOME, "Jan Peeters", "Winger", null, "");
+        match = match.remove(ManualPlayer.FIRST_ID)
+            .create(HOME, "Piet Claes", "Winger", null, "");
+
+        List<Long> ids = match.created().stream().map(ManualPlayer::playerId).toList();
+        assertEquals(List.of(ManualPlayer.FIRST_ID + 1, ManualPlayer.FIRST_ID + 2), ids);
+    }
+
+    // A blank position is the editor's to resolve, not the picker's: a hand-made
+    // player has no vendor row to look one up in, and the sidecar must never store
+    // a null.
+    @Test
+    void aCreatedPlayerWithNoPositionGetsTheUnknownStandIn() {
+        EditableMatch match = match(twoCleanSides()).create(HOME, "Marc Dupont", "  ", null, "");
+        assertEquals(LineupEntry.UNKNOWN_POSITION, match.lineup()
+            .get(match.lineup().size() - 1).position());
+    }
+
     @Test
     void theFirstEverCreatedPlayerOpensTheReservedRange() {
         EditableMatch match = match(twoCleanSides())

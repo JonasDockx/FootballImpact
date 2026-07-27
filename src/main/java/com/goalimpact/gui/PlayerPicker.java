@@ -189,8 +189,10 @@ final class PlayerPicker extends Stage {
             status.setText("Date of birth must be yyyy-mm-dd, or empty.");
             return;
         }
-        String position = newPosition.getText() == null ? "" : newPosition.getText().trim();
-        pick = new Pick(null, name, position.isEmpty() ? "Unknown" : position, dateOfBirth,
+        // A blank position is passed on as blank: what an unnamed position becomes
+        // is EditableMatch's rule, not this screen's.
+        pick = new Pick(null, name,
+            newPosition.getText() == null ? "" : newPosition.getText().trim(), dateOfBirth,
             newNote.getText() == null ? "" : newNote.getText().trim());
         close();
     }

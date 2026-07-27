@@ -242,8 +242,7 @@ class RepairEditor extends Stage {
         // what is his own work and what came from the record - and which rows
         // Remove will accept.
         column(lineup, "added", 90, e -> !match.isAdded(e.playerId()) ? ""
-            : match.created().stream().anyMatch(p -> p.playerId() == e.playerId())
-                ? "created" : "added");
+            : match.isCreated(e.playerId()) ? "created" : "added");
     }
 
     private TableView<EventRow> buildEventsTable() {

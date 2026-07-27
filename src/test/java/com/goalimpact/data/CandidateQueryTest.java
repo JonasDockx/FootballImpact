@@ -155,6 +155,29 @@ class CandidateQueryTest {
             .anyMatch(r -> r.candidate().playerId() == ManualPlayer.FIRST_ID && r.rank() == 0));
     }
 
+    // ADR 0012 decision 4: the register is authoritative for the name, identity is
+    // the id. A released match keeps whatever name it was saved with - it is a
+    // whole-match snapshot - so if his lineup rows won the COALESCE, a name
+    // corrected in the register could never reach the picker.
+    @Test
+    void theRegisterNameWinsOverTheNameFrozenIntoASavedMatch() throws Exception {
+        SidecarStore store = store();
+        EditableMatch match = sidecarMatch(900000101L, date)
+            .create(clubId, "Marc Dupond", "Winger", null, "");
+        store.save(match, "released", "p");
+
+        try (Connection c = DriverManager.getConnection(
+            "jdbc:duckdb:" + tempDir.resolve("sidecar.duckdb"));
+            Statement s = c.createStatement()) {
+            s.execute("UPDATE manual_players SET player_name = 'Marc Dupont'");
+        }
+
+        PlayerCandidate dupont = store.candidates(clubId, 900000102L, date.plusDays(7), "", 50)
+            .stream().filter(p -> p.playerId() == ManualPlayer.FIRST_ID)
+            .findFirst().orElseThrow();
+        assertEquals("Marc Dupont", dupont.playerName());
+    }
+
     // The same man at a club he has never played for: findable only by typing, and
     // only because the register is searched beside the vendor's players table.
     @Test

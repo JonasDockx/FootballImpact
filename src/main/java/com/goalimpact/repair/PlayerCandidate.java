@@ -25,14 +25,15 @@ public record PlayerCandidate(long playerId, String playerName, String position,
     PlayerCandidate merge(PlayerCandidate other) {
         return new PlayerCandidate(playerId,
             firstKnown(playerName, other.playerName, ""),
-            firstKnown(nullIfUnknown(position), nullIfUnknown(other.position), "Unknown"),
+            firstKnown(nullIfUnknown(position), nullIfUnknown(other.position),
+                LineupEntry.UNKNOWN_POSITION),
             dateOfBirth != null ? dateOfBirth : other.dateOfBirth,
             Math.max(nearbyMatches, other.nearbyMatches),
             everPlayedForClub || other.everPlayedForClub);
     }
 
     private static String nullIfUnknown(String position) {
-        return "Unknown".equals(position) ? null : position;
+        return LineupEntry.UNKNOWN_POSITION.equals(position) ? null : position;
     }
 
     private static String firstKnown(String mine, String theirs, String neither) {

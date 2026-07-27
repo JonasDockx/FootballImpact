@@ -41,17 +41,23 @@ public final class EditableMatch {
 
     // Item 17, slice 1. The manual players minted during this repair, waiting to
     // be written to the register inside save's transaction (ADR 0012, decision 3),
-    // and the highest manual id known when the editor opened - read once, so ids
-    // are handed out max+1, max+2 from a single read and cannot collide.
+    // and the next id to hand out - seeded max+1 from the single read the editor
+    // makes when it opens.
+    //
+    // nextManualId is a counter and never a function of created.size(): a create,
+    // a remove and a second create must not hand the same id to two different men.
+    // It only ever rises, so an id abandoned by a remove is simply never reused -
+    // the reserved range has an order of magnitude of headroom and no reason to be
+    // thrifty.
     private final List<ManualPlayer> created;
-    private final long manualIdCeiling;
+    private final long nextManualId;
 
     // The vendor entry point: the lineup as loaded is both the working copy and
     // the baseline provenance diffs against.
     public EditableMatch(MatchHeader header, List<LineupEntry> lineup,
         List<EventRow> events, List<AppearanceRow> appearances) {
         this(header, lineup, lineup, events, appearances, Origin.VENDOR_SHEET,
-            List.of(), ManualPlayer.FIRST_ID - 1);
+            List.of(), ManualPlayer.FIRST_ID);
     }
 
     // The appeared entry point (stage 4b-3, decision 1): a match with no team
@@ -76,12 +82,12 @@ public final class EditableMatch {
             lineup.add(cameOn.contains(r.playerId()) ? r.asBench() : r.asStarter());
         }
         return new EditableMatch(header, lineup, lineup, events, appearances,
-            Origin.RECONSTRUCTED, List.of(), ManualPlayer.FIRST_ID - 1);
+            Origin.RECONSTRUCTED, List.of(), ManualPlayer.FIRST_ID);
     }
 
     private EditableMatch(MatchHeader header, List<LineupEntry> lineup,
         List<LineupEntry> original, List<EventRow> events, List<AppearanceRow> appearances,
-        Origin origin, List<ManualPlayer> created, long manualIdCeiling) {
+        Origin origin, List<ManualPlayer> created, long nextManualId) {
         this.header = header;
         this.lineup = List.copyOf(lineup);
         this.original = List.copyOf(original);
@@ -89,12 +95,13 @@ public final class EditableMatch {
         this.appearances = List.copyOf(appearances);
         this.origin = origin;
         this.created = List.copyOf(created);
-        this.manualIdCeiling = manualIdCeiling;
+        this.nextManualId = nextManualId;
     }
 
-    private EditableMatch with(List<LineupEntry> nextLineup, List<ManualPlayer> nextCreated) {
+    private EditableMatch with(List<LineupEntry> nextLineup, List<ManualPlayer> nextCreated,
+        long nextId) {
         return new EditableMatch(header, nextLineup, original, events, appearances,
-            origin, nextCreated, manualIdCeiling);
+            origin, nextCreated, nextId);
     }
 
     public MatchHeader header() {
@@ -180,7 +187,7 @@ public final class EditableMatch {
         for (LineupEntry entry : lineup) {
             next.add(entry.playerId() == playerId ? edit.apply(entry) : entry);
         }
-        return with(next, created);
+        return with(next, created, nextManualId);
     }
 
     // --- Item 17, slice 1: adding, creating and removing a player -----------
@@ -189,12 +196,12 @@ public final class EditableMatch {
         return created;
     }
 
-    // The highest manual id the sidecar's register already holds, read once when
-    // the editor opens (ADR 0012, decision 3). Below the reserved range it is
-    // ignored, so an empty register opens the range at its first id.
+    // Seed the allocator from the highest manual id the sidecar's register already
+    // holds - the single read the editor makes when it opens (ADR 0012, decision
+    // 3). A ceiling below the reserved range means an empty register, which opens
+    // the range at its first id.
     public EditableMatch withManualIdCeiling(long ceiling) {
-        return new EditableMatch(header, lineup, original, events, appearances,
-            origin, created, Math.max(ManualPlayer.FIRST_ID - 1, ceiling));
+        return with(lineup, created, Math.max(ManualPlayer.FIRST_ID, ceiling + 1));
     }
 
     // Add a player the record does name - a vendor id chosen in the picker. The
@@ -202,23 +209,30 @@ public final class EditableMatch {
     // once it is full (decision 7), so filling an absent side is eleven clicks and
     // no corrections, and the To XI / To bench buttons settle the rest.
     public EditableMatch add(long clubId, long playerId, String playerName, String position) {
-        List<LineupEntry> next = new ArrayList<>(lineup);
-        next.add(new LineupEntry(clubId, playerId, playerName, position,
-            starters(clubId) < 11 ? LineupEntry.STARTER : LineupEntry.BENCH));
-        return with(next, created);
+        return with(lineupPlus(clubId, playerId, playerName, position), created, nextManualId);
     }
 
-    // Name a player no source names (glossary 'Manual player'). The id is the next
-    // one above the ceiling read at open, so two men created in one repair take
-    // consecutive ids; the register row rides along until save writes it inside its
-    // own transaction, and a cancelled repair leaves nothing behind.
+    // Name a player no source names (glossary 'Manual player'). He takes the next
+    // id from the reserved range and the counter moves on, so a create, a remove
+    // and a second create cannot hand one id to two different men. His register row
+    // rides along until save writes it inside its own transaction, and a cancelled
+    // repair leaves nothing behind.
     public EditableMatch create(long clubId, String playerName, String position,
         LocalDate dateOfBirth, String note) {
 
-        long playerId = manualIdCeiling + 1 + created.size();
         List<ManualPlayer> nextCreated = new ArrayList<>(created);
-        nextCreated.add(new ManualPlayer(playerId, playerName, dateOfBirth, note));
-        return with(add(clubId, playerId, playerName, position).lineup(), nextCreated);
+        nextCreated.add(new ManualPlayer(nextManualId, playerName, dateOfBirth, note));
+        return with(lineupPlus(clubId, nextManualId, playerName, position), nextCreated,
+            nextManualId + 1);
+    }
+
+    private List<LineupEntry> lineupPlus(long clubId, long playerId, String playerName,
+        String position) {
+        List<LineupEntry> next = new ArrayList<>(lineup);
+        next.add(new LineupEntry(clubId, playerId, playerName,
+            position == null || position.isBlank() ? LineupEntry.UNKNOWN_POSITION : position,
+            starters(clubId) < 11 ? LineupEntry.STARTER : LineupEntry.BENCH));
+        return next;
     }
 
     // Whether this row was put here in this session - exactly the ids the original
@@ -227,6 +241,12 @@ public final class EditableMatch {
     public boolean isAdded(long playerId) {
         return lineup.stream().anyMatch(e -> e.playerId() == playerId)
             && original.stream().noneMatch(e -> e.playerId() == playerId);
+    }
+
+    // Whether this row is a player named by hand in this session, rather than one
+    // picked from a record. The screen shows the difference; nothing else needs it.
+    public boolean isCreated(long playerId) {
+        return created.stream().anyMatch(p -> p.playerId() == playerId);
     }
 
     // Undo an add. A recorded player is left exactly where he is. A created player
@@ -244,7 +264,7 @@ public final class EditableMatch {
         }
         List<ManualPlayer> nextCreated = new ArrayList<>(created);
         nextCreated.removeIf(p -> p.playerId() == playerId);
-        return with(next, nextCreated);
+        return with(next, nextCreated, nextManualId);
     }
 
     // Why each player already in the match cannot be picked again (decision 7).

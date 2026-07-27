@@ -543,12 +543,23 @@ public final class SidecarStore {
     // the real snapshot.
     //
     // The club arm. Who has turned out for this club, over vendor appearances and
-    // released sidecar lineups together (decision 5), each match counted once by
-    // DISTINCT game_id so the 4,573 bulk reconstructions do not double-count. The
-    // nearby count is the same union narrowed to a month either side of this match,
-    // which is rank 0. The match being repaired is excluded, so a draft's own rows
-    // never rank their own players. %s is the sidecar half, dropped when there is
-    // no sidecar or no released match in it yet.
+    // sidecar lineups together (decision 5), each match counted once by DISTINCT
+    // game_id so the 4,573 bulk reconstructions do not double-count. The nearby
+    // count is the same union narrowed to a month either side of this match, which
+    // is rank 0. The match being repaired is excluded, so a draft's own rows never
+    // rank their own players. %s is the sidecar half, dropped when there is no
+    // sidecar yet.
+    //
+    // Sidecar drafts count beside releases, deliberately: a rank is a typing aid
+    // and never evidence (decision 1), and a man entered into yesterday's
+    // half-finished repair is exactly the man you want offered first today. Nothing
+    // here reaches a rating - only a Released match does.
+    //
+    // This arm alone is uncapped, where decision 10 caps the reader. The cap is
+    // there to keep rank 2's 114,893 players off the screen; capping a club's own
+    // squad would instead drop rank-0 names, and truncating it in SQL by nearby
+    // count would put the ranking rule back in the query string that decision 10
+    // took it out of.
     private static final String CANDIDATES_SQL = """
         WITH plays AS (
             SELECT a.player_id AS player_id, CAST(a.game_id AS BIGINT) AS game_id,
@@ -565,7 +576,7 @@ public final class SidecarStore {
             FROM plays GROUP BY player_id
         )
         SELECT c.player_id,
-               COALESCE(v.name, c.player_name, %s) AS player_name,
+               COALESCE(v.name, %s, c.player_name) AS player_name,
                COALESCE(v.position, c.position, 'Unknown') AS position,
                COALESCE(CAST(v.date_of_birth AS DATE), %s) AS date_of_birth,
                c.nearby AS nearby
@@ -656,6 +667,10 @@ public final class SidecarStore {
         long gameId, LocalDate date, boolean withLineups, boolean withRegister)
         throws SQLException {
 
+        // The register comes before the man's own lineup rows in the name COALESCE:
+        // it is authoritative for the name (ADR 0012, decision 4), while a released
+        // match is a snapshot that keeps whatever name it was saved with, so a name
+        // corrected in the register still reaches the picker.
         String sql = CANDIDATES_SQL.formatted(
             withLineups ? SIDECAR_PLAYS : "",
             withRegister ? "mp.player_name" : "NULL",
@@ -704,17 +719,27 @@ public final class SidecarStore {
     // the highest id the register already holds, taken once when a repair opens, so
     // ids within that repair are max+1, max+2 and cannot collide with an earlier
     // session's. Zero when the sidecar, or the table, is not there yet.
+    // A zero here restarts allocation at the first reserved id, which would re-mint
+    // ids already registered and split exactly the careers ADR 0012 exists to keep
+    // whole. So it is returned only for the two states that really do mean "no
+    // manual player yet" - no sidecar file, and a sidecar written before ADR 0012
+    // that has no register table. Anything else (a locked file, a corrupt one) is
+    // thrown, and the editor refuses to open rather than opening on a wrong ceiling.
     public long highestManualPlayerId() throws SQLException {
         if (!Files.exists(sidecar)) {
             return 0;
         }
         try (Connection c = openReadOnly(sidecar);
-            Statement s = c.createStatement();
-            ResultSet rs = s.executeQuery("SELECT max(player_id) FROM manual_players")) {
-            return rs.next() ? rs.getLong(1) : 0;
-        } catch (SQLException noSuchTable) {
-            // A sidecar written before ADR 0012 holds no register and no manual player.
-            return 0;
+            Statement s = c.createStatement()) {
+            try (ResultSet present = s.executeQuery(
+                "SELECT 1 FROM duckdb_tables() WHERE table_name = 'manual_players'")) {
+                if (!present.next()) {
+                    return 0;
+                }
+            }
+            try (ResultSet rs = s.executeQuery("SELECT max(player_id) FROM manual_players")) {
+                return rs.next() ? rs.getLong(1) : 0;
+            }
         }
     }
 

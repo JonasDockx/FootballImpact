@@ -724,6 +724,40 @@ one matchday ranks 0 on the next; `ManualPlayerRegisterTest` (6) pins the
 transaction boundary, the allocation across two sessions, and that an abandoned
 repair leaves no orphan. Full suite 180 green.
 
+**Reviewed the same day; four real defects, all fixed before the hand repairs.**
+Worth keeping because three of the four are the *same* failure mode ADR 0012 was
+written against, arriving by doors the ADR did not name:
+
+1. **Manual ids collided after a remove.** The allocator was
+   `ceiling + 1 + created.size()`, so create A, create B, remove A, create C
+   handed C **B's id** — two hand-made men, one id, one register row, the second
+   insert silently swallowed by the `WHERE NOT EXISTS`. Now a counter that only
+   rises; a freed id is never reused. The reserved range has no reason to be
+   thrifty.
+2. **The register was not authoritative for the name** (ADR 0012 decision 4). The
+   COALESCE read `v.name, c.player_name, mp.player_name`, and a manual player has
+   no `players` row, so his own frozen lineup rows always beat the register — the
+   register name was dead for exactly the population it governs. Now
+   `v.name, mp.player_name, c.player_name`.
+3. **`highestManualPlayerId()` swallowed every `SQLException` and returned 0**,
+   which restarts allocation at `FIRST_ID` on a locked or corrupt sidecar. Now it
+   probes for the table and returns 0 only for the two states that really mean
+   "no manual player yet"; anything else throws and the editor refuses to open.
+4. **Two rules had leaked into `gui`** — the Unknown-position default and a
+   recomputation of created-ness by streaming `created()`. Moved to
+   `EditableMatch` (`lineupPlus`, `isCreated`), and `"Unknown"` is now pinned as
+   `LineupEntry.UNKNOWN_POSITION` beside the other three load-bearing strings.
+
+Two review findings **not** acted on, with reasons: the club arm stays uncapped
+(decision 10's cap exists to keep rank 2's 114,893 players off the screen —
+capping a squad would drop rank-0 names, and ordering it in SQL would put the
+ranking rule back in the query string decision 10 took it out of), and sidecar
+*drafts* count toward rank 0 beside releases (a rank is a typing aid, not
+evidence — a man in yesterday's half-finished repair is exactly who you want
+offered today, and nothing here reaches a rating). Both are now stated in the
+code. Replay re-checked after the fixes: still byte-identical, still 0.6503.
+Suite 183 green.
+
 ## 2. Store each player's date of birth
 
 **Why:** Enables age-aware analysis — comparing a player against peers in the
