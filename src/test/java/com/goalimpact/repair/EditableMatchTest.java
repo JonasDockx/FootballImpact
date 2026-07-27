@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EditableMatchTest {
@@ -159,5 +161,127 @@ class EditableMatchTest {
         assertTrue(seed.contains("reconstructed"), seed);
         assertTrue(seed.contains("P100"), seed);   // home keeper, id 100
         assertTrue(seed.contains("P200"), seed);   // away keeper, id 200
+    }
+
+    // --- Item 17, slice 1: adding, creating and removing --------------------
+
+    // A side one man short: ten starters and no eleventh anywhere.
+    private static List<LineupEntry> tenAndAFullSide() {
+        List<LineupEntry> lineup = new ArrayList<>(cleanSide(HOME, 100));
+        lineup.remove(10);
+        lineup.addAll(cleanSide(AWAY, 200));
+        return lineup;
+    }
+
+    // Decision 7: the role defaults to starter while the side is under eleven,
+    // which is what makes the 57 ten-starter rows and the 139 absent sides a run
+    // of clicks rather than a click and a correction each.
+    @Test
+    void anAddedPlayerStartsWhileTheSideIsShortOfEleven() {
+        EditableMatch match = match(tenAndAFullSide());
+        assertEquals(List.of("XI is not 11"), match.problems());
+
+        EditableMatch filled = match.add(HOME, 999, "Marc Dupont", "Winger");
+        assertTrue(filled.problems().isEmpty(), filled.problems().toString());
+        assertTrue(filled.lineup().stream()
+            .filter(e -> e.playerId() == 999).allMatch(LineupEntry::starter));
+    }
+
+    @Test
+    void aTwelfthAddedPlayerLandsOnTheBench() {
+        EditableMatch match = match(twoCleanSides()).add(HOME, 999, "Marc Dupont", "Winger");
+
+        assertTrue(match.problems().isEmpty(), match.problems().toString());
+        assertTrue(match.lineup().stream()
+            .filter(e -> e.playerId() == 999).noneMatch(LineupEntry::starter));
+    }
+
+    // Decision 8: remove is an undo of this session's adds, not an editing power.
+    // No recorded player may be dropped, however wrong he looks.
+    @Test
+    void removeUndoesAnAddButNeverTouchesARecordedPlayer() {
+        EditableMatch added = match(tenAndAFullSide()).add(HOME, 999, "Marc Dupont", "Winger");
+        assertTrue(added.isAdded(999));
+        assertFalse(added.isAdded(100));
+
+        EditableMatch undone = added.remove(999);
+        assertEquals(21, undone.lineup().size());
+
+        assertEquals(added.lineup(), added.remove(100).lineup());
+    }
+
+    // Decision 2 / ADR 0012: ids come from the reserved range, max+1 from a single
+    // read, so two men created in one repair never collide with each other or with
+    // anyone the register already holds.
+    @Test
+    void createdPlayersTakeConsecutiveIdsAboveTheKnownCeiling() {
+        EditableMatch match = match(twoCleanSides())
+            .withManualIdCeiling(ManualPlayer.FIRST_ID + 4)
+            .create(HOME, "Marc Dupont", "Winger", LocalDate.of(1975, 3, 1), "club programme")
+            .create(HOME, "Jan Peeters", "Goalkeeper", null, "club programme");
+
+        List<Long> created = match.created().stream().map(ManualPlayer::playerId).toList();
+        assertEquals(List.of(ManualPlayer.FIRST_ID + 5, ManualPlayer.FIRST_ID + 6), created);
+        assertTrue(created.stream().allMatch(ManualPlayer::isManual));
+        assertTrue(match.lineup().stream()
+            .anyMatch(e -> e.playerId() == ManualPlayer.FIRST_ID + 5));
+    }
+
+    @Test
+    void theFirstEverCreatedPlayerOpensTheReservedRange() {
+        EditableMatch match = match(twoCleanSides())
+            .create(HOME, "Marc Dupont", "Winger", null, "");
+        assertEquals(ManualPlayer.FIRST_ID, match.created().get(0).playerId());
+    }
+
+    // Decision 4: a date of birth is optional and never blocks a release.
+    @Test
+    void aCreatedPlayerWithoutADateOfBirthStillReleases() {
+        EditableMatch match = match(tenAndAFullSide())
+            .create(HOME, "Marc Dupont", "Winger", null, "");
+        assertTrue(match.problems().isEmpty(), match.problems().toString());
+        assertNull(match.created().get(0).dateOfBirth());
+    }
+
+    // Removing a created player must take his register row with him, or save would
+    // write a man who appears in no match - the orphan ADR 0012 decision 3 rules out.
+    @Test
+    void removingACreatedPlayerAlsoDropsHisRegisterRow() {
+        EditableMatch match = match(twoCleanSides())
+            .create(HOME, "Marc Dupont", "Winger", null, "");
+        long id = match.created().get(0).playerId();
+
+        assertTrue(match.remove(id).created().isEmpty());
+    }
+
+    // Decision 9's mitigation: no note is required before releasing, so the seed
+    // is the only place the addition is recorded - it must name every added and
+    // created player by name and id.
+    @Test
+    void theProvenanceSeedNamesAddedAndCreatedPlayers() {
+        String seed = match(tenAndAFullSide())
+            .add(HOME, 999, "Marc Dupont", "Winger")
+            .create(AWAY, "Jan Peeters", "Left Winger", null, "club programme")
+            .provenanceSummary();
+
+        assertTrue(seed.contains("Marc Dupont (999)"), seed);
+        assertTrue(seed.contains("added"), seed);
+        assertTrue(seed.contains("Jan Peeters (" + ManualPlayer.FIRST_ID + ")"), seed);
+        assertTrue(seed.contains("created"), seed);
+    }
+
+    // Decision 7 again: the picker greys a man already named, and the reason has to
+    // say which side and which role, because the same name in the other XI is a
+    // different mistake from the same name on this bench.
+    @Test
+    void membershipNamesTheSideAndTheRoleOfEveryPlayerInTheMatch() {
+        EditableMatch match = match(twoCleanSides()).asBench(210);
+
+        assertTrue(match.membership().get(100L).contains("Olympiakos Volos"),
+            match.membership().get(100L));
+        assertTrue(match.membership().get(100L).contains("XI"));
+        assertTrue(match.membership().get(210L).contains("Panathinaikos"));
+        assertTrue(match.membership().get(210L).contains("bench"));
+        assertNull(match.membership().get(999L));
     }
 }

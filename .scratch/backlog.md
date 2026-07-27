@@ -563,6 +563,167 @@ the write path, the `com.goalimpact.repair` judgement layer these features will 
 built in, and live validation. Decisions and gate under item **26**, *Stage 4b-2
 plan*.
 
+**Handoff — the remaining slices (user, 2026-07-26).** With 4b-1 (read-only
+browser), 4b-2 (certain-tier editor + first write), 4b-3 (appeared-tier
+reconstruction) and 4b-4 (bulk-release the clean appeared games) shipped, the
+sidecar now holds 4,573 released matches and the spine spans 2012–2026. Four things
+remain, each to be **grilled before building** in the established way. Listed in
+their natural dependency order, because the player picker is the keystone the other
+three lean on:
+
+1. **The ranked player picker + roster prefill** — the core unbuilt piece
+   (design notes above). It is what lets a repair *add* a player the record does
+   not name, and so unlocks every "incomplete XI" case at once: the ~948 appeared
+   games whose reconstruction is short of eleven, the sparse appeared sides (a side
+   under eleven, or absent), and the certain rows still parked since 4b-2 — the 57
+   with 10 starters, the ~380 with 1–9, the 139 with a side absent entirely. Reserved
+   ID range ≥ 1,000,000,000 for players named from nothing.
+2. **The maybe tier in the editor** — extend the editor to the third rung. A maybe
+   match has neither a team sheet nor an appearances roster, so it cannot be
+   reconstructed and can only be authored *through the picker* — hence it depends on
+   (1). The ±1-month nearby-squad list (item 25 / stage 4a) is its rank-0 candidate
+   source.
+3. **Editing beyond the lineup — events and the header** — add or amend
+   substitution/goal events, and set the home team, score and other header facts.
+   The events layer already copies through read-only (4b-2 decision 11); this makes
+   it editable. Needed for any match whose vendor events are wrong or missing, and a
+   prerequisite for (4).
+4. **Enter a full match from scratch** — the "manual entry" half of this item's
+   title: author a header, two XIs and the events with nothing pre-filled. Composes
+   (1) and (3); this is where keyboard-first entry and chronological roster prefill
+   (a season as a few edits per matchday) earn their keep.
+
+Cross-cutting when these land: the calibration re-pin question (ADR 0009) grows as
+more authored matches enter the population, and the vendor-shadow risk (a release
+masking a later real sheet) compounds — item **27**'s refresh is where a
+reconciliation would live.
+
+**Slice 1 grilled (2026-07-27) — the ranked player picker.** Decisions on manual
+player identity are in
+[ADR 0012](../docs/adr/0012-manually-created-players.md); *Manual player* and
+*Candidate rank* are now in the glossary. What the slice delivers is the ability
+to **add** a player to a lineup, which unlocks every incomplete-XI case at once —
+the 57 certain rows with 10 starters, the ~380 with 1–9, the 139 with a side
+absent, and the ~948 imperfect appeared reconstructions.
+
+**Roster prefill is cut from this slice and moves to slice 4.** It was listed
+here since 2026-07-21, and three things argued it out. Its payoff — "a season is
+a handful of edits per matchday" — belongs to chronological from-scratch entry,
+which is slice 4's workflow; scattered repairs have no previous matchday worth
+trusting. It drags a *remove any row* move in with it, since an XI you cannot
+correct is useless. And it is the one feature here that can fail **silently**: a
+picker offers one name at a time and each is an affirmative act, whereas prefill
+puts eleven plausible names on screen that look exactly like a finished repair,
+so the three you do not recognise get released as "checked by hand" without being
+checked. Every other feature in this slice fails loudly. Rank 0 on open already
+makes an absent side eleven clicks down a pre-ranked list, which is most of the
+speed at none of the risk.
+
+Decisions, in the order they were taken:
+
+1. **The ranking is a typing aid, never evidence.** Verification comes from a
+   source outside the tool; a match that cannot be checked stays **Held**. This
+   keeps *Match state*'s "Released = checked and approved by hand" true, and it
+   is why the ranking may be aggressive — being wrong costs a keystroke.
+2. **Created players go in a `manual_players` register** (id, name, optional DOB,
+   created_on, note), ids ≥ 1,000,000,000, allocated max+1. Deriving the
+   population from sidecar lineup rows was recommended and rejected: nowhere to
+   put a DOB or a note. ADR 0012.
+3. **The register writes inside `save`'s transaction**, so cancelling a repair
+   leaves no orphan and every register row belongs to a real sidecar match.
+4. **DOB optional, never a release gate** — a manual player without one joins the
+   69,975 already off ADR 0011's chart.
+5. **Ranking counts vendor appearances ∪ sidecar lineups**, `DISTINCT game_id` so
+   the 4,573 bulk reconstructions are not double-counted. Without this, a player
+   created last matchday is invisible on the next one and the tool is barely
+   faster than a spreadsheet exactly where it is needed most.
+6. **Rank 0 shows on open** — the club's ±30-day squad, the query at
+   `TransfermarktLoader:209`. Typing filters and reveals rank 1, then rank 2
+   (capped, and only once text is typed — rank 2 is 114,893 players).
+   "Create '(typed name)'" always sits at the bottom, never preselected.
+7. **Two club-named add buttons.** The side cannot be inferred from a selected
+   row, because the hardest case is a side absent entirely. Role defaults to
+   starter while the side is under 11; the To XI / To bench buttons from 4b-2
+   correct it. Players already in the match render greyed with the reason.
+8. **Remove undoes this session's adds only** — exactly the rows where `original`
+   has no match, which `EditableMatch.handEdits` already computes at the
+   `was == null` branch. An undo, not an editing power: no recorded player can be
+   dropped. Known consequence, accepted: an added player saved into a draft
+   reloads through the vendor constructor and so becomes recorded, hence no
+   longer removable.
+9. **No provenance requirement (user, against the recommendation).** Requiring a
+   hand-written note before releasing a repair that adds players was argued for
+   on the grounds that the box is the only place a verification is ever recorded,
+   and optional means it holds only as long as discipline does. Declined for
+   friction on the 948 imperfect appeared games. Mitigation: the generated seed
+   explicitly names every added and created player, so the *what* is in the file
+   even when the *how I knew* is not.
+10. **SQL selects, Java ranks.** A reader in `data` returns candidates tagged
+    with their evidence (nearby matches, ever-played-for-club, manual, DOB,
+    position), capped; a pure ranker in `repair` orders them from that evidence
+    alone, unit-tested on plain lists. Same seam `SidecarStore` / `EditableMatch`
+    already sits on, and it keeps a rule that *will* be tuned out of a SQL string
+    only the real snapshot can exercise. Within a rank: nearby matches desc, then
+    name. The typed filter applies across all three ranks.
+
+**Gate — inert, then exactly three.** Landing the code releases nothing, so the
+replay must stay byte-identical to today (champion 0.6503). Then one hand repair
+of each of the three shapes — a certain row with 10 starters, an imperfect
+appeared game, and an absent side needing eleven names including at least one
+created player — after which the replay must show **exactly three more rated
+matches and no other rating changed**. Log-loss cannot gate this slice: three
+matches on 4,573 is noise. The absent-side repair is the one that exercises
+creation, id allocation and the register write in anger.
+
+**Slice 1 built (2026-07-27). Gate half met: the code is inert.** The replay
+after landing it writes a byte-identical `goalimpact.csv` (md5
+`cf7f70f6c98eeb56d995635e89ec8a3b`) at the champion 0.6503, because nothing is
+released and the loader still names its four sidecar tables explicitly — the
+fifth is invisible to it. **The three hand repairs are still to do**; that half
+of the gate is open.
+
+What landed, by layer:
+
+- **`repair`** — `PlayerCandidate` (a name plus its evidence: nearby matches,
+  ever-played-for-club, DOB, position; `manual()` is the ADR 0012 range test, not
+  a stored flag), `RankedCandidate`, `CandidateRanker` (decision 10's pure half:
+  three rungs, nearby desc then name, rank 0 alone until something is typed, the
+  filter across all three, rank 2 capped, the same man from two arms merged at his
+  strongest evidence), `ManualPlayer` (the register row, `FIRST_ID`
+  = 1,000,000,000). `EditableMatch` gained `add`/`create`/`remove`/`isAdded`/
+  `membership`/`created`/`withManualIdCeiling`, all still returning fresh
+  instances, and `handEdits` grew the `was == null` branch decision 9's mitigation
+  needs — the seed now names every added and created player by name and id.
+- **`data`** — `SidecarStore` gained the fifth table, the register write *inside*
+  `save`'s transaction (`WHERE NOT EXISTS`, so a re-save does not duplicate and
+  `created_on` stays the first write), `highestManualPlayerId()` for the
+  single-read allocation, and `candidates()` — a club arm (vendor `appearances` ∪
+  released sidecar lineups, `DISTINCT game_id`, the match under repair excluded)
+  plus a capped name-search arm over `players` and `manual_players` that is only
+  asked once something is typed.
+- **`gui`** — `PlayerPicker` (search box, ranked table, greyed already-in rows
+  with their reason, a create panel at the bottom that is never preselected) and
+  two club-named add buttons plus Remove in `RepairEditor`, which reads the id
+  ceiling once at open.
+
+Two things worth recording that the grill did not settle:
+
+1. **The create panel is a panel, not the "bottom row" of the list.** A list row
+   has nowhere to put a DOB and a note, and ADR 0012 decision 2 is precisely that
+   those are captured at the one moment they are in front of the operator or lost.
+   Same intent — always at the bottom, never preselected.
+2. **`candidates()` gates each arm on which sidecar tables actually exist**, not
+   on the file existing. Three states have to survive: no sidecar at all, the
+   pre-ADR-0012 four-table file (which is what is on disk today), and the current
+   five. Naming a missing table is a hard error in DuckDB, so the check is real.
+
+Tests: `CandidateRankerTest` (9) pins the ordering on plain lists;
+`CandidateQueryTest` (6) pins the SQL against the real snapshot with a fixture
+derived at run time, including decision 5's load-bearing claim — a man created on
+one matchday ranks 0 on the next; `ManualPlayerRegisterTest` (6) pins the
+transaction boundary, the allocation across two sessions, and that an abandoned
+repair leaves no orphan. Full suite 180 green.
+
 ## 2. Store each player's date of birth
 
 **Why:** Enables age-aware analysis — comparing a player against peers in the

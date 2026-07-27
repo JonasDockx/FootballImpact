@@ -37,9 +37,14 @@ import java.util.function.UnaryOperator;
 //
 // The match is held in one mutable field because EditableMatch is immutable: an
 // edit replaces it and refresh() redraws from the new value, so the screen and
-// the object can never disagree. Only the first slice's two moves are offered -
-// retag a position, move a player between the XI and the bench - on whichever
-// lineup row is selected; adding a player is decision 1's excluded case.
+// the object can never disagree. Stage 4b-2's two moves - retag a position, move
+// a player between the XI and the bench - act on whichever lineup row is selected.
+//
+// Item 17, slice 1 adds the third move: put a player in. It is two club-named
+// buttons rather than one, because the side cannot be inferred from a selected row
+// - the hardest case is a side absent entirely, where there is no row to select
+// (decision 7). Remove undoes an add and nothing else (decision 8): a recorded
+// player can never be dropped, however wrong he looks.
 class RepairEditor extends Stage {
 
     private final SidecarStore store;
@@ -50,6 +55,7 @@ class RepairEditor extends Stage {
     private final TextField position = new TextField();
     private final TextArea provenance = new TextArea();
     private final Button release = new Button("Release");
+    private final Button remove = new Button("Remove (undo add)");
 
     // Once the provenance box is edited by hand it is never overwritten by the
     // generated seed; seeding guards against the programmatic setText being
@@ -59,7 +65,11 @@ class RepairEditor extends Stage {
 
     RepairEditor(SidecarStore store, long gameId) throws SQLException {
         this.store = store;
-        this.match = store.load(gameId);
+        // The manual-id ceiling is read once, here, and threaded through every
+        // edit: ids are handed out max+1, max+2 from that single read, and the
+        // window is APPLICATION_MODAL so no second repair can be minting at the
+        // same time (ADR 0012, decision 3).
+        this.match = store.load(gameId).withManualIdCeiling(store.highestManualPlayerId());
         initModality(Modality.APPLICATION_MODAL);
         setTitle("Repair - game " + gameId);
         setScene(new Scene(build(), 1000, 740));
@@ -83,8 +93,15 @@ class RepairEditor extends Stage {
         toXi.setOnAction(e -> edit(m -> m.asStarter(selectedId())));
         Button toBench = new Button("To bench");
         toBench.setOnAction(e -> edit(m -> m.asBench(selectedId())));
+        remove.setOnAction(e -> removeSelected());
         HBox edits = new HBox(8, new Label("Selected player:"),
-            position, setPosition, toXi, toBench);
+            position, setPosition, toXi, toBench, remove);
+
+        Button addHome = new Button("Add to " + h.homeClubName());
+        addHome.setOnAction(e -> addTo(h.homeClubId(), h.homeClubName()));
+        Button addAway = new Button("Add to " + h.awayClubName());
+        addAway.setOnAction(e -> addTo(h.awayClubId(), h.awayClubName()));
+        HBox adds = new HBox(8, new Label("Add a player:"), addHome, addAway);
 
         provenance.setPrefRowCount(4);
         provenance.setWrapText(true);
@@ -103,7 +120,7 @@ class RepairEditor extends Stage {
 
         problems.setWrapText(true);
 
-        VBox box = new VBox(8, header, problems, lineup, edits,
+        VBox box = new VBox(8, header, problems, lineup, edits, adds,
             new Label("Events (read-only - copied through unchanged):"), events,
             new Label("Provenance (seeded from the edits; add why before releasing):"),
             provenance, buttons);
@@ -119,6 +136,39 @@ class RepairEditor extends Stage {
             return;
         }
         edit(m -> m.withPosition(selectedId(), typed));
+    }
+
+    // Open the ranked picker for one side and put back whatever it returned. A
+    // named player is added by his own id; a hand-made one is minted into the
+    // reserved range by EditableMatch, which also carries his register row until
+    // save writes it (ADR 0012).
+    private void addTo(long clubId, String clubName) {
+        PlayerPicker.pick(this, store, match, clubId, clubName).ifPresent(pick -> {
+            match = pick.isNew()
+                ? match.create(clubId, pick.name(), pick.position(), pick.dateOfBirth(),
+                    pick.note())
+                : match.add(clubId, pick.playerId(), pick.name(), pick.position());
+            refresh();
+        });
+    }
+
+    // Decision 8: an undo of this session's adds, not an editing power. A recorded
+    // player - including one added into a draft and reloaded, which comes back
+    // through the vendor constructor as recorded - stays put.
+    private void removeSelected() {
+        LineupEntry selected = lineup.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            problems.setText("Select a player row first.");
+            return;
+        }
+        if (!match.isAdded(selected.playerId())) {
+            problems.setText(selected.playerName()
+                + " is in the record for this match, so he cannot be removed -"
+                + " only players added in this session can.");
+            return;
+        }
+        match = match.remove(selected.playerId());
+        refresh();
     }
 
     // Apply an edit to the selected player, or say why nothing happened.
@@ -188,6 +238,12 @@ class RepairEditor extends Stage {
         column(lineup, "position", 160, LineupEntry::position);
         column(lineup, "role", 80, e -> e.starter() ? "XI" : "bench");
         column(lineup, "GK?", 60, e -> e.goalkeeper() ? "GK" : "");
+        // Which rows this session put here, so the operator can see at a glance
+        // what is his own work and what came from the record - and which rows
+        // Remove will accept.
+        column(lineup, "added", 90, e -> !match.isAdded(e.playerId()) ? ""
+            : match.created().stream().anyMatch(p -> p.playerId() == e.playerId())
+                ? "created" : "added");
     }
 
     private TableView<EventRow> buildEventsTable() {

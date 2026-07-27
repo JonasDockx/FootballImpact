@@ -4,7 +4,9 @@ import com.goalimpact.repair.AppearanceRow;
 import com.goalimpact.repair.EditableMatch;
 import com.goalimpact.repair.EventRow;
 import com.goalimpact.repair.LineupEntry;
+import com.goalimpact.repair.ManualPlayer;
 import com.goalimpact.repair.MatchHeader;
+import com.goalimpact.repair.PlayerCandidate;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,7 +17,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -73,6 +78,15 @@ public final class SidecarStore {
         """
         CREATE TABLE IF NOT EXISTS appearances (
             game_id BIGINT, minutes_played INTEGER)
+        """,
+        // The fifth table (ADR 0012), and the first sidecar state that is not a
+        // whole match: the register of players named by hand. It is written inside
+        // save's transaction, never on the create click, which buys the invariant
+        // that every row here is a player who appears in at least one sidecar match.
+        """
+        CREATE TABLE IF NOT EXISTS manual_players (
+            player_id BIGINT, player_name VARCHAR, date_of_birth DATE,
+            created_on TIMESTAMP, note VARCHAR)
         """
     };
 
@@ -334,6 +348,7 @@ public final class SidecarStore {
                 insertLineups(c, gameId, match.lineup());
                 insertEvents(c, gameId, match.events());
                 insertAppearances(c, gameId, match.appearances());
+                insertManualPlayers(c, match.created());
                 c.commit();
             } catch (SQLException failed) {
                 c.rollback();
@@ -365,6 +380,7 @@ public final class SidecarStore {
                     insertLineups(c, gameId, match.lineup());
                     insertEvents(c, gameId, match.events());
                     insertAppearances(c, gameId, match.appearances());
+                    insertManualPlayers(c, match.created());
                 }
                 c.commit();
             } catch (SQLException failed) {
@@ -483,6 +499,222 @@ public final class SidecarStore {
                 ps.addBatch();
             }
             ps.executeBatch();
+        }
+    }
+
+    // The register write (ADR 0012, decision 3). It rides inside the caller's
+    // transaction, so a repair that is cancelled - or one that fails halfway -
+    // leaves no manual player behind, and every row here belongs to a match that
+    // really was saved. A re-save of the same match finds its players already
+    // registered and adds nothing, which keeps the created_on honest: it is when
+    // the man was first written, not when his match was last touched.
+    private void insertManualPlayers(Connection c, List<ManualPlayer> players)
+        throws SQLException {
+        if (players.isEmpty()) {
+            return;
+        }
+        try (PreparedStatement ps = c.prepareStatement("""
+            INSERT INTO manual_players (player_id, player_name, date_of_birth, created_on, note)
+            SELECT ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM manual_players WHERE player_id = ?)
+            """)) {
+            for (ManualPlayer p : players) {
+                ps.setLong(1, p.playerId());
+                ps.setString(2, p.playerName());
+                if (p.dateOfBirth() == null) {
+                    ps.setNull(3, Types.DATE);
+                } else {
+                    ps.setDate(3, Date.valueOf(p.dateOfBirth()));
+                }
+                ps.setTimestamp(4, Timestamp.valueOf(LocalDateTime.now()));
+                ps.setString(5, p.note());
+                ps.setLong(6, p.playerId());
+                ps.executeUpdate();
+            }
+        }
+    }
+
+    // --- The picker's candidates (item 17, slice 1, decision 10) --------------
+    //
+    // SQL selects and Java ranks: these queries gather evidence about who might be
+    // the man being named, and CandidateRanker in the repair package turns that
+    // evidence into 'Candidate rank'. The split is deliberate - the ranking rule
+    // will be tuned, and a rule inside a SQL string can only ever be exercised by
+    // the real snapshot.
+    //
+    // The club arm. Who has turned out for this club, over vendor appearances and
+    // released sidecar lineups together (decision 5), each match counted once by
+    // DISTINCT game_id so the 4,573 bulk reconstructions do not double-count. The
+    // nearby count is the same union narrowed to a month either side of this match,
+    // which is rank 0. The match being repaired is excluded, so a draft's own rows
+    // never rank their own players. %s is the sidecar half, dropped when there is
+    // no sidecar or no released match in it yet.
+    private static final String CANDIDATES_SQL = """
+        WITH plays AS (
+            SELECT a.player_id AS player_id, CAST(a.game_id AS BIGINT) AS game_id,
+                   a.date AS played_on, a.player_name AS player_name,
+                   CAST(NULL AS VARCHAR) AS position
+            FROM appearances a
+            WHERE a.player_club_id = ? AND CAST(a.game_id AS BIGINT) <> ?
+            %s
+        ),
+        club AS (
+            SELECT player_id, min(player_name) AS player_name,
+                   max(position) AS position,
+                   count(DISTINCT game_id) FILTER (WHERE played_on BETWEEN ? AND ?) AS nearby
+            FROM plays GROUP BY player_id
+        )
+        SELECT c.player_id,
+               COALESCE(v.name, c.player_name, %s) AS player_name,
+               COALESCE(v.position, c.position, 'Unknown') AS position,
+               COALESCE(CAST(v.date_of_birth AS DATE), %s) AS date_of_birth,
+               c.nearby AS nearby
+        FROM club c
+        LEFT JOIN players v ON v.player_id = c.player_id
+        %s
+        """;
+
+    private static final String SIDECAR_PLAYS = """
+            UNION ALL
+            SELECT l.player_id, l.game_id, m.date, l.player_name, l.position
+            FROM side.game_lineups l JOIN side.matches m ON m.game_id = l.game_id
+            WHERE l.club_id = ? AND l.game_id <> ?
+        """;
+
+    // The everyone-else arm (rank 2), asked only once something is typed: the
+    // vendor's 114,893 players are unusable as an opening list, and a name search
+    // over them is what turns a rank-2 guess into one keystroke.
+    private static final String SEARCH_VENDOR_SQL = """
+        SELECT v.player_id, v.name AS player_name,
+               COALESCE(v.position, 'Unknown') AS position,
+               CAST(v.date_of_birth AS DATE) AS date_of_birth
+        FROM players v
+        WHERE lower(v.name) LIKE '%' || lower(?) || '%'
+        ORDER BY v.name
+        LIMIT ?
+        """;
+
+    // The manual half of the same arm. A hand-made player has no players row, so a
+    // man created for one club is otherwise unfindable when he turns up at another.
+    private static final String SEARCH_MANUAL_SQL = """
+        SELECT mp.player_id, mp.player_name, 'Unknown' AS position, mp.date_of_birth
+        FROM side.manual_players mp
+        WHERE lower(mp.player_name) LIKE '%' || lower(?) || '%'
+        ORDER BY mp.player_name
+        LIMIT ?
+        """;
+
+    // Everyone the picker may offer for one side of one match, tagged with their
+    // evidence and unranked. Rank 0 - the club's squad within a month of the date -
+    // always comes back, so a side with nobody in it opens as a pre-ranked list of
+    // eleven clicks. The everyone-else arm is added only once text is typed, and
+    // capped there.
+    public List<PlayerCandidate> candidates(long clubId, long gameId, LocalDate date,
+        String typed, int cap) throws SQLException {
+
+        List<PlayerCandidate> out = new ArrayList<>();
+        try (Connection c = openReadOnly(snapshot)) {
+            Set<String> side = attachSidecar(c);
+            boolean withLineups = side.contains("game_lineups") && side.contains("matches");
+            boolean withRegister = side.contains("manual_players");
+            readClubArm(c, out, clubId, gameId, date, withLineups, withRegister);
+            if (typed != null && !typed.isBlank()) {
+                readSearchArm(c, out, SEARCH_VENDOR_SQL, typed, cap);
+                if (withRegister) {
+                    readSearchArm(c, out, SEARCH_MANUAL_SQL, typed, cap);
+                }
+            }
+        }
+        return out;
+    }
+
+    // Attach the sidecar read-only beside the vendor and report which of its tables
+    // are really there. Three states have to survive: no file at all before the
+    // first repair, a file written before ADR 0012 that has four tables and no
+    // register, and a current one with five. Naming a missing table in a query is a
+    // hard error, so each arm is gated on what came back rather than on the file
+    // merely existing.
+    private Set<String> attachSidecar(Connection c) throws SQLException {
+        Set<String> tables = new HashSet<>();
+        if (!Files.exists(sidecar)) {
+            return tables;
+        }
+        try (Statement s = c.createStatement()) {
+            s.execute("ATTACH '" + sidecar.toString().replace('\\', '/')
+                + "' AS side (READ_ONLY)");
+            try (ResultSet rs = s.executeQuery(
+                "SELECT table_name FROM duckdb_tables() WHERE database_name = 'side'")) {
+                while (rs.next()) {
+                    tables.add(rs.getString(1));
+                }
+            }
+        }
+        return tables;
+    }
+
+    private void readClubArm(Connection c, List<PlayerCandidate> out, long clubId,
+        long gameId, LocalDate date, boolean withLineups, boolean withRegister)
+        throws SQLException {
+
+        String sql = CANDIDATES_SQL.formatted(
+            withLineups ? SIDECAR_PLAYS : "",
+            withRegister ? "mp.player_name" : "NULL",
+            withRegister ? "mp.date_of_birth" : "NULL",
+            withRegister ? "LEFT JOIN side.manual_players mp ON mp.player_id = c.player_id" : "");
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            int p = 1;
+            ps.setLong(p++, clubId);
+            ps.setLong(p++, gameId);
+            if (withLineups) {
+                ps.setLong(p++, clubId);
+                ps.setLong(p++, gameId);
+            }
+            ps.setDate(p++, Date.valueOf(date.minusDays(30)));
+            ps.setDate(p, Date.valueOf(date.plusDays(30)));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(candidate(rs, rs.getInt("nearby"), true));
+                }
+            }
+        }
+    }
+
+    private void readSearchArm(Connection c, List<PlayerCandidate> out, String sql,
+        String typed, int cap) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, typed);
+            ps.setInt(2, cap);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(candidate(rs, 0, false));
+                }
+            }
+        }
+    }
+
+    private static PlayerCandidate candidate(ResultSet rs, int nearby, boolean everForClub)
+        throws SQLException {
+        Date dob = rs.getDate("date_of_birth");
+        return new PlayerCandidate(rs.getLong("player_id"), rs.getString("player_name"),
+            rs.getString("position"), dob == null ? null : dob.toLocalDate(),
+            nearby, everForClub);
+    }
+
+    // The single read the editor's id allocation stands on (ADR 0012, decision 3):
+    // the highest id the register already holds, taken once when a repair opens, so
+    // ids within that repair are max+1, max+2 and cannot collide with an earlier
+    // session's. Zero when the sidecar, or the table, is not there yet.
+    public long highestManualPlayerId() throws SQLException {
+        if (!Files.exists(sidecar)) {
+            return 0;
+        }
+        try (Connection c = openReadOnly(sidecar);
+            Statement s = c.createStatement();
+            ResultSet rs = s.executeQuery("SELECT max(player_id) FROM manual_players")) {
+            return rs.next() ? rs.getLong(1) : 0;
+        } catch (SQLException noSuchTable) {
+            // A sidecar written before ADR 0012 holds no register and no manual player.
+            return 0;
         }
     }
 

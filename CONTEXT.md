@@ -213,3 +213,26 @@ is the input to the repair GUI (item 17); it holds candidates to *check*, never
 rating decisions — a rating still moves only on a Clean or Released match (see
 *Match state*, *Sidecar*).
 _Avoid_: confidence score — the tiers are ordinal rungs, not a number
+
+**Candidate rank**:
+How likely the repair tool thinks a given player is the one being named, on a
+three-rung ladder used to order the player picker: **rank 0** — he turned out
+for this club within a month of this match, ordered by how many such nearby
+matches he played; **rank 1** — he ever turned out for this club; **rank 2** —
+everyone else. A typing aid and nothing more: it decides what order names are
+offered in, never whether a name is right, which only a source outside the tool
+can settle. Distinct from *Worklist tier*, the other ordinal ladder here — a
+tier says how sure we are that a player belongs to a *match*, a rank says how
+plausible a *player* is for a place being filled.
+_Avoid_: confidence, likelihood — a rank is a display order, not a probability
+
+**Manual player**:
+A player named by hand because no source names him — the eleven men of a side
+the vendor's record omits entirely. He exists only in the *Sidecar*, carries an
+id from a reserved range that cannot collide with the vendor's own, and is
+identified by that id and never by his name, so a name later corrected does not
+make him a different man. He rates exactly like any other player: nothing in a
+replay distinguishes him, because player identity reaches the engine through
+lineups alone (see [ADR 0012](docs/adr/0012-manually-created-players.md)).
+_Avoid_: fake player, synthetic player — he is a real footballer with a missing
+record, not an invention
