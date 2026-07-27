@@ -758,6 +758,55 @@ offered today, and nothing here reaches a rating). Both are now stated in the
 code. Replay re-checked after the fixes: still byte-identical, still 0.6503.
 Suite 183 green.
 
+**Gate, first pass (2026-07-27). Three repairs done, one shape still open.**
+Released `2225695` (Swansea v Arsenal), `2243064` (Málaga v Barcelona) and
+`2282712` (Córdoba v Barcelona) — all *appeared*-tier. The replay then reports
+**85,044 → 85,047 matches (+3)**, sidecar 4,573 → 4,576, log-loss unchanged at
+0.6503. The count half of the gate is met.
+
+`2282712` carried the slice's real risk: **eight players named by hand**, ids
+`1000000000`–`1000000007`, consecutive from the first reserved id, all
+`created_on` inside a 3 ms window — one transaction from one read of the
+ceiling. Zero register rows without a lineup row, so ADR 0012's invariant held
+under real use. Decision 7's role default worked as designed: Córdoba had six
+recorded starters, the first five creations went in as starters to reach eleven
+and the next three fell to the bench by themselves. Three of the eight carry no
+date of birth and released anyway (decision 4). The CSV grew by exactly five
+rows — the five created *starters*; the three created substitutes are named by
+no substitution event, so they took no minutes and no rating, which is correct.
+
+**"No other rating changed" cannot be read literally, and was not.** 7,324 of
+~95,500 ratings moved, mean 0.056. That is structural, not a defect: ADR 0005
+makes this an online career rating, so a December-2012 match shifts its own
+participants and they carry the shift into every later lineup they appear in.
+Read as "+3 rated matches, no other match newly rated or dropped", the gate
+passes. Worth pinning the wording before the next slice reuses it.
+
+**The certain-tier and absent-side shapes are still open, deliberately.** The
+first candidates picked for them — `4188974` (Scottish junior football) and
+`3936666` (a Copa del Rey qualifier, no home club name at all) — were chosen for
+being clean examples of the shape, which made them nearly unsourceable. No
+outside source could be found, so both **stay Held**: decision 1 says the
+ranking is a typing aid and verification comes from outside the tool, and
+releasing on the strength of a plausible picker list is exactly what that
+forbids. The lesson is for the *choice of match*, not the tool — pick from
+competitions the vendor covers properly. Replacements identified:
+`3451032` (Elche v Granada, ES1 2020-12-13 — Granada absent entirely **and**
+Elche on nine starters, so both shapes in one match) and `2613697` (Moreirense v
+Marítimo, PO1 2016-05-15 — Marítimo on ten starters). Neither should need a
+created player, and none is needed: creation is already exercised by `2282712`.
+
+**Asked for and built the same day: per-side counts on screen.** Counting rows
+by hand to find which XI was short was the first thing the tool asked of the
+operator. `problems()` could not be made to say it — LoaderAgreementTest pins
+those strings equal to the loader's own reasons (decision 4), and rewording them
+for readability is the silent drift that test exists to catch. So the count went
+into a new `SideStatus` in `repair`, shown for both sides whether or not anything
+is wrong. Also fixed while checking it on real data: vendor fixtures can carry a
+null `home_club_name` — `3936666` is one — and the screen greeted that repair
+with the word "null". `MatchHeader` now offers a label falling back to the club
+id.
+
 ## 2. Store each player's date of birth
 
 **Why:** Enables age-aware analysis — comparing a player against peers in the
