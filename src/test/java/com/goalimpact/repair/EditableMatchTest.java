@@ -163,6 +163,73 @@ class EditableMatchTest {
         assertTrue(seed.contains("P200"), seed);   // away keeper, id 200
     }
 
+    // --- Item 17, slice 2: the events-derived lineup -------------------------
+
+    // A maybe match derives no roster of its own: the caller hands over only the
+    // men the events named (EventRoster), so a side arrives part-built - median
+    // five of eleven, measured 2026-07-28 - and the picker finishes it.
+    @Test
+    void anEventsDerivedMatchStartsThoseTheEventsDoNotSubOn() {
+        List<LineupEntry> roster = List.of(
+            rosterEntry(HOME, 101, "Midfield"), rosterEntry(HOME, 102, "Midfield"),
+            rosterEntry(HOME, 111, "Midfield"));
+        List<EventRow> events = List.of(subOn(HOME, 111));
+
+        EditableMatch match = EditableMatch.fromEvents(header(), roster, events, List.of());
+
+        assertEquals(EditableMatch.Origin.EVENTS, match.origin());
+        assertEquals(2, match.lineup().stream().filter(LineupEntry::starter).count());
+        assertTrue(match.lineup().stream()
+            .filter(e -> e.playerId() == 111)
+            .noneMatch(LineupEntry::starter));
+    }
+
+    // The seed must describe the record it actually read. Saying "reconstructed
+    // from the appearances roster" on a match that has no appearances roster
+    // would write a falsehood into the precious sidecar.
+    @Test
+    void theEventsDerivedSeedNamesTheEventsAndNotTheAppearances() {
+        List<LineupEntry> roster = List.of(rosterEntry(HOME, 101, "Goalkeeper"));
+
+        String seed = EditableMatch.fromEvents(header(), roster, List.of(), List.of())
+            .provenanceSummary();
+
+        assertTrue(seed.contains("the match's own events"), seed);
+        assertFalse(seed.contains("from the appearances roster"), seed);
+    }
+
+    // Decision 2: an id the vendor references but never names goes into the
+    // lineup labelled by that id, because leaving him out would leave him addable
+    // only by *creating* him - handing a footballer who already holds a vendor id
+    // a second one, the split identity ADR 0012 exists to prevent.
+    @Test
+    void anUnnamedVendorIdIsLabelledByItsId() {
+        LineupEntry row = new LineupEntry(HOME, 117799L,
+            LineupEntry.unnamed(117799L), LineupEntry.UNKNOWN_POSITION, "substitutes");
+
+        assertEquals("player 117799", row.playerName());
+        assertTrue(row.unnamed());
+    }
+
+    // Decisions 2 and 3, and ADR 0012 decision 6: naming him registers him under
+    // his own id. He is a Manual player of the *named* kind - nothing is minted,
+    // so the allocator must not move, or the next created player would skip an id
+    // for no reason.
+    @Test
+    void namingAVendorIdRegistersHimUnderThatIdAndMintsNothing() {
+        EditableMatch match = EditableMatch
+            .fromEvents(header(), List.of(rosterEntry(HOME, 117799L, "Midfield")),
+                List.of(), List.of())
+            .name(117799L, "Marc Dupont", LocalDate.of(1979, 3, 4), "matchday programme");
+
+        assertEquals(List.of(new ManualPlayer(117799L, "Marc Dupont",
+            LocalDate.of(1979, 3, 4), "matchday programme")), match.created());
+        assertEquals("Marc Dupont", match.lineup().get(0).playerName());
+        assertFalse(match.isCreated(117799L));
+        assertEquals(ManualPlayer.FIRST_ID,
+            match.create(HOME, "Somebody", "Midfield", null, null).created().get(1).playerId());
+    }
+
     // --- Item 17, slice 1: adding, creating and removing --------------------
 
     // A side one man short: ten starters and no eleventh anywhere.

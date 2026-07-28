@@ -115,6 +115,55 @@ class SidecarOverrideTest {
         }
     }
 
+    // Add the register on top of the four-table file, so the other tests keep
+    // exercising a sidecar that has none - the shape on disk before ADR 0012.
+    private static void writeRegister(Path file, long playerId, String name) throws Exception {
+        String url = "jdbc:duckdb:" + file.toString().replace('\\', '/');
+        try (Connection c = DriverManager.getConnection(url);
+             Statement s = c.createStatement()) {
+            s.execute("""
+                CREATE TABLE manual_players (
+                  player_id BIGINT, player_name VARCHAR, date_of_birth DATE,
+                  created_on TIMESTAMP, note VARCHAR)""");
+            s.execute("INSERT INTO manual_players VALUES (" + playerId + ", '" + name
+                + "', NULL, now(), 'named by hand')");
+        }
+    }
+
+    // ADR 0012 decision 7 (item 17, slice 2). The register is where a hand-typed
+    // name lives, so it must beat the name frozen into the lineup row when the
+    // match was released - otherwise naming a man once would not show in the
+    // games he is already in, which is the whole reason for naming him.
+    @Test
+    void theRegistersNameBeatsTheOneFrozenInTheLineupRow(@TempDir Path dir) throws Exception {
+        assumeTrue(Files.exists(SNAPSHOT), "vendor snapshot not present");
+        Path sidecar = dir.resolve("sidecar.duckdb");
+        writeSidecar(sidecar, "released");        // lineup row names him P900002
+        writeRegister(sidecar, 900002L, "Marc Dupont");
+
+        try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT, sidecar)) {
+            assertEquals("Marc Dupont",
+                firstGoal(loader.loadEvents(opener(loader))).scorer().name());
+        }
+    }
+
+    // Only the men the register names move; everyone else keeps the lineup row's
+    // name, so the join can never blank a name it has nothing to say about.
+    @Test
+    void aPlayerTheRegisterDoesNotNameKeepsHisLineupName(@TempDir Path dir) throws Exception {
+        assumeTrue(Files.exists(SNAPSHOT), "vendor snapshot not present");
+        Path sidecar = dir.resolve("sidecar.duckdb");
+        writeSidecar(sidecar, "released");
+        writeRegister(sidecar, 900002L, "Marc Dupont");
+
+        try (TransfermarktLoader loader = new TransfermarktLoader(SNAPSHOT, sidecar)) {
+            assertEquals("P900001", loader.loadEvents(opener(loader)).stream()
+                .filter(e -> e instanceof MatchEvent.StartingXI)
+                .flatMap(e -> ((MatchEvent.StartingXI) e).players().stream())
+                .filter(p -> p.id() == 900001L).findFirst().orElseThrow().name());
+        }
+    }
+
     @Test
     void anEmptySidecarBehavesExactlyAsTheVendor(@TempDir Path dir) throws Exception {
         assumeTrue(Files.exists(SNAPSHOT), "vendor snapshot not present");

@@ -2,11 +2,13 @@ package com.goalimpact.data;
 
 import com.goalimpact.repair.AppearanceRow;
 import com.goalimpact.repair.EditableMatch;
+import com.goalimpact.repair.EventRoster;
 import com.goalimpact.repair.EventRow;
 import com.goalimpact.repair.LineupEntry;
 import com.goalimpact.repair.ManualPlayer;
 import com.goalimpact.repair.MatchHeader;
 import com.goalimpact.repair.PlayerCandidate;
+import com.goalimpact.repair.PlayerSighting;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,8 +24,10 @@ import java.sql.Types;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
@@ -149,8 +153,140 @@ public final class SidecarStore {
             if (hasVendorLineup(c, gameId)) {
                 return readMatch(c, "games", gameId);
             }
-            return reconstructAppeared(c, gameId);
+            if (hasAppearances(c, gameId)) {
+                return reconstructAppeared(c, gameId);
+            }
+            return deriveFromEvents(c, gameId);
         }
+    }
+
+    private boolean hasAppearances(Connection c, long gameId) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement(
+            "SELECT 1 FROM appearances WHERE CAST(game_id AS BIGINT) = ? LIMIT 1")) {
+            ps.setLong(1, gameId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    // The maybe tier (item 17, slice 2, decision 1): neither team sheet nor
+    // appearances record, so the lineup is derived from the match's own events.
+    // The judgement stays in repair - EventRoster decides who played and for whom,
+    // including decision 8's own-goal flip - and this method does only what the
+    // data layer may do: look the names and positions up.
+    private EditableMatch deriveFromEvents(Connection c, long gameId) throws SQLException {
+        MatchHeader header = readHeader(c, "games", gameId);
+        List<EventRow> events = readEvents(c, gameId);
+        List<EventRoster.Slot> slots =
+            EventRoster.from(events, header.homeClubId(), header.awayClubId());
+
+        Map<Long, LineupEntry> known = readPlayerFacts(c, slots);
+        List<LineupEntry> roster = new ArrayList<>(slots.size());
+        for (EventRoster.Slot slot : slots) {
+            LineupEntry facts = known.get(slot.playerId());
+            // The type is a placeholder; fromEvents sets start/bench from the
+            // substitutions, exactly as the appeared roster's is overwritten.
+            roster.add(new LineupEntry(slot.clubId(), slot.playerId(),
+                facts == null ? LineupEntry.unnamed(slot.playerId()) : facts.playerName(),
+                facts == null ? LineupEntry.UNKNOWN_POSITION : facts.position(),
+                LineupEntry.BENCH));
+        }
+        return EditableMatch.fromEvents(header, roster, events, readAppearances(c, gameId));
+    }
+
+    // A name for each derived id, from wherever the snapshot holds one. players
+    // covers 50,149 men and is not the master list: game_lineups alone references
+    // 69,943 ids absent from it, so all three sources are asked, in the order a
+    // name is most likely to be right. 8.8% of derived rows are named by none of
+    // them and fall through to decision 2's label. Only players carries a
+    // position, so 26% arrive Unknown - and a side gets a goalkeeper for free
+    // only 5% of the time, which problems() then holds the match on.
+    //
+    // The register wins over all three when the sidecar has one (ADR 0012,
+    // decision 6): a man named by hand in one repair is named in every later one,
+    // which is the whole point of naming him once.
+    private static final String PLAYER_FACTS_SQL = """
+        SELECT ids.pid AS player_id,
+               COALESCE(%s v.name,
+                   (SELECT gl.player_name FROM game_lineups gl
+                        WHERE gl.player_id = ids.pid AND gl.player_name IS NOT NULL LIMIT 1),
+                   (SELECT ap.player_name FROM appearances ap
+                        WHERE ap.player_id = ids.pid AND ap.player_name IS NOT NULL LIMIT 1)
+               ) AS player_name,
+               COALESCE(v.position, 'Unknown') AS position
+        FROM (SELECT unnest(?::BIGINT[]) AS pid) ids
+        LEFT JOIN players v ON v.player_id = ids.pid
+        %s
+        """;
+
+    private Map<Long, LineupEntry> readPlayerFacts(Connection c, List<EventRoster.Slot> slots)
+        throws SQLException {
+
+        Map<Long, LineupEntry> facts = new HashMap<>();
+        if (slots.isEmpty()) {
+            return facts;
+        }
+        boolean withRegister = attachSidecar(c).contains(MANUAL_PLAYERS);
+        String sql = PLAYER_FACTS_SQL.formatted(
+            withRegister ? "mp.player_name," : "",
+            withRegister ? "LEFT JOIN side.manual_players mp ON mp.player_id = ids.pid" : "");
+
+        Long[] ids = slots.stream().map(EventRoster.Slot::playerId).toArray(Long[]::new);
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setArray(1, c.createArrayOf("BIGINT", ids));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString("player_name");
+                    if (name == null || name.isBlank()) {
+                        continue;
+                    }
+                    facts.put(rs.getLong("player_id"), new LineupEntry(0L,
+                        rs.getLong("player_id"), name, rs.getString("position"),
+                        LineupEntry.BENCH));
+                }
+            }
+        }
+        return facts;
+    }
+
+    private static final String MANUAL_PLAYERS = "manual_players";
+
+    // Every other match whose events name this player, so the operator can work
+    // out who he is before naming him (decision 9). The list is short by nature -
+    // the 2,969 nameless ids touch a median of one game each, 15 at the most -
+    // so it is shown whole and never capped.
+    private static final String OTHER_GAMES_SQL = """
+        SELECT DISTINCT CAST(e.game_id AS BIGINT) AS gid, g.date AS played_on,
+               g.competition_id, g.season,
+               COALESCE(g.home_club_name, 'club ' || g.home_club_id) AS home,
+               COALESCE(g.away_club_name, 'club ' || g.away_club_id) AS away
+        FROM game_events e
+        JOIN games g ON CAST(g.game_id AS BIGINT) = CAST(e.game_id AS BIGINT)
+        WHERE (e.player_id = ? OR e.player_in_id = ?) AND CAST(e.game_id AS BIGINT) <> ?
+        ORDER BY played_on, gid
+        """;
+
+    public List<PlayerSighting> otherGames(long playerId, long excludingGameId)
+        throws SQLException {
+
+        List<PlayerSighting> out = new ArrayList<>();
+        try (Connection c = openReadOnly(snapshot);
+            PreparedStatement ps = c.prepareStatement(OTHER_GAMES_SQL)) {
+            ps.setLong(1, playerId);
+            ps.setLong(2, playerId);
+            ps.setLong(3, excludingGameId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Date played = rs.getDate("played_on");
+                    out.add(new PlayerSighting(rs.getLong("gid"),
+                        played == null ? null : played.toLocalDate(),
+                        rs.getString("competition_id"), rs.getString("season"),
+                        rs.getString("home"), rs.getString("away")));
+                }
+            }
+        }
+        return out;
     }
 
     private static final String APPEARED_IDS_SQL = """
@@ -737,7 +873,14 @@ public final class SidecarStore {
                     return 0;
                 }
             }
-            try (ResultSet rs = s.executeQuery("SELECT max(player_id) FROM manual_players")) {
+            // Only the minted ids. Since slice 2 the register also holds vendor
+            // ids that were merely given a name (ADR 0012, decision 6), and those
+            // must be invisible here - otherwise naming one man would drag the
+            // next *created* player's id up to his, skipping the range for no
+            // reason. The range test is the honest filter: a vendor id is never
+            // above it.
+            try (ResultSet rs = s.executeQuery("SELECT max(player_id) FROM manual_players"
+                + " WHERE player_id >= " + ManualPlayer.FIRST_ID)) {
                 return rs.next() ? rs.getLong(1) : 0;
             }
         }

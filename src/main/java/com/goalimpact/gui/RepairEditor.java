@@ -59,6 +59,7 @@ class RepairEditor extends Stage {
     private final TextArea provenance = new TextArea();
     private final Button release = new Button("Release");
     private final Button remove = new Button("Remove (undo add)");
+    private final Button nameHim = new Button("Name this player");
 
     // Once the provenance box is edited by hand it is never overwritten by the
     // generated seed; seeding guards against the programmatic setText being
@@ -97,8 +98,9 @@ class RepairEditor extends Stage {
         Button toBench = new Button("To bench");
         toBench.setOnAction(e -> edit(m -> m.asBench(selectedId())));
         remove.setOnAction(e -> removeSelected());
+        nameHim.setOnAction(e -> nameSelected());
         HBox edits = new HBox(8, new Label("Selected player:"),
-            position, setPosition, toXi, toBench, remove);
+            position, setPosition, toXi, toBench, remove, nameHim);
 
         Button addHome = new Button("Add to " + h.homeClubLabel());
         addHome.setOnAction(e -> addTo(h.homeClubId(), h.homeClubLabel()));
@@ -173,6 +175,33 @@ class RepairEditor extends Stage {
         }
         match = match.remove(selected.playerId());
         refresh();
+    }
+
+    // Put a name to a player the vendor references but never names (decision 9).
+    // Offered only on such a row: a man the vendor already names is not this
+    // problem, and overwriting his name here would be a second, undecided feature.
+    private void nameSelected() {
+        LineupEntry selected = lineup.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            problems.setText("Select a player row first.");
+            return;
+        }
+        if (!selected.unnamed()) {
+            problems.setText(selected.playerName()
+                + " is already named by the vendor's own records, so there is"
+                + " nothing to supply here.");
+            return;
+        }
+        try {
+            NamePlayerDialog.name(this, store, selected, match.header().gameId())
+                .ifPresent(naming -> {
+                    match = match.name(selected.playerId(), naming.name(),
+                        naming.dateOfBirth(), naming.note());
+                    refresh();
+                });
+        } catch (SQLException e) {
+            problems.setText("Could not read his other matches: " + e.getMessage());
+        }
     }
 
     // Apply an edit to the selected player, or say why nothing happened.
@@ -252,7 +281,8 @@ class RepairEditor extends Stage {
         // Which rows this session put here, so the operator can see at a glance
         // what is his own work and what came from the record - and which rows
         // Remove will accept.
-        column(lineup, "added", 90, e -> !match.isAdded(e.playerId()) ? ""
+        column(lineup, "added", 90, e -> match.isNamed(e.playerId()) ? "named"
+            : !match.isAdded(e.playerId()) ? ""
             : match.isCreated(e.playerId()) ? "created" : "added");
     }
 

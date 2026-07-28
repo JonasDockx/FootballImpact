@@ -103,6 +103,7 @@ public class TransfermarktLoader implements AutoCloseable {
     // over the vendor's copy of that game id outright - a whole-match
     // replacement - while a draft is invisible and rates nowhere.
     private final boolean hasSidecar;
+    private final boolean hasRegister;
     private final Set<Long> released;       // game ids the sidecar has released
     private boolean sidecarStaged = false;  // stageSidecar runs once, not per slice
 
@@ -304,7 +305,20 @@ public class TransfermarktLoader implements AutoCloseable {
                     + sidecar.toString().replace('\\', '/') + "' AS sidecar (READ_ONLY)");
             }
         }
+        this.hasRegister = hasSidecar && sidecarHasRegister();
         this.released = hasSidecar ? loadReleasedIds() : Set.of();
+    }
+
+    // Whether the attached sidecar carries ADR 0012's register. Three states have
+    // to survive: no sidecar, a pre-ADR-0012 file with four tables, and a current
+    // one with five.
+    private boolean sidecarHasRegister() throws SQLException {
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(
+                "SELECT 1 FROM duckdb_tables()"
+                    + " WHERE database_name = 'sidecar' AND table_name = 'manual_players'")) {
+            return rows.next();
+        }
     }
 
     // The released game ids, read once at construction. Draft rows are
@@ -489,7 +503,11 @@ public class TransfermarktLoader implements AutoCloseable {
     // Draft rows are skipped in Java via released, mirroring loadReleasedIds.
     private void stageSidecar() throws SQLException {
         try (Statement statement = connection.createStatement();
-            ResultSet rows = statement.executeQuery(SIDECAR_LINEUP_SQL)) {
+            ResultSet rows = statement.executeQuery(SIDECAR_LINEUP_SQL.formatted(
+                hasRegister ? "mp.player_name," : "",
+                hasRegister
+                    ? "LEFT JOIN sidecar.manual_players mp ON mp.player_id = l.player_id"
+                    : ""))) {
             while (rows.next()) {
                 long gid = rows.getLong("gid");
                 if (!released.contains(gid)) {
@@ -542,10 +560,24 @@ public class TransfermarktLoader implements AutoCloseable {
     // ordering in loadEvents - so a released match is not a special replay,
     // just a different source for the same shape. The event filter matches
     // the vendor's: no shootout rows, no minute <= 0.
+    // ADR 0012 decision 7 (item 17, slice 2): the register is authoritative for a
+    // hand-typed name, at replay time too. A released match is a snapshot that
+    // keeps whatever name it was saved with, so without this join a man named by
+    // hand today would still read as "player 117799" in the games he is already
+    // in - and naming him once is precisely what was asked for.
+    //
+    // Only the sidecar's lineups are joined, and that is the whole population by
+    // construction: a created player appears in no vendor table at all, and a
+    // nameless vendor id appears in no lineup anywhere until a repair puts him in
+    // one. The register may be absent - a file written before ADR 0012 has four
+    // tables - and naming a missing table is a hard error in DuckDB, so the join
+    // is formatted in only when the table is really there.
     private static final String SIDECAR_LINEUP_SQL = """
-        SELECT game_id AS gid, club_id, player_id, player_name, position, type
-        FROM sidecar.game_lineups
-        ORDER BY gid, club_id, player_id
+        SELECT l.game_id AS gid, l.club_id, l.player_id,
+               COALESCE(%s l.player_name) AS player_name, l.position, l.type
+        FROM sidecar.game_lineups l
+        %s
+        ORDER BY gid, l.club_id, l.player_id
         """;
 
     private static final String SIDECAR_EVENT_SQL = """

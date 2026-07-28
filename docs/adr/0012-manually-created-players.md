@@ -65,6 +65,41 @@ that requires the set of manual players to be knowable.
    would turn one unfindable birthday into a match that cannot be repaired,
    inverting the point of the tool.
 
+## Amendment (2026-07-28, item 17 slice 2): the register also holds vendor ids
+
+Building the maybe tier turned up a second population this ADR did not foresee.
+The vendor's `game_events` reference **2,969 player ids that no vendor table ever
+names** — not `players`, not `game_lineups`, not `appearances` — across 1,329
+games. They hold no rating today, because the engine builds its players from
+lineup rows alone and these men appear in none; they enter the ratings for the
+first time when a maybe match naming them is released.
+
+Such a man is a *Manual player* by every part of the definition except one: the
+vendor already gave him an id. Decisions 6 and 7 follow from taking that
+seriously.
+
+6. **`manual_players` holds him too, under his vendor id.** The register becomes
+   the one place a hand-typed name lives, and the reserved range stops being what
+   the table *means* — it is only how an id is minted when the vendor never
+   supplied one. `ManualPlayer.isManual` stays a true range test and keeps its
+   meaning ("was this id invented here?"); `highestManualPlayerId` gains a
+   `WHERE player_id >= FIRST_ID` so a vendor id can never seed the allocator.
+   The alternative — a second table for name overrides, leaving this ADR
+   untouched — was rejected for splitting one concept across two writes, two
+   joins and two things to keep in step.
+
+7. **The register's name beats the name frozen in a lineup row, at replay time
+   too.** This narrows decision 4, which tolerated a corrected name not
+   reaching matches already saved. It cannot survive naming: the whole point of
+   naming a man once is that his other games show it. So `TransfermarktLoader`
+   left-joins `sidecar.manual_players` and prefers its name — the loader learns a
+   fifth sidecar table, and the "four tables, the fifth invisible" simplicity
+   that kept the replay trivially byte-identical ends here. Identity is still the
+   id and nothing about a rating changes; only the display name moves. Decision
+   4's second half stands: a *created* player's name is his register row's, and
+   the invariant of decision 3 is unchanged, since a vendor id is registered
+   inside the same `save` transaction as the match that first names him.
+
 ## Considered options
 
 - **Derive the manual population from sidecar lineup rows (rejected).** No new
@@ -78,6 +113,18 @@ that requires the set of manual players to be knowable.
 - **A `manual` boolean column instead of a reserved range (rejected).** Requires
   a join to answer a question about an id, and admits the state where the column
   and the id disagree.
+- **A second sidecar table for name overrides (rejected, 2026-07-28).** Would
+  have kept this ADR's original text exact — `manual_players` for minted ids
+  only, `player_names` for vendor ids. Rejected because the two tables would hold
+  the same fact ("the name a human typed for this player id"), so every reader
+  would join both and every writer would have to pick, for no gain but leaving a
+  paragraph unedited.
+- **Keep the register out of the replay (rejected, 2026-07-28).** The loader
+  would stay untouched and the byte-identical gate stay trivial; a renamed player
+  would be fixed by re-opening and re-releasing his matches, of which he has a
+  median of one. Rejected because it leaves two places able to disagree about who
+  a player is — the exact defect the slice-1 review had already had to fix once
+  in the picker's `COALESCE`.
 - **Write the register on the "create" click (rejected).** Simpler write path,
   and the id is real the instant it exists. Rejected for the orphan rows: after a
   year the register stops meaning "everyone I created" and starts meaning

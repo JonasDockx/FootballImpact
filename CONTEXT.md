@@ -206,13 +206,28 @@ How sure the per-player missing-match worklist is that a player belongs to a
 player is named in the match's broken team sheet, which the gate read before
 rejecting the match. **Appeared** — the match has no team sheet, but the vendor's
 `appearances` record names exactly who played it, with minutes. **Maybe** — the
-match has neither team sheet nor appearances; the player is only a candidate,
-drawn from the club's squad in the month around the match date and ranked by how
-many nearby matches they actually turned out for. A worklist is per player and
+match has neither team sheet nor appearances, so no source states its lineups;
+the player is only a candidate, drawn from the club's squad in the month around
+the match date and ranked by how many nearby matches they actually turned out
+for. A Maybe match is nonetheless rarely blank: its own events name whoever
+scored, was booked or was substituted, which is most of a lineup but never all
+of one (see *Derived lineup*). A worklist is per player and
 is the input to the repair GUI (item 17); it holds candidates to *check*, never
 rating decisions — a rating still moves only on a Clean or Released match (see
 *Match state*, *Sidecar*).
 _Avoid_: confidence score — the tiers are ordinal rungs, not a number
+
+**Derived lineup**:
+A lineup nobody recorded, worked out from the match's own surviving records
+instead of read off a team sheet. Two records can do it, in falling
+completeness: the *appearances* record, which names everyone who played, and the
+match's events, which name only whoever did something — scored, was booked, came
+on or went off. Either way the split between the starting XI and the bench is
+read from the substitutions: a named player who never came on started. A derived
+lineup is a reading of the record and never a guess, so where the record is
+silent it is simply short — the gap is closed by hand or the match stays *Held*.
+_Avoid_: inferred lineup, guessed lineup, reconstructed lineup — nothing here is
+estimated, and the derivation is not confined to matches being repaired
 
 **Candidate rank**:
 How likely the repair tool thinks a given player is the one being named, on a
@@ -227,12 +242,16 @@ plausible a *player* is for a place being filled.
 _Avoid_: confidence, likelihood — a rank is a display order, not a probability
 
 **Manual player**:
-A player named by hand because no source names him — the eleven men of a side
-the vendor's record omits entirely. He exists only in the *Sidecar*, carries an
-id from a reserved range that cannot collide with the vendor's own, and is
-identified by that id and never by his name, so a name later corrected does not
-make him a different man. He rates exactly like any other player: nothing in a
-replay distinguishes him, because player identity reaches the engine through
-lineups alone (see [ADR 0012](docs/adr/0012-manually-created-players.md)).
+A footballer the vendor does not name, whose name is therefore supplied by hand
+and kept in the *Sidecar*. He arrives two ways, and the difference between them
+is only whether the vendor happened to give him an id: **created** — no source
+mentions him at all, so an id is minted for him from a reserved range that
+cannot collide with the vendor's own; **named** — the vendor's records reference
+his id but never spell out who he is, so he keeps that id and gains a name. He
+is identified by his id and never by his name, so a name later corrected does
+not make him a different man, and the hand-typed name is authoritative wherever
+one is shown. He rates exactly like any other player: nothing in a replay
+distinguishes him, because player identity reaches the engine through lineups
+alone (see [ADR 0012](docs/adr/0012-manually-created-players.md)).
 _Avoid_: fake player, synthetic player — he is a real footballer with a missing
 record, not an invention

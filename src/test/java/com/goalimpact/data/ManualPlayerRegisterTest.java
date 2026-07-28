@@ -88,6 +88,43 @@ class ManualPlayerRegisterTest {
             "SELECT count(*) FROM manual_players WHERE created_on IS NOT NULL"));
     }
 
+    // ADR 0012 decision 6 (item 17, slice 2): the register also holds a vendor id
+    // the snapshot never names. He keeps that id - nothing is minted - so the
+    // register stops meaning "ids I invented" and starts meaning "names I typed".
+    @Test
+    void namingAVendorIdWritesHisRegisterRowUnderThatId() throws Exception {
+        Path db = sidecar();
+        SidecarStore store = new SidecarStore(db, SNAPSHOT);
+        EditableMatch match = tenAndAFullSide()
+            .withManualIdCeiling(store.highestManualPlayerId())
+            .name(105L, "Marc Dupont", LocalDate.of(1975, 3, 1), "matchday programme");
+
+        store.save(match, "released", match.provenanceSummary());
+
+        assertEquals(105L, count(db, "SELECT player_id FROM manual_players"));
+        assertEquals("Marc Dupont", text(db, "SELECT player_name FROM manual_players"));
+        assertEquals("Marc Dupont",
+            text(db, "SELECT player_name FROM game_lineups WHERE player_id = 105"));
+    }
+
+    // The allocator reads the highest id in the register, so a vendor id sitting
+    // there must be invisible to it. Otherwise naming one man would drag the next
+    // *created* player's id up to his - and a vendor id above the reserved range
+    // is impossible, so the range test is the honest filter.
+    @Test
+    void aNamedVendorIdDoesNotMoveTheAllocator() throws Exception {
+        Path db = sidecar();
+        SidecarStore store = new SidecarStore(db, SNAPSHOT);
+        store.save(tenAndAFullSide()
+            .withManualIdCeiling(store.highestManualPlayerId())
+            .name(105L, "Marc Dupont", null, ""), "released", "named one");
+
+        assertEquals(0, store.highestManualPlayerId());
+        assertEquals(ManualPlayer.FIRST_ID, tenAndAFullSide()
+            .withManualIdCeiling(store.highestManualPlayerId())
+            .create(HOME, "Jan Peeters", "Winger", null, "").created().get(0).playerId());
+    }
+
     // ADR 0012, decision 3: the register is written with the match and never on the
     // create click, so an abandoned repair leaves nothing behind. Creating without
     // saving is the whole test.

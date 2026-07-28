@@ -30,7 +30,7 @@ import java.util.function.UnaryOperator;
 // The original and the origin are threaded through each edit unchanged.
 public final class EditableMatch {
 
-    public enum Origin { VENDOR_SHEET, RECONSTRUCTED }
+    public enum Origin { VENDOR_SHEET, RECONSTRUCTED, EVENTS }
 
     private final MatchHeader header;
     private final List<LineupEntry> lineup;
@@ -71,6 +71,30 @@ public final class EditableMatch {
     // the ~3% that do not derive to eleven diffs against it.
     public static EditableMatch fromAppearances(MatchHeader header,
         List<LineupEntry> roster, List<EventRow> events, List<AppearanceRow> appearances) {
+        return derived(header, roster, events, appearances, Origin.RECONSTRUCTED);
+    }
+
+    // The maybe entry point (item 17, slice 2, decision 1): a match with neither
+    // team sheet nor appearances record, whose own events still name a median of
+    // 18 of the 22 who played (glossary 'Derived lineup'). The roster is whoever
+    // the events named, with his side worked out by EventRoster; the start/bench
+    // split is then the very same rule the appeared tier uses, because it reads
+    // the very same substitutions. The difference from fromAppearances is what
+    // the record could supply, not how it is read: a side arrives part-built -
+    // median five of eleven, and a goalkeeper only 5% of the time - so problems()
+    // holds it and the picker finishes it.
+    public static EditableMatch fromEvents(MatchHeader header,
+        List<LineupEntry> roster, List<EventRow> events, List<AppearanceRow> appearances) {
+        return derived(header, roster, events, appearances, Origin.EVENTS);
+    }
+
+    // A starter is a roster player no substitution brought on. Nothing is
+    // invented: the split is read from the events that will later drive the
+    // replay, so the derivation is consistent with the engine by construction.
+    // The result is its own baseline, so a released-as-is match shows no change
+    // and a hand fix diffs against the derivation.
+    private static EditableMatch derived(MatchHeader header, List<LineupEntry> roster,
+        List<EventRow> events, List<AppearanceRow> appearances, Origin origin) {
         Set<Long> cameOn = new HashSet<>();
         for (EventRow e : events) {
             if (EventRow.SUBSTITUTION.equals(e.type()) && e.playerInId() != null) {
@@ -82,7 +106,7 @@ public final class EditableMatch {
             lineup.add(cameOn.contains(r.playerId()) ? r.asBench() : r.asStarter());
         }
         return new EditableMatch(header, lineup, lineup, events, appearances,
-            Origin.RECONSTRUCTED, List.of(), ManualPlayer.FIRST_ID);
+            origin, List.of(), ManualPlayer.FIRST_ID);
     }
 
     private EditableMatch(MatchHeader header, List<LineupEntry> lineup,
@@ -132,11 +156,16 @@ public final class EditableMatch {
     // checked before the keeper, and the keeper line is never reached when the
     // count is wrong. An empty list means the loader would rate this match.
     //
-    // This assumes a lineup with a starting XI to judge: either the vendor's own
-    // (certain tier) or the reconstructed one (appeared tier, which marks starters
-    // from the substitution events before the editor ever opens). The loader's "no
-    // lineups" reason, for a match with no starters at all, is the maybe tier's -
-    // still not offered - and is never reached here.
+    // What this judges is the lineup *in hand*, which is the vendor's own only on
+    // the certain tier; on the other two it is a Derived lineup this object built
+    // before the editor opened. So the loader's reading of the vendor's rows is
+    // not the thing to agree with - it says "no lineups" for every appeared and
+    // maybe match, whatever the derivation made of it. The agreement that does
+    // hold, and that LoaderAgreementTest pins, is with the loader's reading of
+    // the *released* match: empty exactly when the loader would rate it. The "no
+    // lineups" reason therefore has no counterpart here, because a lineup with no
+    // starters at all already reports "XI is not 11" for both sides, which is
+    // both true and more use to the operator.
     public List<String> problems() {
         List<String> reasons = new ArrayList<>();
         if (startingGoalkeepers(header.homeClubId()) > 1) {
@@ -254,6 +283,24 @@ public final class EditableMatch {
             nextManualId + 1);
     }
 
+    // Put a name to a player the vendor references but never names (decision 2,
+    // ADR 0012 decision 6). He is a Manual player of the *named* kind: he keeps
+    // the vendor id he already has, so nothing is minted and the allocator does
+    // not move - only a register row appears, written inside save's transaction
+    // like any other, and his lineup row starts showing the name.
+    public EditableMatch name(long playerId, String playerName, LocalDate dateOfBirth,
+        String note) {
+
+        List<ManualPlayer> nextCreated = new ArrayList<>(created);
+        nextCreated.removeIf(p -> p.playerId() == playerId);
+        nextCreated.add(new ManualPlayer(playerId, playerName, dateOfBirth, note));
+        List<LineupEntry> next = new ArrayList<>(lineup.size());
+        for (LineupEntry entry : lineup) {
+            next.add(entry.playerId() == playerId ? entry.withName(playerName) : entry);
+        }
+        return with(next, nextCreated, nextManualId);
+    }
+
     private List<LineupEntry> lineupPlus(long clubId, long playerId, String playerName,
         String position) {
         List<LineupEntry> next = new ArrayList<>(lineup);
@@ -271,9 +318,21 @@ public final class EditableMatch {
             && original.stream().noneMatch(e -> e.playerId() == playerId);
     }
 
-    // Whether this row is a player named by hand in this session, rather than one
-    // picked from a record. The screen shows the difference; nothing else needs it.
+    // Whether this row is a player *invented* in this session, rather than one
+    // picked from a record. Since slice 2 the register also holds vendor ids that
+    // were merely given a name (ADR 0012 decision 6), so membership of `created`
+    // is no longer the question - the reserved range is, and it is the range test
+    // that says which of the two kinds of Manual player this is.
     public boolean isCreated(long playerId) {
+        return ManualPlayer.isManual(playerId) && isRegistered(playerId);
+    }
+
+    // Whether this row is a vendor id given a name by hand in this session.
+    public boolean isNamed(long playerId) {
+        return !ManualPlayer.isManual(playerId) && isRegistered(playerId);
+    }
+
+    private boolean isRegistered(long playerId) {
         return created.stream().anyMatch(p -> p.playerId() == playerId);
     }
 
@@ -318,10 +377,9 @@ public final class EditableMatch {
     // any later hand fix reads as a change "since reconstruction".
     public String provenanceSummary() {
         List<String> changes = handEdits();
-        if (origin == Origin.RECONSTRUCTED) {
-            String seed = "Game " + header.gameId()
-                + ": reconstructed from the appearances roster and the substitution"
-                + " events (a starter is a listed player never subbed on). Home GK "
+        if (origin != Origin.VENDOR_SHEET) {
+            String seed = "Game " + header.gameId() + ": " + derivedFrom()
+                + " (a starter is a listed player never subbed on). Home GK "
                 + goalkeeper(header.homeClubId()) + ", away GK "
                 + goalkeeper(header.awayClubId()) + ".";
             return changes.isEmpty()
@@ -369,6 +427,17 @@ public final class EditableMatch {
             }
         }
         return changes;
+    }
+
+    // Which record the lineup was read off, in the seed's own words. It must name
+    // the record that was actually read: a maybe match has no appearances roster
+    // at all, so claiming one would write a falsehood into the precious sidecar,
+    // and a year on nothing would tell it from the 4,573 that really had one.
+    private String derivedFrom() {
+        return origin == Origin.EVENTS
+            ? "reconstructed from the match's own events - whoever scored, was booked,"
+                + " came on or went off; no team sheet and no appearances record exist"
+            : "reconstructed from the appearances roster and the substitution events";
     }
 
     // The starting goalkeeper of a side, "name (id)", for the reconstruction seed;

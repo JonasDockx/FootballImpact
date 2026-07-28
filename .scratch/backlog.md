@@ -807,6 +807,183 @@ null `home_club_name` — `3936666` is one — and the screen greeted that repai
 with the word "null". `MatchHeader` now offers a label falling back to the club
 id.
 
+**Slice 2 grilled (2026-07-28) — the maybe tier in the editor.** Eleven
+decisions. The grill opened by measuring the maybe set and the premise it was
+called on did not survive: **a maybe match is not authored from nothing.**
+
+| the 2,243 maybe matches | |
+| --- | --- |
+| carry `game_events` at all | **2,108** (94%) |
+| carry a substitution | 2,084 |
+| both clubs named by events | 2,079 |
+| distinct players named, per match | median **18** (11 on-pitch, 7 came on) |
+| derived starters per side | median **5**, max 11, never >11 |
+| sides that get a goalkeeper for free | 214 of 4,187 (**5%**) |
+
+So the very rule `fromAppearances` already uses — *a named player never subbed on
+started* — applies verbatim to an events-fed roster. Each side opens with about
+five of its eleven already correct and its substitution timings intact, and the
+picker fills the rest. Three sources name those ids between them (`players` ∪
+`game_lineups` ∪ `appearances`): 34,886 of 38,263 rows (91%) are nameable, 26%
+carry no position.
+
+**The premise of the loader-agreement worry did not survive either.** The
+disagreement it warned about *already shipped*: an appeared match has no
+`game_lineups` either, so the loader throws `no lineups` on it while `problems()`
+judges the reconstruction and says nothing — the state of all 4,573 games
+bulk-released in 4b-4. `LoaderAgreementTest` covers four *certain* games and
+never noticed, and `EditableMatch`'s comment that the `no lineups` reason "is
+never reached here" describes the vendor-sheet path only. `problems()` was never
+answering *does the loader rate the vendor's rows*; it answers *would the loader
+rate **this lineup***, and the two coincide only when the lineup is the vendor's.
+
+Decisions, in the order they were taken:
+
+1. **A third `Origin`: the lineup is derived from the events** (glossary *Derived
+   lineup*), not authored from nothing. Opening empty and picker-only was the
+   stated plan and was rejected for throwing away evidence the vendor already
+   holds — evidence that is consistent with the replay by construction, since the
+   same events drive it. Offering the event-named men as a new rank −1 instead
+   (keeping every name an affirmative click, the argument that cut roster
+   prefill) was also rejected: prefill's danger is eleven *plausible* names, and
+   these are eleven *recorded* ones. The 135 event-less matches open empty.
+2. **The 3,377 rows the vendor never names go in, labelled `player <id>`**, at
+   position Unknown. Leaving them out was rejected hard: the man is then only
+   addable by *creating* him, giving a footballer who already holds a vendor id a
+   second one — the split identity ADR 0012 exists to prevent. Blocking Release
+   until named was rejected for gating a correct repair on a cosmetic field the
+   engine never reads. **User's condition: there must be an easy way to name him
+   later** — see decision 9.
+3. **`manual_players` widens to hold vendor ids** (ADR 0012 amendment, decision
+   6). The population is small and shallow: 2,969 distinct ids over 1,329 games,
+   median 1 game each, max 15, and `description` carries no name (just
+   "Tactical", "Red card"). They hold **no rating today at all** — the engine
+   builds players from lineup rows and they appear in none — so a maybe release
+   is the first time they ever rate. A second `player_names` table was rejected
+   for splitting one fact across two writes.
+4. **The register's name reaches the replay** (ADR 0012 amendment, decision 7).
+   The loader left-joins `sidecar.manual_players` and prefers it over the name
+   frozen in the lineup row. Ends the "four sidecar tables, the fifth invisible"
+   property that made the byte-identical gate free. The alternative — re-open and
+   re-release his median-one match — was cheap but leaves two places able to
+   disagree about who a player is, which is the defect the slice-1 review already
+   had to fix once in `candidates()`.
+5. **The loader agreement is restated and the reconstructed path gets a test.**
+   `problems()` judges the lineup in hand, so it is the *released* match the
+   loader must agree with. A new test saves a derived match as Released into a
+   temp sidecar and asserts the loader then rates it exactly when `problems()`
+   was empty — the check 4b-3 decision 6 could only do by hand, now covering the
+   4,576 existing releases as well as every maybe one to come.
+6. **Rank 0 stays `candidates()`; `maybe_players` stays the worklist.** Same rule
+   in both (±30 days, `count(DISTINCT game_id)`), but the live query strictly
+   dominates: all matches against 435, counts sidecar releases (slice-1 decision
+   5), never stale, and offers rank-1 names besides. Known wrinkle, accepted: the
+   worklist's "nearby matches" column can read one lower than the picker's,
+   because the picker also counts your own releases.
+7. **No provenance requirement (user, against the recommendation — again).**
+   Requiring a note was argued on the ground that the hand-picked half of a maybe
+   XI has *nothing* inside the tool behind it, so the box is the only place the
+   outside check is ever recorded, and that decision 9's friction argument was
+   made about 948 appeared games where these are a handful of unsourceable
+   fixtures. Declined: decision 9 applies uniformly. Mitigation unchanged — the
+   seed names every added and created player.
+8. **Event `club_id` is the player's club, flipped on own goals.** Measured
+   against real team sheets: substitutions wrong 386/585,047 (0.07%) out and
+   778/584,272 (0.13%) in, cards 108/348,818 (0.03%), **goals 6,852/226,801
+   (3.0%)** — and the 3% is own goals, which `description` marks `, Own-goal`.
+   Dropping goal-only players was rejected for silently discarding men the record
+   proves were playing, with nothing on screen to say so.
+9. **Naming a nameless player happens on the row, in the editor.** Select a
+   `player <id>` row, press Name this player, get a dialog listing his other
+   games (median 1, max 15) plus the same name / DOB / note fields the create
+   panel has. Written inside `save`'s transaction like any register row, so ADR
+   0012 decision 3's invariant holds unchanged and a cancelled repair leaves
+   nothing. A browse-all-2,969 tab was left unbuilt — raise it if naming ever
+   happens in batches.
+10. **Slice 1's gate stays half open and slice 2 proceeds.** The two unexercised
+    shapes (`3451032`, `2613697`) are hand repairs, not code, and nothing here
+    depends on them; slice 2's own gate works the picker harder than either
+    would. Accepted risk: two gates open at once, so a picker defect found later
+    has two candidate causes.
+11. **Gate — inert, then one match.** Step 1: the code lands, the loader prefers
+    the register, and the replay must stay **byte-identical at 0.6503**. That is
+    not free this time — it proves the new join is inert, since the 8 existing
+    register rows carry names already frozen identically in their lineup rows, so
+    a correct join must change nothing. Step 2: release one events-derived maybe
+    match that includes naming at least one nameless id through the new dialog;
+    the replay must show **exactly +1 rated match**, the CSV growing by the
+    players who actually took minutes. Plus decision 5's new agreement test
+    green. Log-loss cannot gate this (one match on 4,576 is noise). **Pick the
+    fixture from a competition the vendor covers properly** — the slice-1 gate
+    stalled twice on unsourceable matches, and maybe matches skew to national
+    teams and sparse coverage, which is exactly where that goes wrong.
+
+Glossary gained **Derived lineup** and widened **Manual player** to its two
+kinds, created and named; *Worklist tier*'s Maybe rung now says its events still
+name most of a lineup. ADR 0012 gained decisions 6 and 7 and two rejected
+options.
+
+**Slice 2 built (2026-07-28). Gate step 1 met: the code is inert.** The replay
+after landing it writes a byte-identical `goalimpact.csv` (md5
+`6babb4ab5497a9edd201fe7e46fa03d0`) at the champion **0.6503**, ship gate 0.6503
+< 0.6551. That is a real check this time, not a free one: the loader now joins
+`sidecar.manual_players`, the register was present and populated during the run
+(five tables, 8 rows, ids `1000000000`–`1000000007`), and **zero** lineup rows
+carry a name differing from it - so a correct join must change nothing, and did
+not. **Gate step 2 - one maybe match released end to end, including a nameless
+id named through the dialog - is still to do.**
+
+Seams were agreed before any test was written, six of them, no `gui` tests. What
+landed, by layer:
+
+- **`repair`** — `EventRoster` (decision 1's and 8's pure half: who the events
+  prove was playing and for whom, own goals flipped), `PlayerSighting` (the
+  evidence behind a naming). `EditableMatch` gained `fromEvents` and
+  `Origin.EVENTS`, `name(...)`, `isNamed(...)`, and a `derivedFrom()` seed that
+  names the record it actually read. `fromAppearances` and `fromEvents` now share
+  one `derived(...)`, because the start/bench rule was always the same rule -
+  what differs is which record could supply the roster. `LineupEntry` gained
+  `unnamed(id)` / `unnamed()` and `withName`.
+- **`data`** — `SidecarStore.load` grew its third branch (`hasAppearances`
+  decides appeared from maybe) and `deriveFromEvents`, whose only job is looking
+  names and positions up: `PLAYER_FACTS_SQL` asks `players`, then any other team
+  sheet, then any appearances row, with the register ahead of all three when the
+  sidecar has one. `highestManualPlayerId` gained the `>= FIRST_ID` filter.
+  `otherGames(...)` backs the naming dialog. `TransfermarktLoader` gained
+  `hasRegister` and the `COALESCE(mp.player_name, l.player_name)` join, formatted
+  in only when the table really exists - a pre-ADR-0012 four-table sidecar must
+  still load, and `SidecarOverrideTest` keeps three tests on exactly that shape.
+- **`gui`** — `NamePlayerDialog` (decision 9: the evidence list, then name, DOB
+  and note), a `Name this player` button in `RepairEditor` offered only on an
+  unnamed row, a `named` value in the added column, and the one line this whole
+  slice began with: `openOnDoubleClick(maybe, ...)`.
+
+Tests **211 green** (183 → 203 → 211). `EventRosterTest` (5) pins the derivation
+on plain lists; `DerivedLineupTest` (5) pins the query against the real snapshot
+with fixtures derived at run time; `ManualPlayerRegisterTest` grew the two
+register cases; `SidecarOverrideTest` grew the two replay-name cases;
+`LoaderAgreementTest` grew decision 5's four.
+
+**The own-goal flip turned out to be load-bearing, not cosmetic.** Measured over
+the whole maybe set: taken at face value, `club_id` puts **58** men on both sides
+of their own match - two lineup rows for one footballer, and both XIs counting
+wrong. Flipped, **zero**, and the slot count falls by exactly those 58. That is
+now the shape of a unit test rather than a footnote.
+
+**One thing the grill got wrong and the build corrected.** The seed for a derived
+match said "Since reconstruction: …" for both tiers, and the first assertion
+written against it - that an events seed must not contain the word "appearances"
+- failed, because the honest seed says "no team sheet and no appearances record
+exist". The assertion was wrong, not the seed: what matters is that it never
+claims to have *read* an appearances roster. Pinned as
+`not contains("from the appearances roster")`.
+
+**Noted, not acted on:** `PLAYER_FACTS_SQL` resolves each name with correlated
+subqueries over `game_lineups` (3.18M rows) and `appearances`. That is one query
+per match opened, ~20 ids, and it is comfortably fast enough for a window
+opening; it would not be if anything ever derived matches in bulk the way
+stage 4b-4 released them.
+
 ## 2. Store each player's date of birth
 
 **Why:** Enables age-aware analysis — comparing a player against peers in the

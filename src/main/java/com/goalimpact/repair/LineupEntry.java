@@ -30,12 +30,30 @@ public record LineupEntry(long clubId, long playerId, String playerName,
     // to spell the miss the same way.
     public static final String UNKNOWN_POSITION = "Unknown";
 
+    // What a player the vendor references but never names is called on screen and
+    // in the sidecar (item 17, slice 2, decision 2). 2,969 ids are in this state,
+    // named by no vendor table at all; the id is the only true thing known about
+    // him, and identity was always the id rather than the name, so the label says
+    // exactly that rather than pretending to a name or storing a null. Pinned
+    // here so the reader, the editor and the picker all spell it the same way.
+    public static String unnamed(long playerId) {
+        return "player " + playerId;
+    }
+
+    public boolean unnamed() {
+        return unnamed(playerId).equals(playerName);
+    }
+
     public boolean starter() {
         return STARTER.equals(type);
     }
 
     public boolean goalkeeper() {
         return GOALKEEPER.equals(position);
+    }
+
+    public LineupEntry withName(String newName) {
+        return new LineupEntry(clubId, playerId, newName, position, type);
     }
 
     public LineupEntry withPosition(String newPosition) {

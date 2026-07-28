@@ -49,9 +49,10 @@ class WorklistPane extends BorderPane {
         + "double-click an APPEARED row to rebuild the match from it.";
 
     private static final String MAYBE_HINT =
-        "No team sheet and no appearance record for these, so a repair would mean "
-        + "naming players from nothing - the ranked picker, not offered yet "
-        + "(stage 4b-3, decision 2).";
+        "No team sheet and no appearance record for these - but the match's own "
+        + "events still name whoever scored, was booked or was substituted. "
+        + "Double-click to open what they give (about five starters a side, and "
+        + "rarely a goalkeeper) and finish the rest with the picker.";
 
     private final WorklistReader reader;
     private final SidecarStore store;
@@ -102,7 +103,7 @@ class WorklistPane extends BorderPane {
         VBox.setVgrow(players, Priority.ALWAYS);
         setLeft(left);
 
-        Label editableHint = new Label("Double-click a CERTAIN or APPEARED row to repair it.");
+        Label editableHint = new Label("Double-click any row to repair that match.");
         Label appearedHint = hint(APPEARED_HINT);
         Label maybeHint = hint(MAYBE_HINT);
 
@@ -122,10 +123,11 @@ class WorklistPane extends BorderPane {
         return label;
     }
 
-    // Both the certain and appeared tables open the editor (stage 4b-3); only
-    // maybe stays read-only, having no roster to rebuild from. A double-click on a
-    // populated row opens the game; the editor reconstructs an appeared match on
-    // its own, so the pane needs only the game id and never learns the tier.
+    // All three tables open the editor (item 17, slice 2). Maybe was the last to
+    // stay read-only, on the belief that it had no roster to rebuild from; in
+    // fact 94% of maybe matches carry events, and those name a median of 18 of
+    // the 22 who played. So the pane still needs only the game id and never
+    // learns the tier - SidecarStore.load picks the record to derive from.
     private void openEditor(long gameId) {
         try {
             new RepairEditor(store, gameId).showAndWait();
@@ -210,6 +212,7 @@ class WorklistPane extends BorderPane {
         addColumn(appeared, "minutes", 80, r -> String.valueOf(r.minutes()));
 
         maybe.setPlaceholder(new Label("none"));
+        openOnDoubleClick(maybe, r -> r.match().gameId());
         addMatchColumns(maybe, MaybeRow::match);
         addColumn(maybe, "club", 70, r -> String.valueOf(r.clubId()));
         addColumn(maybe, "nearby matches", 120, r -> String.valueOf(r.nearbyMatches()));
