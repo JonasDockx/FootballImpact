@@ -1001,6 +1001,21 @@ per match opened, ~20 ids, and it is comfortably fast enough for a window
 opening; it would not be if anything ever derived matches in bulk the way
 stage 4b-4 released them.
 
+**Slice 2 gate met in full (2026-07-28).** The user released one maybe match —
+`2262449`, FCSB 2-0 Molde, Europa League 2012-10-25, whose events derived 14 of
+the 22 — and the replay reports **85,048 → 85,049 matches (+1)**, sidecar 4,577 →
+**4,578**, maybe tier 435 / 2,243 → 434 / 2,242 matches, log-loss unchanged at
+**0.6503**, ship gate strictly better. Read as slice 1 pinned the wording — "+1
+rated match, no other match newly rated or dropped" — the gate passes.
+
+The CSV grew by **12 players** (95,509 → 95,521): men who had never been in a
+rated match before, which on this tier includes ids the vendor references in its
+events but names in no table at all. Their first rating in the project's history
+came out of this release — the population ADR 0012's amendment was written for.
+
+**Slice 2 is done. Item 17's remaining slices are 3 (events + header) and 4
+(a full match from scratch).**
+
 ## 2. Store each player's date of birth
 
 **Why:** Enables age-aware analysis — comparing a player against peers in the
@@ -2661,3 +2676,51 @@ specific smells the user already flagged:
 **Data availability:** none needed — the results file already holds both careers.
 This item is the *validation* that turns the hunches into evidence; the actual
 fixes live in items 9, 15, 16 and 21.
+
+## 29. Club-scoped worklist — reach every Held match, not just 54% of them
+
+**Why (user, 2026-07-28, after slice 2 shipped):** "Fixtures that are unreachable
+in the GUI should not happen. I should also be able to look for a club's
+incomplete matches (or a national team's)." Two requests that turn out to be one
+feature.
+
+The worklist is searched by **player name** only (item 25, stage 4a), and a match
+appears in it only if some tier names a player for it. The certain tier reads the
+broken team sheet and the appeared tier reads the appearances record, so both
+always name somebody. The maybe tier cannot: its candidates come from the club's
+squad within ±30 days, and for an isolated fixture there is no such squad. Those
+matches then appear in **no worklist at all**, and since the GUI offers no other
+way in, they cannot be opened. Measured 2026-07-28:
+
+| Held matches | |
+| --- | --- |
+| reachable by a player search | 2,101 |
+| **unreachable** | **1,809 (46%)** |
+| ...that still carry both club ids | **1,809 — every one** |
+| ...that carry events, so slice 2 would derive a lineup for them | **1,772 (98%)** |
+
+The unreachable set is concentrated exactly where the ±30-day club rule fails:
+FIWC 320, EURO 215, MLS1 144, ELQ 98, JAP1 94, SFA 79, UCOL 74, SE1 68 — national
+teams and sparsely covered leagues. Stage 4a predicted this ("most maybe matches
+are isolated in the snapshot (national teams, sparsely-covered clubs)") and
+accepted it while the maybe tier was read-only; slice 2 made it a real blockage,
+because the machinery to repair 1,772 of them now exists and cannot be pointed at
+them.
+
+**The fix is the user's second request.** A match always knows its two clubs —
+all 1,809 do — so a club-scoped worklist reaches **100%** of Held matches by
+construction, and needs no new evidence, only a different way of asking. For a
+national team the "club" *is* the national team, which is how the vendor models
+them, so one view serves both halves of the request.
+
+**Data availability:** `games.home_club_id` / `away_club_id` are present on every
+row; club names are occasionally null (8 maybe matches) and already have a
+`MatchHeader` label fallback. The three tier tables carry `club_id`, so a
+club-scoped list can reconcile against them where they overlap.
+
+**Not yet grilled.** Open questions worth putting to the user first: whether this
+is a second pane or a mode of the existing one; whether the club list is
+searchable by name or picked from the match; whether a club view shows only Held
+matches or every match it played (the latter also surfaces item 25's harder half
+— matches absent entirely); and whether the three-rung tier vocabulary still
+means anything once the entry point is a club rather than a player.
