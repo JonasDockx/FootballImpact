@@ -923,6 +923,23 @@ kinds, created and named; *Worklist tier*'s Maybe rung now says its events still
 name most of a lineup. ADR 0012 gained decisions 6 and 7 and two rejected
 options.
 
+**Slice 1's gate is met after all (found 2026-07-28).** The two shapes recorded
+as still open were closed by the user before slice 2 was built, and in one match:
+`3451032` (Elche v Granada, ES1 2020-12-13) is `released` in the sidecar, with
+Elche taken from nine starters to eleven (Tete Morente and Pere Milla added) and
+Granada — absent from the vendor entirely — built to a full eleven. The sidecar
+now holds **4,577** released matches. `2613697` was never needed.
+
+Worth keeping, because it cost a wrong diagnosis first: a released match is
+invisible to the worklist, since the tiers are built from the gate's own throw
+and a release never throws. So "not in `held_appearances`" reads identically for
+"already fixed" and "never captured", and the first guess here was the second.
+The same property is why a gate match must be picked *from* the worklist rather
+than by game id: **a match in no worklist cannot be opened in the GUI at all**,
+there being no way to reach one but a player search. That bites hardest on the
+maybe tier, where only 435 of the 2,243 matches have `maybe_players` candidates
+— the other 1,808 are unreachable, whatever their events hold.
+
 **Slice 2 built (2026-07-28). Gate step 1 met: the code is inert.** The replay
 after landing it writes a byte-identical `goalimpact.csv` (md5
 `6babb4ab5497a9edd201fe7e46fa03d0`) at the champion **0.6503**, ship gate 0.6503
