@@ -135,6 +135,49 @@ public class TransfermarktLoader implements AutoCloseable {
         return heldAppearances;
     }
 
+    // The match-level spine (item 29, slice 1): every Held match, whatever the
+    // reason. The two lists above and below it are conditional - one keyed on
+    // the team-sheet reasons, one on "no lineups" - and a third family, "an
+    // event outlives the whistle", falls through both and was recorded nowhere
+    // at all. This one is unconditional by design: a match nobody names is
+    // exactly the match the per-player worklist cannot reach.
+    private record HeldRow(long gameId, long homeClubId, long awayClubId, String reason) {
+    }
+
+    private final List<HeldRow> heldRows = new ArrayList<>();
+
+    // The Repair source is settled here rather than at the gate, because three
+    // of its four rungs are set-shaped questions - does this game have
+    // appearances, does it have events - and set-shaped work belongs in SQL
+    // (ADR 0009), like appearedPlayers() beside it. The gate settles only the
+    // rung it alone can see: a reason other than "no lineups" means a team sheet
+    // exists and is merely broken.
+    //
+    // The appearances half reuses appearedGameIds(), the very set the appeared
+    // tier is built from, so a match's source and its tier cannot disagree.
+    public List<HeldMatch> heldMatches() throws SQLException {
+        Set<Long> withAppearances = appearedGameIds();
+        Set<Long> withEvents = eventGameIds();
+        List<HeldMatch> out = new ArrayList<>(heldRows.size());
+        for (HeldRow row : heldRows) {
+            out.add(new HeldMatch(row.gameId(), row.homeClubId(), row.awayClubId(),
+                row.reason(), sourceFor(row, withAppearances, withEvents)));
+        }
+        return out;
+    }
+
+    private static RepairSource sourceFor(HeldRow row,
+        Set<Long> withAppearances, Set<Long> withEvents) {
+
+        if (!row.reason().equals("no lineups")) {
+            return RepairSource.TEAM_SHEET;
+        }
+        if (withAppearances.contains(row.gameId())) {
+            return RepairSource.APPEARANCES;
+        }
+        return withEvents.contains(row.gameId()) ? RepairSource.EVENTS : RepairSource.NOTHING;
+    }
+
     // The maybe-tier match set (item 26, stage 4a): every "no lineups" Held
     // match, recorded as the gate throws it - so this set IS the gate's verdict,
     // never a second SQL definition of "no lineups" that could drift from the
@@ -237,6 +280,26 @@ public class TransfermarktLoader implements AutoCloseable {
         try (Statement statement = connection.createStatement();
             ResultSet rows = statement.executeQuery(
                 "SELECT DISTINCT game_id FROM appearances WHERE game_id IN ("
+                + gameIdList() + ")")) {
+            while (rows.next()) {
+                ids.add(rows.getLong("game_id"));
+            }
+        }
+        return ids;
+    }
+
+    // Which no-lineup Held matches carry events of their own - the difference
+    // between a match slice 2 can derive a lineup for and one with nothing left
+    // to derive from (item 29). Only the no-lineup set is asked about: a match
+    // that still has a team sheet is a TEAM_SHEET repair whatever its events say.
+    private Set<Long> eventGameIds() throws SQLException {
+        Set<Long> ids = new HashSet<>();
+        if (heldNoLineup.isEmpty()) {
+            return ids;
+        }
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(
+                "SELECT DISTINCT game_id FROM game_events WHERE game_id IN ("
                 + gameIdList() + ")")) {
             while (rows.next()) {
                 ids.add(rows.getLong("game_id"));
@@ -702,10 +765,16 @@ public class TransfermarktLoader implements AutoCloseable {
             EventOrdering.sort(events);
             return events;
         } catch (UnusableMatchException e) {
-            // The same throw that counts the skip fills the worklist. A Held
-            // match with a starting XI names its players (starters and bench);
-            // the raw lineup rows are still in hand because they were removed
-            // up front, before the gate ran.
+            // The same throw that counts the skip fills the worklist. The
+            // match-level row comes first and is unconditional (item 29): the
+            // player rows below are what a per-player worklist can reach, and
+            // this is what a club-scoped one can.
+            heldRows.add(new HeldRow(match.matchId(),
+                match.home().id(), match.away().id(), e.reason()));
+
+            // A Held match with a starting XI names its players (starters and
+            // bench); the raw lineup rows are still in hand because they were
+            // removed up front, before the gate ran.
             if (HELD_REASONS.contains(e.reason()) && lineup != null) {
                 for (LineupRow row : lineup) {
                     heldAppearances.add(new HeldAppearance(match.matchId(),

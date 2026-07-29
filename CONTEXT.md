@@ -215,6 +215,9 @@ of one (see *Derived lineup*). A worklist is per player and
 is the input to the repair GUI (item 17); it holds candidates to *check*, never
 rating decisions — a rating still moves only on a Clean or Released match (see
 *Match state*, *Sidecar*).
+A tier is a judgement about a *player*, so it says nothing on its own about a
+match: a list scoped to a club rather than a player carries no tier and is read
+by *Repair source* instead.
 _Avoid_: confidence score — the tiers are ordinal rungs, not a number
 
 **Derived lineup**:
@@ -228,6 +231,20 @@ lineup is a reading of the record and never a guess, so where the record is
 silent it is simply short — the gap is closed by hand or the match stays *Held*.
 _Avoid_: inferred lineup, guessed lineup, reconstructed lineup — nothing here is
 estimated, and the derivation is not confined to matches being repaired
+
+**Repair source**:
+The surviving record a repair of a *Held* match starts from — what the match
+still has to offer when it is opened — on a ladder of falling completeness.
+**Team sheet** — one exists and is merely broken, so nearly a whole lineup is
+already there. **Appearances** — no team sheet, but the appearances record names
+everyone who played. **Events** — neither, so the lineup is a *Derived lineup*
+read off whoever scored, was booked or was substituted. **Nothing** — no record
+survives at all. A property of a *match*, and so the match-scoped counterpart of
+*Worklist tier*: a tier says how sure we are that a player belongs to a match, a
+source says what the match itself still has. A match whose source is Nothing can
+be listed but not repaired — its events cannot be reconstructed, so releasing it
+would assert that nothing happened in it.
+_Avoid_: tier — a tier ranks players, a source ranks records
 
 **Candidate rank**:
 How likely the repair tool thinks a given player is the one being named, on a

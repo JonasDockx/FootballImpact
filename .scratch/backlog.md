@@ -2724,3 +2724,217 @@ searchable by name or picked from the match; whether a club view shows only Held
 matches or every match it played (the latter also surfaces item 25's harder half
 — matches absent entirely); and whether the three-rung tier vocabulary still
 means anything once the entry point is a club rather than a player.
+
+### Grilled (2026-07-29) — nine decisions, all the recommended option
+
+**Two facts measured first, both of which shaped the answers.**
+
+*There is no Held-**match** record anywhere.* The results DB holds three
+*player*-row tables; a match exists in the worklist only as a by-product of some
+player pointing at it, which is the root cause of the 46% and not merely its
+symptom. The loader half-knows better already — `heldNoLineup` carries game id,
+both club ids and the date — but only for `no lineups`, and it never reaches the
+results file.
+
+*Club names must come from `games`, not from the vendor `clubs` table.* Measured
+against the snapshot: 3,274 club sides appear in `games`, `clubs` names only 796
+of them, so **2,481 club ids are named by no vendor table** — the same shape as
+the 2,969 unnamed player ids slice 2 hit. `games.home_club_name` /
+`away_club_name` covers 3,170 of the 3,274 (104 unnamed) and the mapping is
+clean: no club id carries two names, no name is shared by two ids. National
+sides are named plainly there ("Spain", "Italy"), confirming one view serves
+both halves of the request. Sizes: median club side 8 matches, p90 140, max 809
+(Real Madrid).
+
+*A third finding, unmeasured.* `loadEvents`' catch block records a Held match in
+one of two ways — the three team-sheet reasons fill `heldAppearances`,
+`no lineups` fills `heldNoLineup`. A third family, **`an event outlives the
+whistle`**, falls through both and leaves no trace anywhere: not in the
+worklist, not in a table, not even as a count (nothing in `.scratch` or `docs`
+records skips by reason). **So 1,809 is a floor on the unreachable set, not the
+whole of it.** The true count needs a full designated run; none was made during
+the grill, since a run rewrites `goalimpact.csv` and the results DB.
+
+> **Corrected during slice 1 (2026-07-29).** The whistle family is **empty**:
+> the tripwire fires on **0** matches, on the snapshot with the sidecar and
+> without it alike. So 1,809 was never a floor — it was the whole unreachable
+> set, and the grill's caveat was wrong. The design consequence stands
+> regardless and is why the error was cheap: `held_matches` is filled
+> unconditionally, so a family that grows later is carried without anyone
+> having to notice. What the run *did* newly count is the bottom rung —
+> **135 Held matches with no surviving record at all**, where the grill had
+> only the 37 unreachable ones.
+
+**1. What a club view lists: only that club's Held matches.** Not a full ledger
+of every match it played with a Clean/Held/Released column — for a big club that
+buries a dozen actionable rows under 800 inert ones, and turns a worklist into a
+browser. Item 25's harder half (fixtures the vendor never carried) is explicitly
+**out of scope**: nothing in the snapshot says a missing fixture ever existed, so
+listing one needs an outside source of true fixture lists, which does not exist
+here. It stays a separate item, not a column on this one.
+
+**2. The tier ladder does not survive; rows are read by Repair source.** The
+three rungs answer *how sure are we this player was in this match*, and that
+question has no meaning in a club view — we are never unsure the club was in the
+match, which is exactly why this view reaches 100%. What does survive is
+ordinal and is the thing worth seeing before double-clicking: **how much of a
+lineup the editor can hand you.** New glossary term **Repair source**, four
+values — `team sheet` / `appearances` / `events` / `nothing` — written to
+CONTEXT.md this session, with a clarifying sentence added to *Worklist tier*
+saying a tier is a per-player judgement and a match-scoped list uses Repair
+source instead. Rejected: reusing Certain/Appeared/Maybe as the row label, which
+would give one word two meanings across two screens and would label a match
+whose events name 18 of 22 men as "Maybe". The gate's reason rides along as a
+second column for free, but the row is *organised* by source, because the reason
+says why the match broke and the source says what you will have to work with —
+`no lineups` covers both the rich case and the empty one.
+
+**3. Where the list comes from: a new `held_matches` table, filled by the same
+throw that counts the skip.** One row per Held match **whatever the reason**:
+game id, both club ids, the gate's reason, the Repair source. Match facts (date,
+competition, names) stay in vendor `games` and join at display time, as the
+three player tables already do. This is item 25's own trick — one verdict
+recorded twice, so the skip report and the worklist cannot drift — and it gives
+the worklist the match-level spine it has never had. Because it is filled for
+every reason, the whistle family stops being invisible for free. Rejected:
+deriving the Held set live in SQL, which would be a second definition of the
+gate and is in any case impossible — the extra-time decision and the whistle
+tripwire are Java logic SQL cannot reproduce.
+
+**4. Club search covers every fixture-bearing club and shows the Held count,
+including zero** — `Molde (0)` is a real and useful answer, meaning *this club is
+complete*. This **departs from the player box's precedent** of searching only the
+worklist's own names, deliberately: the objections that made the player box
+narrow do not apply to clubs. Player names are messy (1,075 ids carry more than
+one name, hence the `min()`) and the population huge; club names are clean and
+1:1 both ways. Cost is noise — `united` matches 58 club sides, most with nothing
+to do — paid for by ordering Held count descending so work floats above the
+zeros. A right-click "show this club" from a player-worklist row is a welcome
+*addition* later but can never be the only door: an isolated fixture is by
+definition one you cannot already be looking at.
+
+**5. A second tab, `By player` | `By club`.** The club view is its own class with
+its own search box, its own left-hand list and a **single** table — one table
+because every row there means the same thing, where the player pane needs three
+because a row's meaning changes per rung. `WorklistPane` is not touched beyond
+being wrapped in a tab; the two share only the reader, the sidecar and the
+editor. Rejected: a mode toggle on the one search box, which would give every
+part of that pane two meanings and hand it its first judgement, against its own
+"deliberately dumb" charter.
+
+**6. A live sidecar state column: blank / `draft` / `released`.** `held_matches`
+is a photograph taken by a designated run, and a release never throws, so a
+repaired match would otherwise sit in the list unchanged until the next run —
+unworkable across 215 Spain fixtures in one sitting. The sidecar knows
+immediately and the GUI already has it open. This also kills the ambiguity that
+caused a wrong diagnosis last session: with the marker, "absent" means only
+"never captured", never "already fixed". Needs a sibling to `sidecarGameIds()`
+returning id-to-status rather than flattening it. Rejected: hiding released rows,
+which gives no confirmation of what you did and re-creates the same ambiguity.
+
+**7. A `nothing` row is shown but cannot be opened.** Checked, and the hazard is
+worse than an unhelpful screen: `SidecarStore.load` falls through to
+`deriveFromEvents`, which with no events returns a valid `EditableMatch` with an
+empty roster — no crash. But events are read-only in the editor (slice 3 is
+unbuilt) and a released match replaces the vendor's copy **wholesale**. Naming 22
+men in such a match and releasing it would not release an incomplete match; it
+would **assert that nothing happened in it**, and the engine would replay a
+genuine 0–0, moving 22 ratings on a fact nobody established. So the row is
+visible — reachability is delivered in full — with the double-click disabled and
+a one-line reason ("no surviving record; needs event editing, item 17 slice 3").
+When slice 3 lands, one condition is deleted. Rejected: letting it open with a
+warning, since the guard would be a sentence you must remember at the moment you
+press Release and the failure is silent and permanent; and omitting the rows,
+which restores the very unreachability this item exists to kill.
+
+**8. Two slices.**
+
+*Slice 1 — the match-level spine, GUI untouched.* The catch block records every
+Held match whatever the reason; `held_matches` is written to the results DB
+beside the other three; Repair source is computed per row. Invisible when it
+lands. **Gate:** replay byte-identical (85,049 matches, log-loss **0.6503** at
+four decimals, leaderboard unchanged); `held_matches` reconciles to the skip
+report reason-for-reason; and the run **prints the reachability number**, which
+must be zero unreachable by construction — every row carries both club ids. That
+last line turns item 29's founding measurement into a permanent output rather
+than a one-off probe, and it is how the whistle family's true size finally gets
+counted.
+
+*Slice 2 — the `By club` tab.* Search, list, single table, Repair source column,
+live sidecar state column, disabled `nothing` rows. **Gate:** nothing on the run
+path is touched, so the replay cannot move; tests green; and one end-to-end
+proof — open a fixture no player search can reach (one of the 215 EURO matches)
+and repair and release it, exactly as FCSB v Molde closed item 17 slice 2.
+
+Rejected: one slice, which would mix a change to the run's output (needing a
+byte-identical proof) with GUI work that needs none, so a failed gate would not
+say which half broke.
+
+**9. No ADR.** The whole worklist lineage — item 25's certain tier, item 26's
+stages 3 to 4b-4, item 17's slices 1 and 2 — is recorded in this backlog and
+nowhere else; only manual players earned one (ADR 0012), because that changed
+what a *rating* is computed from. Nothing here does: no rating moves, no
+calibration shifts, and every decision above is reversible by editing one screen
+and one table. The durable part is the two CONTEXT.md changes, already written.
+
+**Defaults, stated rather than grilled:** the club's match list is date
+descending, all competitions, all seasons, uncapped (no club's Held set is large
+enough to need a limit); the 104 unnamed club sides display as `club <id>` and
+the search matches that fallback text, so an unnamed club is reachable by typing
+its id; a club's list shows matches where it was either side, with nothing
+distinguishing home from away beyond the existing `match` column.
+
+### Slice 1 outcome (2026-07-29) — DONE, gate met
+
+The match-level spine, landed inert: the GUI is untouched and the feature is
+invisible until slice 2.
+
+**What it is.** `data/HeldMatch` (game id, both club ids, the gate's reason, the
+Repair source) and `data/RepairSource` (TEAM_SHEET / APPEARANCES / EVENTS /
+NOTHING). `TransfermarktLoader.heldMatches()` joins `heldAppearances()` and
+`maybePlayers()` as a fourth thing the gate produces, and
+`report/HeldMatchWriter` DROP/CREATEs `held_matches` in the results DB after the
+other three writers, so no two ever hold the file at once.
+
+**Where the Repair source is decided, and why it cannot drift.** The gate settles
+only the rung it alone can see — a reason other than `no lineups` means a team
+sheet exists and is merely broken. The other three are set-shaped questions and
+go to SQL (ADR 0009). The appearances half **reuses `appearedGameIds()`**, the
+very set the appeared tier is built from, so a match's source and its tier are
+one query answered once; a new `eventGameIds()` does the same for events over
+the same no-lineup id list.
+
+**The unconditional record is the whole point.** `heldAppearances` is keyed on
+three reasons and `heldNoLineup` on a fourth, so a match matching neither was
+recorded nowhere. `held_matches` is filled in the catch block before any
+branching, for every reason there is or ever will be.
+
+**Gate met.**
+
+- **Byte-identical replay:** `goalimpact.csv` md5 `67f9f80cb440b18936431abcad80c520`
+  before and after, 85,049 of 88,958 matches, log-loss **0.6503** (whole 0.6510),
+  leaderboard unchanged.
+- **Reconciles to the skip report, line for line:** 3,909 rows = 716
+  `XI is not 11` + 3,187 `no lineups` + 3 `no starting goalkeeper` + 3
+  `two starting goalkeepers`.
+- **And the Repair source partitions the same 3,909 a second way:** TEAM_SHEET
+  722 (= 716 + 3 + 3, the certain tier's match count); APPEARANCES 945 (= the
+  appeared tier's 945 matches); EVENTS 2,107 + NOTHING 135 = 2,242 (= the maybe
+  tier's matches). Two independent splits of one set, both closing.
+- **Reachability, now a permanent output:** `reachable by club: 3,909 of 3,909
+  (0 unreachable)`. A row lacking either club id would be a match no club view
+  could reach; there is not one.
+
+**Tests: 216 green** (211 + 5), all at the agreed seam `heldMatches()`, all
+replaying real competition-seasons with every expected figure measured by SQL
+first. DFB 2012 (63 games, no team sheets anywhere, 49 appearances / 14 events);
+DKP 2022 g3906312 (a broken sheet is still the richest source); UKR1 2013
+(224 games, exactly 2 with no record at all — g2335710, g2453109); a clean match
+is not Held. **Honest note on the loop:** only cycles 1 and 2 were genuinely
+red-then-green. `sourceFor` had to be a total function to satisfy cycle 2, so
+cycles 3 to 5 passed on arrival — they are specification and regression tests,
+not tests that drove code. The whistle family could not be tested at all,
+because there is nothing to test it against (see the correction above).
+
+**Still ahead:** slice 2, the `By club` tab, at seams `WorklistReader.searchClubs`,
+`WorklistReader.heldMatchesFor` and `SidecarStore.sidecarStatuses`.

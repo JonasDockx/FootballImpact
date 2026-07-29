@@ -5,6 +5,7 @@ import com.goalimpact.data.AppearedPlayer;
 import com.goalimpact.data.DataFiles;
 import com.goalimpact.data.DataLoader;
 import com.goalimpact.data.HeldAppearance;
+import com.goalimpact.data.HeldMatch;
 import com.goalimpact.data.MaybePlayer;
 import com.goalimpact.data.TransfermarktLoader;
 import com.goalimpact.data.UnusableMatchException;
@@ -19,6 +20,7 @@ import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
 import com.goalimpact.report.CsvWriter;
 import com.goalimpact.report.HeldAppearanceWriter;
+import com.goalimpact.report.HeldMatchWriter;
 import com.goalimpact.report.Leaderboard;
 import com.goalimpact.report.MissingMatchWriter;
 import com.goalimpact.report.RatingHistoryWriter;
@@ -174,10 +176,11 @@ public class Main {
         List<HeldAppearance> held = new ArrayList<>();
         List<AppearedPlayer> appeared = new ArrayList<>();
         List<MaybePlayer> maybe = new ArrayList<>();
+        List<HeldMatch> heldMatches = new ArrayList<>();
         switch (SPINE) {
             case STATSBOMB -> loadStatsBomb(matches, replays);
             case TRANSFERMARKT -> loadTransfermarkt(
-                matches, replays, leagueMatches, held, appeared, maybe);
+                matches, replays, leagueMatches, held, appeared, maybe, heldMatches);
         }
         System.out.printf("%nSpine: %s - %d matches replay (%s to %s).%n%n",
             SPINE, replays.size(),
@@ -347,6 +350,11 @@ public class Main {
             System.out.printf(Locale.US,
                 "Missing-match tiers: %,d appeared + %,d maybe rows -> %s%n",
                 appeared.size(), maybe.size(), DataFiles.RESULTS.toAbsolutePath());
+            // The match-level spine (item 29), last of the four and written the
+            // same way: one writer at a time on the results file.
+            long spineRows = HeldMatchWriter.write(DataFiles.RESULTS, runId, heldMatches);
+            System.out.printf(Locale.US, "Held matches: %,d rows -> %s%n",
+                spineRows, DataFiles.RESULTS.toAbsolutePath());
         }
 
         new Leaderboard().print(tallies.values(), 20);
@@ -393,7 +401,8 @@ public class Main {
     // false debutants.
     private static void loadTransfermarkt(List<Match> matches, List<List<MatchEvent>> replays,
         Set<Long> leagueMatches, List<HeldAppearance> held,
-        List<AppearedPlayer> appeared, List<MaybePlayer> maybe) throws Exception {
+        List<AppearedPlayer> appeared, List<MaybePlayer> maybe,
+        List<HeldMatch> heldMatches) throws Exception {
 
         try (TransfermarktLoader loader = new TransfermarktLoader(DataFiles.SNAPSHOT, DataFiles.SIDECAR)) {
             List<Match> all = new ArrayList<>();
@@ -440,14 +449,14 @@ public class Main {
             // lines (XI is not 11 / no GK / two GKs), because they are the same
             // throw counted two ways.
             held.addAll(loader.heldAppearances());
-            Map<String, Set<Long>> heldMatches = new TreeMap<>();
+            Map<String, Set<Long>> certainByReason = new TreeMap<>();
             for (HeldAppearance h : held) {
-                heldMatches.computeIfAbsent(h.reason(), r -> new HashSet<>()).add(h.gameId());
+                certainByReason.computeIfAbsent(h.reason(), r -> new HashSet<>()).add(h.gameId());
             }
-            int heldMatchTotal = heldMatches.values().stream().mapToInt(Set::size).sum();
+            int heldMatchTotal = certainByReason.values().stream().mapToInt(Set::size).sum();
             System.out.printf("held worklist: %d player-rows over %d matches%n",
                 held.size(), heldMatchTotal);
-            heldMatches.forEach((reason, ids) ->
+            certainByReason.forEach((reason, ids) ->
                 System.out.printf("  %4d matches x %s%n", ids.size(), reason));
 
             // The appeared + maybe tiers (item 26, stage 4a). They PARTITION the
@@ -473,6 +482,29 @@ public class Main {
                 maybe.size(), maybeGames.size(), maybeMatches, maybeMatches - maybeGames.size());
             System.out.printf("  no-lineup partition: %d = %d appeared + %d maybe%n",
                 loader.heldNoLineupCount(), appearedMatches, maybeMatches);
+
+            // The match-level spine (item 29, slice 1), reconciled against the
+            // skip report above: one row per Held match, whatever the reason, so
+            // the two totals are the same verdict counted twice. The reachability
+            // line is the measurement item 29 is named after, made permanent -
+            // a row without both club ids would be a match no club view could
+            // reach, and there must never be one.
+            heldMatches.addAll(loader.heldMatches());
+            Map<String, Integer> spineByReason = new TreeMap<>();
+            Map<String, Integer> spineBySource = new TreeMap<>();
+            for (HeldMatch h : heldMatches) {
+                spineByReason.merge(h.reason(), 1, Integer::sum);
+                spineBySource.merge(h.repairSource().name(), 1, Integer::sum);
+            }
+            System.out.printf("held matches: %,d rows%n", heldMatches.size());
+            spineByReason.forEach((reason, n) ->
+                System.out.printf("  %5d x %s%n", n, reason));
+            spineBySource.forEach((source, n) ->
+                System.out.printf("  %5d repair source %s%n", n, source));
+            long unreachable = heldMatches.stream()
+                .filter(h -> h.homeClubId() == 0 || h.awayClubId() == 0).count();
+            System.out.printf("  reachable by club: %,d of %,d (%d unreachable)%n",
+                heldMatches.size() - unreachable, heldMatches.size(), unreachable);
 
             // The venue verdict, which no test can eyeball for you.
             Map<Match.HomeSide, Integer> venues = new TreeMap<>();
