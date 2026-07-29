@@ -2993,3 +2993,20 @@ in the real sidecar (all 4,578 rows are `released`), so the `draft` marker is
 proven only against a synthetic one. And the club search's 200-row cap can hide
 a low-count club behind 200 busier matches of the same name — acceptable while
 no name is that common, and the count ordering puts work first by design.
+
+### Slice 2 gate closed (2026-07-29) — the user's own release
+
+Closed the way item 17 slice 2 was, by repairing a real match through the new
+door: **the Euro 2024 final, found by searching for Spain.** The run's own
+counters prove the match was one the player door could not reach — the
+"no club game within a month" line fell **1,808 → 1,807** and the maybe tier
+**2,242 → 2,241**, so the fixture released was one of the isolated ones with no
+±30-day squad to name a candidate from. That is item 29's premise demonstrated
+end to end: a match that existed in no worklist, opened, repaired and released.
+
+Run after the release: 85,050 of 88,958 replay (was 85,049), sidecar 4,579 (was
+4,578), `held_matches` 3,908 (was 3,909), **log-loss 0.6503** unchanged at four
+decimals, ship gate still strictly better than the venue-blind baseline, item 11
+gate unchanged. Reachability still **3,908 of 3,908, 0 unreachable**.
+
+**Item 29 is done.** Both slices shipped, all gates met.
