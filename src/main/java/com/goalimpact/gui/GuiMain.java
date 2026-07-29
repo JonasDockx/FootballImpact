@@ -8,6 +8,8 @@ import javafx.application.Application;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.layout.BorderPane;
 import javafx.stage.Stage;
 
@@ -44,12 +46,23 @@ public class GuiMain extends Application {
             String stamp = "run " + reader.runId() + "   worklist written "
                 + Files.getLastModifiedTime(DataFiles.RESULTS).toInstant()
                     .atZone(ZoneId.systemDefault()).toLocalDateTime().withNano(0);
-            return new WorklistPane(reader,
-                new SidecarStore(DataFiles.SIDECAR, DataFiles.SNAPSHOT), stamp);
+            SidecarStore store = new SidecarStore(DataFiles.SIDECAR, DataFiles.SNAPSHOT);
+            return tabs(new WorklistPane(reader, store, stamp), new ClubPane(reader, store));
         } catch (Exception e) {
             return message("Could not open the worklist: " + e.getMessage()
                 + "\nRun 'mvn compile exec:java' to build it.");
         }
+    }
+
+    // Two doors into one worklist (item 29, slice 2), as two tabs rather than a
+    // mode on one screen: they differ in shape, not just in what you type. The
+    // player pane needs three sections because a row's meaning changes per
+    // Worklist tier; the club pane needs one, because every row there is a Held
+    // match and means the same thing.
+    private static Parent tabs(Parent byPlayer, Parent byClub) {
+        TabPane tabs = new TabPane(new Tab("By player", byPlayer), new Tab("By club", byClub));
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        return tabs;
     }
 
     private static Parent message(String text) {

@@ -23,6 +23,7 @@ import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 // The writer's own checks (item 26, stage 4b-2, gate check 3), all on a throwaway
@@ -131,6 +132,30 @@ class SidecarStoreTest {
         assertEquals(saved.lineup(), loaded.lineup());
         assertEquals(saved.events(), loaded.events());
         assertEquals(saved.appearances(), loaded.appearances());
+    }
+
+    // The club list marks a row from the sidecar rather than from the run, so a
+    // match repaired this afternoon stops looking like work immediately instead
+    // of waiting for the next designated run (item 29, slice 2). That needs the
+    // status, which sidecarGameIds() flattens away - and both statuses must come
+    // back distinctly, or "already done" and "half done" would look alike.
+    @Test
+    void theSidecarReportsEachMatchsStatus() throws Exception {
+        SidecarStore store = new SidecarStore(sidecar(), SNAPSHOT);
+        store.save(sampleMatch(), "draft", "p");
+        assertEquals("draft", store.sidecarStatuses().get(GAME));
+
+        store.save(sampleMatch(), "released", "p");
+        assertEquals("released", store.sidecarStatuses().get(GAME));
+
+        // The same keys as the older question, so the two cannot disagree about
+        // which matches the sidecar holds.
+        assertEquals(store.sidecarGameIds(), store.sidecarStatuses().keySet());
+    }
+
+    @Test
+    void anEmptySidecarReportsNoStatuses() throws Exception {
+        assertTrue(new SidecarStore(sidecar(), SNAPSHOT).sidecarStatuses().isEmpty());
     }
 
     private static long count(Path db, String sql) throws Exception {

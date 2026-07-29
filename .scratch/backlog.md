@@ -2938,3 +2938,58 @@ because there is nothing to test it against (see the correction above).
 
 **Still ahead:** slice 2, the `By club` tab, at seams `WorklistReader.searchClubs`,
 `WorklistReader.heldMatchesFor` and `SidecarStore.sidecarStatuses`.
+
+### Slice 2 outcome (2026-07-29) — built, one gate check left to the user
+
+The `By club` tab, the second door into the worklist.
+
+**What it is.** `WorklistReader` gains two queries and the `gui` package a
+sibling pane. `searchClubs` spans **every** club the vendor has a fixture for
+(decision 4) — a LEFT-JOIN-shaped count so zero comes back as an answer rather
+than an absence — ordered work-first, capped at 200 like the player search.
+`heldMatchesFor` reads `held_matches` alone, touching no player table, which is
+exactly why it reaches what the player door cannot. `ClubPane` is dumb in the
+same way `WorklistPane` is: no SQL, no judgement, one table because every row
+means the same thing. `GuiMain` wraps the two in a `TabPane`.
+
+**Club names come from `games`, never from `clubs`.** The vendor's `clubs` table
+names 796 of the 3,274 club sides, so 2,481 clubs would have been unsearchable.
+Grouped by id to collapse repeats, with `coalesce(..., 'club ' || id)` so the
+104 unnamed sides are still reachable by typing their id.
+
+**The sidecar marks the row, not the run.** `SidecarStore.sidecarStatuses()` is
+the new sibling to `sidecarGameIds()`, keeping the status the older one flattens
+away, and `ClubPane` re-reads it whenever a club is opened and again when the
+editor closes. Without it a match repaired an hour ago would look identical to
+one still to do, because `held_matches` is only rewritten by a designated run
+and a release never throws.
+
+**A `nothing` row is listed but refuses to open**, with the reason on screen.
+Visible, so reachability is complete; shut, so nobody can release a 0-0 that
+nobody established.
+
+**Gate — two of three checks met.**
+
+- **The replay cannot move.** Nothing on the run path is touched: `Main`,
+  `TransfermarktLoader`, `engine`, `credit` and `report` are untouched by this
+  slice, and the two modified files gained read-only methods the GUI alone
+  calls.
+- **Tests: 222 green** (216 + 6), at the three agreed seams. `searchClubs`
+  reports Spain (3375) with 51 and finds Juventus (506) with **0** — the answer
+  the player door can never give. `heldMatchesFor` returns those 51 newest-first,
+  every one `EVENTS`/`no lineups` with Spain on one side or the other, and its
+  count is asserted equal to the number the search promised, so the two halves of
+  the screen cannot contradict each other. `sidecarStatuses` round-trips draft
+  and released on a throwaway sidecar and is asserted to have the same key set as
+  `sidecarGameIds`. The GUI is untested by agreement — there are no GUI tests in
+  this repo — and launches cleanly.
+- **STILL OPEN — the end-to-end proof is the user's to make:** open a EURO
+  fixture that no player search can reach, repair it and release it, as FCSB v
+  Molde closed item 17 slice 2. Not something this session can do for you: it
+  needs judgement about real footballers, from a source outside the tool.
+
+**Known limits, stated rather than discovered later.** No draft has ever existed
+in the real sidecar (all 4,578 rows are `released`), so the `draft` marker is
+proven only against a synthetic one. And the club search's 200-row cap can hide
+a low-count club behind 200 busier matches of the same name — acceptable while
+no name is that common, and the count ordering puts work first by design.

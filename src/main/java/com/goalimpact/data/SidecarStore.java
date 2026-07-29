@@ -331,6 +331,27 @@ public final class SidecarStore {
         return out;
     }
 
+    // The same question with the status kept (item 29, slice 2). The club list
+    // is drawn from held_matches, which a designated run writes and a release
+    // never rewrites, so without this a match repaired an hour ago would sit in
+    // the list looking exactly like work still to do. The sidecar knows at once.
+    public Map<Long, String> sidecarStatuses() throws SQLException {
+        Map<Long, String> out = new HashMap<>();
+        if (!Files.exists(sidecar)) {
+            return out;
+        }
+        try (Connection c = openReadOnly(sidecar);
+            Statement s = c.createStatement();
+            ResultSet rs = s.executeQuery("SELECT game_id, status FROM matches")) {
+            while (rs.next()) {
+                out.put(rs.getLong("game_id"), rs.getString("status"));
+            }
+        } catch (SQLException noSuchTable) {
+            // A file with no matches table holds no repairs.
+        }
+        return out;
+    }
+
     // Reconstruct many appeared matches over a single vendor connection - far
     // cheaper than one open per game for a batch of thousands.
     public List<EditableMatch> reconstructAppeared(List<Long> gameIds) throws SQLException {

@@ -84,6 +84,37 @@ public class WorklistReader implements AutoCloseable {
         SELECT min(player_name) AS player_name FROM (%s) WHERE player_id = ?
         """.formatted(ALL_NAMES);
 
+    // Every club the vendor has a fixture for, named once. The vendor's own
+    // clubs table cannot be used: it names 796 of the 3,274 club sides that
+    // appear in games, so 2,481 clubs would be unsearchable - the same shape of
+    // hole as the 2,969 unnamed player ids. games carries a name on all but 104
+    // of them, and the mapping is clean (no id with two names, no name on two
+    // ids), so it is grouped by id here purely to collapse the repeats.
+    // A club the vendor never names is still reachable: it falls back to
+    // "club <id>", which the search matches like any other text.
+    private static final String CLUB_NAMES = """
+        SELECT cid AS club_id,
+               coalesce(max(nm), 'club ' || CAST(cid AS VARCHAR)) AS club_name
+        FROM (SELECT home_club_id AS cid, home_club_name AS nm FROM vendor.games
+              UNION ALL SELECT away_club_id, away_club_name FROM vendor.games)
+        GROUP BY cid
+        """;
+
+    // The club door (item 29, slice 2). A LEFT JOIN, not an inner one, because
+    // zero is the answer that says a club is complete - which is why this search
+    // spans every club rather than only those with work. Ordered work-first so
+    // the zeros sit below what there is to do.
+    private static final String CLUB_SEARCH_SQL = """
+        SELECT c.club_id, c.club_name,
+               (SELECT count(*) FROM held_matches h
+                 WHERE h.home_club_id = c.club_id OR h.away_club_id = c.club_id)
+               AS held_matches
+        FROM (%s) c
+        WHERE lower(c.club_name) LIKE '%%' || lower(?) || '%%'
+        ORDER BY held_matches DESC, c.club_name
+        LIMIT 200
+        """.formatted(CLUB_NAMES);
+
     // All three tables are dropped and rewritten by the same designated run, so
     // there is never more than one run_id in the file. Surfaced so the screen
     // can show whether the worklist it is drawing is stale.
@@ -122,6 +153,46 @@ public class WorklistReader implements AutoCloseable {
                 while (rows.next()) {
                     hits.add(new WorklistPlayer(rows.getLong("player_id"),
                         rows.getString("player_name"), rows.getInt("missing_matches")));
+                }
+            }
+        }
+        return hits;
+    }
+
+    // A club's Held matches, either side, newest first (item 29, slice 2). No
+    // player table is touched: this is the whole reason the club door reaches
+    // matches the player door cannot.
+    private static final String CLUB_MATCHES_SQL = """
+        SELECT h.game_id, %s, h.reason, h.repair_source
+        FROM held_matches h
+        JOIN vendor.games g ON g.game_id = CAST(h.game_id AS VARCHAR)
+        WHERE h.home_club_id = ? OR h.away_club_id = ?
+        ORDER BY g.date DESC, h.game_id
+        """.formatted(MATCH_FACTS);
+
+    public List<ClubMatchRow> heldMatchesFor(long clubId) throws SQLException {
+        List<ClubMatchRow> out = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(CLUB_MATCHES_SQL)) {
+            statement.setLong(1, clubId);
+            statement.setLong(2, clubId);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    out.add(new ClubMatchRow(matchFacts(rows), rows.getString("reason"),
+                        RepairSource.valueOf(rows.getString("repair_source"))));
+                }
+            }
+        }
+        return out;
+    }
+
+    public List<ClubHit> searchClubs(String typed) throws SQLException {
+        List<ClubHit> hits = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(CLUB_SEARCH_SQL)) {
+            statement.setString(1, typed);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    hits.add(new ClubHit(rows.getLong("club_id"),
+                        rows.getString("club_name"), rows.getInt("held_matches")));
                 }
             }
         }
