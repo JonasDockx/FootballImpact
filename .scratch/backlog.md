@@ -3010,3 +3010,372 @@ decimals, ship gate still strictly better than the venue-blind baseline, item 11
 gate unchanged. Reachability still **3,908 of 3,908, 0 unreachable**.
 
 **Item 29 is done.** Both slices shipped, all gates met.
+
+## 30. Rebuild the spine ourselves, and widen it — item 26's lever 2
+
+**Why (user, 2026-07-29):** "I would like to include as many competitions from as
+many eras as possible. If data are incomplete, this is not a problem. We can
+always fix this in the GUI." Item **26** named two levers and only built lever 1
+(the third match state). Lever 2 — rebuild the vendor snapshot wider — has never
+had a number of its own: item **15** is the *why we want more* (pre-2013 depth,
+qualifiers, fidelity), item 26 is the *how of lever 1*. This item is the *how of
+lever 2*, and the first time this project builds its own spine instead of
+consuming someone else's file.
+
+It is also the unblocker for item **28**: Messi looks undervalued because his
+peak predates the data, and only more history fixes that.
+
+### What is actually missing, measured 2026-07-29
+
+Three independent dials, not one.
+
+**Dial A — competitions present but only for the last season or two.** Eighteen
+were added by the vendor recently and exist from 2024/2025 only: MLS1, SA1, PL1,
+BRA1, TS1, SER1, RO1, C1, ARG1, A1, KR1, NO1, SE1, AUS1, JAP1, MEX1, RSK1, AFCN.
+They run **4,346 games and 317 club-seasons per season** between them, so
+backfilling 2012–2023 is **~52,000 games**. Already in the vendor's `config.yml`
+— no config edit needed, only a wider `--seasons`.
+
+**Dial B — divisions absent entirely.** Every competition in the file is a first
+tier or a cup. No Championship, Segunda, Serie B, 2. Bundesliga, Ligue 2.
+Roughly 28,000 games for the big five second tiers over 2012–2025. Needs a
+`config.yml` edit.
+
+**Dial C — pre-2012, and national-team qualifiers.** Both absent. Qualifiers and
+the Nations League are not in `config.yml` at all. Item 15's motivation.
+
+**User picked dial A first.** B and C stay open under this item.
+
+### Data availability, probed 2026-07-29
+
+**The vendor's raw scraped JSON is public.** `.dvc/config` sets `remote = http`
+pointing at a public Cloudflare R2 URL; a HEAD against the DVC manifest returns
+**200** with no credentials. 552,330,500 bytes over 74 files. So a rebuild starts
+from the vendor's own raw data, and we scrape only what is missing.
+
+**The snapshot's build commit is the vendor's current HEAD.** `version.commit_hash`
+= `59fa295c…`, and `git log -1` on `master` is that same commit, dated
+2026-07-11. The transform code we would run *is* the code that built the file on
+disk, so an exact reproduction is achievable rather than approximate.
+
+**The 2012 lineup gap is a scraper gap, not a Transfermarkt gap.** The raw file
+list carries `game_lineups.json.gz` for 2013 … 2025 and **no such file for 2012**.
+The crawler was never run for that season. This does not prove old team sheets
+exist on the site, but it removes the evidence that they do not, and it weakens
+item 15's flat claim that "no lineups exist before 2013".
+
+Lineup coverage by calendar year in the file today:
+
+| year | games | with lineups | with appearances |
+|---|---|---|---|
+| 2012 | 3,514 | **0** | 3,021 |
+| 2013 | 5,679 | 3,458 | 5,268 |
+| 2014–2023 | ~5,700/yr | ~97% | ~91% |
+| 2024 | 7,127 | 6,946 | 5,287 |
+| 2025 | 10,402 | 9,800 | 5,595 |
+| 2026 | 4,497 | 4,488 | 2,400 |
+
+**Request cost, read off the crawlers.** `game_lineups` issues **two** requests
+per match (report page, then `aufstellung`); `appearances` issues **one per
+player per season**. For dial A's backfill: games ~2,000, clubs ~220, players
+~3,800, **game_lineups ~104,000**, **appearances ~106,000**. At one request per
+second that is **~60 hours** with appearances, **~30** without.
+
+**The scraper has no rate limiting whatsoever.** No delay, no concurrency cap, no
+custom user agent anywhere in `transfermarkt-scraper`. Crawlee's default
+autoscales to whatever the machine sustains.
+
+**Windows cannot host this pipeline.** The vendor repo will not `git clone` here
+— five `streamlit/pages/*.py` filenames contain `:` — and the acquire script
+shells out with `executable='/bin/bash'` and `set -o pipefail`. WSL exists
+(Ubuntu 20.04) but ships Python 3.8.10 with no pip, while both repos pin
+**Python 3.12** (`^3.12, <3.13`). Ubuntu 24.04 ships 3.12.3, matching their
+`.python-version` exactly.
+
+**Host sizing:** 31.7 GB RAM, 32 logical cores, and **no `-Xmx` set anywhere** —
+so the JVM ceiling is the default quarter of physical RAM, ~7.9 GB. Item 20
+declined `Player` interning partly because 8.5 GB made the 200 MB saving
+unnecessary.
+
+**Where the hand-built work sits.** Of 4,579 sidecar releases, **2,337 are 2012
+matches and 2,057 are 2013** — 96% in the two years where team sheets are
+missing or partial. 2012 has 3,514 games in total, so two thirds of that season
+is already released from reconstructions.
+
+### Grill (2026-07-29) — nine decisions, every one the recommended option
+
+1. **Reproduce before widening.** Download the vendor's raw JSON, run their
+   transform unchanged, and require the rebuilt file to reproduce the one on
+   disk — *before* a single page is scraped. This is the inert-first rhythm every
+   item-26 stage used, pointed at a pipeline instead of at code. Going straight
+   to the backfill was rejected: the first file we ever build would also be the
+   first file containing new matches, so any surprise would have two possible
+   causes and separating them would mean doing this step anyway, after the
+   scraping time was spent.
+2. **The reproduction gate is ratings-decide, tables-diagnose.** Pass requires
+   `Main` on the rebuilt file to produce the identical `goalimpact.csv` and
+   log-loss 0.6503; the seven tables GoalImpact reads are compared row-for-row
+   as well, purely so a failure says *where*. Comparing all 12 curated tables was
+   rejected (it can fail on `transfers` and `player_valuations`, which no rating
+   reads); ratings-only was rejected for giving a verdict with no diagnosis. Same
+   trick as `held_matches` — one verdict recorded twice so the two cannot drift.
+   **The existing snapshot is never overwritten**; the rebuild lands beside it and
+   the path in `Main` moves only after it passes. Today's CSV md5 must be
+   re-recorded first: the `67f9f80c…` in item 29 predates the Euro-final release.
+3. **Scrape one full season first, then drop `appearances`.** Season 2023, all
+   five assets, all 18 competitions — one night — measures lineup coverage
+   instead of assuming it, and shakes out rate limiting, blocks and calendar-year
+   leagues like MLS on a run small enough to discard. Then the remaining eleven
+   seasons **without `appearances`**, halving 60 hours to 30. `appearances` is a
+   *fallback*: it feeds the appeared repair tier, extra-time detection and the
+   4b-4 bulk release, all of which rescue matches that have **no team sheet**. It
+   is bought back later, targeted at exactly the competition-seasons where
+   coverage turns out thin. `clubs` and `players` stay in — ~4,000 requests
+   between them, `players` carries the DOBs item 21 needs, and it is the parent
+   any later `appearances` run requires. Accepted risk: if 2023 looks clean but
+   2013–2015 is patchy, the second visit costs close to full price.
+4. **One request per second, concurrency one, honest user agent.** Item 15 already
+   recorded the position — robots.txt disallows bots, so personal use, slow rate,
+   cache everything — and running unthrottled would break a commitment already in
+   writing, besides being the pattern that gets a home IP blocked mid-run. Three
+   to four per second was rejected: this is a once-off batch run while asleep, so
+   the saved hours buy nothing and spend the one resource that cannot be
+   recovered. Enabling Crawlee's robots.txt support was rejected as a technicality
+   that scrapes *nothing* rather than scraping politely — the honest framing is
+   that we crawl pages robots.txt asks bots not to, at personal-use rate, and the
+   throttle is what makes that defensible. **The patch is checked into
+   GoalImpact's `scripts/`**, on `scripts/first-repair.sql`'s precedent, so the
+   commitment is a fact in this repository rather than a local edit on one machine
+   — with a backlog line saying it must be re-applied after any vendor update.
+5. **Four checks replace the byte-identical gate, and one of them decides.** The
+   population is the thing being changed, so "the number must not move" can no
+   longer tell success from breakage. (a) A **census predicted from SQL before the
+   run** and reproduced exactly — item 20's instrument, and the one that catches an
+   ingestion bug. (b) **Log-loss restricted to the 85,050 matches already in the
+   file**, same scoring window — the only apples-to-apples number against 0.6503,
+   and the decider. (c) **StatsBomb still 0.6259**, untouched. (d) The leaderboard
+   by eye, which has caught a broken clock or venue rule in seconds since item 18.
+   Two traps named in advance rather than discovered: the comparison is unfair
+   until the constants are re-tuned (0.6503 wears knobs fitted to today's
+   population), so (b) is measured **champion against champion**; and a regression
+   may be *correct*, because 52,000 matches of MLS, Brazil and Japan arrive rated
+   0 — which the model reads as exactly average, not unknown — which is item 16's
+   cup-minnow inflation. So **(b) is "explain any regression", not "any regression
+   fails"**. If the explanation turns out to be item 16, that is item 16 becoming
+   urgent, not a broken widening.
+6. **Constants stay global; per-competition is a follow-up.** Item 20's recipe is
+   repeated unchanged — base rate first (it depends on nothing), then a joint
+   `(K0, H, h)` grid with `k` pinned at 0.10 and the anchor measured on domestic
+   leagues only (ADR 0008). Making the base rate and `h` per-competition is
+   tempting once Brazil and Argentina are in the pool, and probably right
+   eventually, but it is a change to the *metric* and bundling it with a change to
+   the *data* means a worse result names neither — the argument that split item 17
+   slice 4b-2. The widened run is the instrument that will say how far apart the
+   leagues actually are. **The scoring window stays 2015-07-01**: this backfill
+   fills leagues *within* 2012–2023 and does not move the start of the data, so
+   ADR 0010's reason is unchanged. Dial C is when it must be revisited.
+7. **Scrape 2012 team sheets, sidecar still wins, disagreements reported.**
+   Deliberate scope creep past dial A, on three grounds: it is ~7,000 requests
+   and two hours for a whole season that currently has none; it is the
+   vendor-shadow reconciliation item 17's handoff flagged and left unowned; and —
+   the reason that decided it — **it grades the reconstruction method against
+   ground truth**. Stage 4b-4 bulk-released 4,573 matches whose lineups were
+   derived from the appearances record and there has never been any way to check
+   whether that derivation was right; this hands back the real answer for ~2,337
+   of them at once. Nothing is changed automatically: the override rule (item 26
+   grill, decision 3) stands, the report is evidence to act on one match at a time
+   through the editor. Letting the vendor win was rejected outright — *Match
+   state* says Released means "checked and approved by hand", and discarding that
+   silently is the permanent invisible failure item 29 decision 7 refused. A bad
+   report is a reason to be glad this ran.
+8. **Measure peak heap, then pin it.** The baseline run of decision 2 is happening
+   anyway, so the measurement is one extra output line. Then set `-Xmx` explicitly
+   in the pom. Independent of the widening, this removes a hidden dependency:
+   every important number in this project is pinned and dated except the memory
+   the run is allowed, which is silently a quarter of whatever machine it is on.
+   If even a raised ceiling will not hold ~137,000 matches, the answer is the
+   streaming refactor — its own item and its own gate, not smuggled in here.
+   Interning `Player` stays declined (item 20: 1,075 ids carry more than one name,
+   so it would change CSV output).
+9. **A new item, no new ADR, and a dated ADR 0009 amendment.** Item 26's four
+   stages are shipped and its body is about lever 1; bolting a five-stage
+   sub-project about a different lever onto it makes both unreadable. Most of the
+   above stays in this backlog on item 29's test — an ADR is for what changes how
+   a *rating* is computed, and nothing here does. Two things fail that test and go
+   to [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md), which
+   already owns the spine and already says to re-measure when a large new era
+   lands: **the reconciliation policy** (decision 7) and **the politeness
+   commitment** (decision 4). The re-measured constants replace its pinned 0.01532
+   and `h = 2.0` when stage 4 produces them.
+
+### Staging (gate each)
+
+| stage | what happens | gate |
+|---|---|---|
+| **0. Reproduce** | WSL Ubuntu 24.04 + Python 3.12, both repos cloned, `dvc pull`, throttle patch applied, dbt run, duckdb exported. **Nothing scraped.** | Identical `goalimpact.csv` + 0.6503; seven-table comparison as diagnostic; today's peak heap recorded |
+| **1. The 2023 probe** | All five assets, season 2023, 18 competitions. One night. | Lineup coverage per competition-season — the evidence that confirms decision 3's drop of `appearances` |
+| **2. The 2012 team sheets** | ~7,000 requests, ~2 hours. | The reconciliation report against 2,337 released reconstructions |
+| **3. The backfill** | The remaining eleven seasons, ~30 hours over several nights. | Census predicted from SQL, then reproduced |
+| **4. Re-measure and cut over** | Base rate, then the 81-cell `(K0, H, h)` grid. | Decision 5's four checks |
+
+**Stage 2 precedes stage 3 deliberately** — two hours against thirty, and its
+report says how much to trust the appeared-tier reconstruction that a large part
+of the current spine rests on, which colours how stage 3's output is read.
+**Rebuild and replay after each of stages 1–3** so a surprise is attributable;
+**re-tune only at stage 4**, since the constants are meaningless until the
+population is final.
+
+### Deliberately not in this item
+
+Dials B and C (second divisions, pre-2012, qualifiers) — they reuse this
+machinery once it exists, and dial C reopens ADR 0010's window. Per-competition
+constants (decision 6). The streaming refactor (decision 8). Item 27's weekly
+refresh, which inherits decision 4's throttle. Item 16, which decision 5 may make
+urgent.
+
+### Stage 0, first half (2026-07-29): the baseline, and a decision the evidence corrected
+
+**The baseline the rebuild must reproduce**, from a designated `Scope.ALL` run on
+the snapshot as it stands, re-run to replace the stale `67f9f80c…` that predates
+item 29's Euro-final release:
+
+| quantity | value |
+|---|---|
+| matches replayed | 85,050 of 88,958 |
+| log-loss | **0.6503** windowed / 0.6510 whole |
+| base scoring rate | 0.01531 (236,325 goals / 15,436,980 team-minutes) |
+| league-only anchor `h` | 2.32 |
+| held matches | 3,908, reachable 3,908, **0 unreachable** |
+| venue | HOME 84,347 / AWAY 8 / NEITHER 695 |
+| `goalimpact.csv` md5 | **`7946A6965729BDD98ECF5320439A26EA`** |
+
+Re-running produced the identical md5, so the run is deterministic and the hash is
+a usable gate rather than a coincidence.
+
+**Decision 8's premise was wrong, and the measurement says so.** Peak heap is
+**1,394 MiB against an 8,116 MiB ceiling** — 17% of what is available, not the
+tight fit the grill assumed. Item 20's remark that "8.5 GB of heap makes the
+saving unnecessary" was about the *ceiling*, and this item read it as a statement
+about *usage*. At 61% more matches the widened replay lands near 2.2 GB, so:
+
+- **There is no memory problem**, and the streaming refactor decision 8 held in
+  reserve is not needed. Do not build it on this item's account.
+- **Pinning `-Xmx` still stands**, on the half of decision 8's argument that never
+  depended on the size: the amount of memory this run is allowed is currently a
+  property of the machine rather than of the project, which is the one important
+  number here that is neither pinned nor dated.
+
+`reportPeakHeap()` in `Main` is the measurement, kept rather than removed — the
+same reasoning as item 29's reachability line, which turned a one-off probe into a
+permanent output so the next person does not have to re-derive it.
+
+**Environment built:** WSL Ubuntu 24.04.4 LTS (added alongside the existing 20.04,
+which is untouched), Python 3.12.3, Poetry 2.4.1 via `pipx`. Note for anyone
+repeating this: on 24.04 `pip install poetry` fails with
+`externally-managed-environment` — PEP 668 protects the system Python — so `pipx`
+is the supported route, not a preference. The vendor repo is cloned to
+`~/spine/transfermarkt-datasets` **in the Linux home, not under `/mnt/c`**, since
+the cross-filesystem path is slow for the many-small-files work the pipeline does,
+and it is checked out at the pinned `59fa295c`.
+
+### Stage 0 outcome (2026-07-29) — the machine reproduces the ratings exactly, and the gate had to be redefined
+
+**We can build the snapshot ourselves.** `dvc pull` fetched the vendor's raw data
+from the public Cloudflare remote with **no credentials** (527 MB, 74 files, the
+inventory matching the manifest exactly — including the confirmed absence of any
+`2012/game_lineups.json.gz`). `dbt build` then completed **119 PASS, 0 ERROR**,
+and `export-duckdb.py` produced a 195.5 MB file stamped with the same commit
+hash as the file on disk. All seven tables GoalImpact reads reproduced their row
+counts **exactly**: 88,958 / 3,179,016 / 1,274,469 / 1,894,350 / 50,149 / 796 / 65.
+
+**Run against the rebuilt file, every number reproduced**: log-loss **0.6503**
+(whole 0.6510), base rate 0.01531, league anchor 2.32, 85,050 of 88,958 matches,
+held 3,908 with 0 unreachable, leaderboard identical top to bottom.
+
+**But `goalimpact.csv` was not byte-identical, and it never can be.** The cause
+is not ours. Measured by building **twice from identical inputs, at the same
+commit, on the same machine, minutes apart**: the two builds differ *from each
+other* in 928 `games` rows, 345 `game_events` rows and 3 `players` rows. The
+vendor's dbt pipeline is **not deterministic**, and the instability is confined
+exactly to display labels:
+
+| stable across builds | unstable across builds |
+|---|---|
+| `game_lineups` (3.18M rows), `appearances` (1.89M), `clubs`, `competitions` — identical | `games.url`, `games.home_club_name`, `games.away_club_name` |
+| every rating-bearing column: `game_id`, `date`, `competition_id`, club and player **ids**, goals, event minutes and types | `game_events.club_name`, `players.name` and its siblings |
+
+A label is picked by a window function over several raw records, so where a club
+carries two spellings the tie-break is arbitrary once row order is not fixed.
+"FC Aktobe" / "FK Aktobe", "FC Südtirol" / "FC Südtirol-Alto Adige",
+"Lleida Esportiu" / "Lleida CF" — the same club, a coin toss per build. Item 20
+already recorded the player-side version of this (1,075 ids carry more than one
+name); this shows it is a property of the *pipeline*, not just of the data.
+
+**What the ratings actually did — the gate's real question, answered three ways:**
+
+| comparison | rows differing |
+|---|---|
+| minutes + rating + goalkeeper | **0** |
+| player + minutes + rating + goalkeeper | **0** |
+| team + minutes + rating | 1,904 of 95,521 (2.0%) |
+
+Not one rating moved. Not one player was renamed. The entire diff is a club label
+on 2% of rows, all lower-league sides at the bottom of the table.
+
+**So the md5 gate is retired, and deliberately, not quietly.** Every stage from
+item 18 to item 29 gated on an identical `goalimpact.csv`. That is no longer
+achievable for a reason that has nothing to do with correctness, and a gate that
+always fails is a gate nobody reads. Its replacement is
+`scripts/compare-ratings.sql`: checks 1 and 2 above **must** be zero, check 3 is
+reported and never fails. This is stricter than the md5 where it counts — it
+states that the same footballers earned the same ratings over the same minutes —
+and silent about the part that was never stable.
+`scripts/compare-snapshots.sql` is split the same way: rating-bearing columns
+must be identical, label columns are counted.
+
+**Three obstacles worth recording, because the next person will hit them.**
+
+1. **`dbt build` exhausted memory four times running**, and the cause was not the
+   data volume. dbt's `--threads` sets how many *models* run at once; DuckDB's own
+   `threads` setting is separate and defaulted to **32**, one per core. `base_games`
+   parses 3.18M lineup rows through a window function, and 32 workers each
+   buffering a slice of that exhausted 18.7 GB. `threads: 4` in the profile's
+   `settings:` block fixed it outright. Everything tried before that was wrong in
+   an instructive way: raising the VM's memory did not help (the workload scales
+   with thread count, not with what is available), and *lowering* DuckDB's memory
+   limit made it worse — 5 failing models instead of 1 — because these models hold
+   memory inside JSON parsing, which DuckDB cannot spill to disk.
+2. **`preserve_insertion_order: false` is worth keeping regardless.** It fixed
+   three of the four failing models on its own and costs a full extra copy of each
+   table being built. Row order is not something this project depends on.
+3. **dbt-duckdb honours `settings:` but silently ignores `config:`** in this
+   version, and `temp_directory` can only be chosen at connect time — so it cannot
+   be set at all through `settings:`, failing with "Cannot switch temporary
+   directory after the current one has been used". Not needed in the end.
+
+**`.wslconfig` was created** (`memory=24GB`) before the thread cause was found. It
+is not load-bearing and could be reverted; kept because stages 1–3 build a spine
+~60% larger and the headroom costs nothing — WSL takes memory on demand and
+returns it.
+
+**Stage 0's gate is met on its purpose**, with the definition sharpened above.
+Nothing has been scraped; the run path is unchanged; `DataFiles.SNAPSHOT` still
+points at the original vendor file, since the rebuilt one is equivalent and
+switching now would churn 1,904 club labels for no benefit. The switch happens
+when the widened file exists.
+
+**Two stale test expectations, found by re-running the suite.**
+`ClubWorklistTest` pinned Spain at **51** Held matches, and it is now **50** — the
+match that left is game `4359342`, Spain v England, the Euro 2024 final released
+to close item 29 slice 2. So the "222 green" recorded under that slice predates
+its own gate-closing release, and the suite had not been re-run since. Nothing to
+do with this item; today's designated run merely rewrote `held_matches` and
+surfaced it.
+
+Fixed by pinning the count as a named constant with a comment saying **the number
+is supposed to move**: it falls by exactly one per Spain match released, which is
+the tool working, so a failure here after a repair means update the constant. The
+invariant that must never drift was already asserted beside it — the search's
+count and the list's length have to agree. Worth noting as a shape: a fixture
+pinned to a number the user is actively trying to change will keep breaking, and
+every club-scoped test carries that property. 222 green after the fix.

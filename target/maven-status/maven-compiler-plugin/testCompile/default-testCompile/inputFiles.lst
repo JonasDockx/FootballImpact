@@ -3,10 +3,15 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\cr
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\credit\TimeIntegratedResidualTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\AppearedReconstructionTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\BulkReconstructionTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\CandidateQueryTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\ClubWorklistTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\DataLoaderTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\DerivedLineupTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\EventOrderingTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\HeldAppearanceTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\HeldMatchTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\LoaderAgreementTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\ManualPlayerRegisterTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\MissingMatchTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\RepairReproductionTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\data\SidecarOverrideTest.java
@@ -17,5 +22,7 @@ C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\da
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\engine\MatchProcessorTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\engine\PredictionQualityTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\engine\SmoothFadeScheduleTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\repair\CandidateRankerTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\repair\EditableMatchTest.java
+C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\repair\EventRosterTest.java
 C:\Users\dockx\Documents\Programmeren\GoalImpact\src\test\java\com\goalimpact\repair\LineupEntryTest.java

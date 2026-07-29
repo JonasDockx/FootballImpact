@@ -382,6 +382,59 @@ consistent with the engine by construction. The sparse 15% (a side under eleven,
 absent) still require naming players the record lacks and are deferred to the ranked
 picker, exactly as the certain tier deferred adding a player.
 
+**Amended 2026-07-29 (item 30): we build the snapshot ourselves, and two standing
+rules follow.** Everything above assumes the snapshot is a file someone else
+produced and we consume. Item 30 makes this project run the vendor's own scraper
+and dbt pipeline, so the spine can be widened. The read path is unaffected — the
+output shape is identical by construction, which was this ADR's premise for
+choosing the vendor — but two commitments now bind every refresh, including item
+27's weekly job.
+
+**1. Politeness is a pinned constraint, not a courtesy.** Transfermarkt's
+robots.txt disallows bots. Acquisition runs at **one request per second, with a
+concurrency of one**, and the throttle lives as a patch checked into `scripts/`
+(`throttle-scraper.py`) rather than as a local edit to the vendor clone, so the
+commitment is visible in this repository and survives a vendor update — Poetry
+installs the scraper from git, so an update silently restores the unthrottled
+original and the patch must be re-applied. The vendor's scraper ships with no
+rate limiting of any kind — Crawlee autoscales to whatever the machine sustains
+— so this is an addition we make, not a default we accept. Enabling Crawlee's
+robots.txt support is not the alternative: it would block every path we need.
+
+**The rate is the whole of the commitment, and the user agent is not part of it**
+(decided 2026-07-29, against the recommendation of the item 30 grill, which had
+specified an "honest user agent" before knowing what follows). The vendor's
+default HTTP client is `ImpitHttpClient(browser='firefox')`, whose purpose is to
+**impersonate a real browser** — matching Firefox's TLS fingerprint and headers so
+the request does not read as automated. Identifying ourselves instead would very
+likely be blocked, since that impersonation is presumably why the vendor's own
+pipeline works at all. It is kept. So the honest statement of what this project
+does is: it crawls pages robots.txt asks bots not to crawl, presenting itself as a
+browser, for personal use, at one request per second. The rate limit is what makes
+that defensible; it is not made defensible by the user agent, and this ADR does
+not claim otherwise.
+
+**2. A refreshed snapshot never overrides a release, and disagreement is
+reported, not acted on.** The wide-override rule stands unchanged: the sidecar
+wins for any match it contains. But a rebuild can now *newly supply* a team sheet
+for a match already released from a reconstruction — 4,394 of the 4,579 releases
+are 2012–2013 matches, exactly the era where the vendor's raw data carries no
+`game_lineups` file for 2012 and a partial one for 2013. Where a vendor sheet
+arrives for a released match, the release still rates and the difference is
+**reported** for a human to act on through the editor, one match at a time.
+Automatically preferring the vendor would silently discard work that *Match
+state* defines as "checked and approved by hand", which is precisely the
+permanent, invisible failure this project has refused elsewhere. The report has a
+second use that justifies it on its own: it grades the appeared-tier
+reconstruction (amendment of 2026-07-26, above) against ground truth for the
+first time.
+
+The three calibration constants pinned below are re-measured once item 30's
+widened population is final — base rate first, then a joint `(K0, H, h)` grid —
+by the recipe item 20 established. They stay **global** for now; making them
+per-competition is a change to the metric and is deliberately not bundled with a
+change to the data.
+
 ## Considered options
 
 - **Pool StatsBomb and Transfermarkt (rejected).** Requires cross-provider

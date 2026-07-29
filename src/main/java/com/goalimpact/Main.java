@@ -26,6 +26,9 @@ import com.goalimpact.report.MissingMatchWriter;
 import com.goalimpact.report.RatingHistoryWriter;
 
 import java.io.PrintStream;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryPoolMXBean;
+import java.lang.management.MemoryType;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -363,6 +366,24 @@ public class Main {
         new CsvWriter().write(csv, tallies.values());
         System.out.println();
         System.out.println("Full results written to " + csv.toAbsolutePath());
+
+        reportPeakHeap();
+    }
+
+    // Item 30, decision 8: every important number in this project is pinned and
+    // dated except the memory the run is allowed, which is silently a quarter of
+    // whatever machine it runs on. This is the measurement that sizes an explicit
+    // -Xmx before the spine widens; peak comes from the pools rather than from
+    // Runtime, which would only report the heap as it happens to stand at the end.
+    private static void reportPeakHeap() {
+        long peak = 0;
+        for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+            if (pool.getType() == MemoryType.HEAP) {
+                peak += pool.getPeakUsage().getUsed();
+            }
+        }
+        System.out.printf(Locale.US, "Peak heap: %,d MiB used of %,d MiB ceiling%n",
+            peak / (1024 * 1024), Runtime.getRuntime().maxMemory() / (1024 * 1024));
     }
 
     

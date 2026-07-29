@@ -27,9 +27,18 @@ class ClubWorklistTest {
         "C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb");
 
     // Spain: a national side, which the vendor models as a club, and exactly the
-    // case the player door cannot reach - all 51 of its Held matches are
+    // case the player door cannot reach - all 50 of its Held matches are
     // "no lineups" with only their own events left.
+    //
+    // THIS COUNT MOVES WHEN YOU REPAIR A SPAIN MATCH, and that is not a bug in
+    // the test. It was 51 until the Euro 2024 final (game 4359342, Spain v
+    // England) was released to close item 29 slice 2, which is the whole point of
+    // the tool. A failure here after a repair means: check the new number is
+    // exactly one lower per match released, then update it. The invariant that
+    // cannot drift is asserted below - the search's count and the list's length
+    // must agree, or the two halves of the screen contradict each other.
     private static final long SPAIN = 3375L;
+    private static final int SPAIN_HELD = 50;
 
     // Juventus: 739 games in the snapshot and not one Held match. The zero is
     // the point - it says "this club is complete", which a search that only
@@ -51,7 +60,7 @@ class ClubWorklistTest {
         try (WorklistReader reader = new WorklistReader(RESULTS, SNAPSHOT)) {
             ClubHit spain = find(reader.searchClubs("spain"), SPAIN).orElseThrow();
             assertEquals("Spain", spain.clubName());
-            assertEquals(51, spain.heldMatches());
+            assertEquals(SPAIN_HELD, spain.heldMatches());
         }
     }
 
@@ -72,7 +81,7 @@ class ClubWorklistTest {
         assumeDatabases();
         try (WorklistReader reader = new WorklistReader(RESULTS, SNAPSHOT)) {
             List<ClubMatchRow> rows = reader.heldMatchesFor(SPAIN);
-            assertEquals(51, rows.size());
+            assertEquals(SPAIN_HELD, rows.size());
             assertEquals(find(reader.searchClubs("spain"), SPAIN).orElseThrow().heldMatches(),
                 rows.size());
 
