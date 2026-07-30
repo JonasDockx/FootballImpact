@@ -3783,6 +3783,36 @@ longer holds. The suite passes on the original snapshot; the assertion encodes a
 fact about the world that dial A is deliberately destroying, and it will have to be
 re-cut when the backfill lands rather than patched now.
 
+### How far back team sheets go, probed 2026-07-30 — 2008 is proven, both kinds
+
+Stage 2 left this open ("2012 is proven, 2008 is not"). Two probes, both clean:
+
+| probe | requests | result |
+|---|---|---|
+| **Euro 2008** finals, 8 games (season label 2007) | ~16 | **11 starters + a full bench on both sides, all 8**, formations included |
+| **Premier League 2008/09**, 8 games sampled across the season | ~470 + 16 | **11 + 7 on both sides, 8 of 8** |
+
+So team sheets exist for 2008 in both international and league football, four years
+earlier than the vendor's scrape ever reached. The league sample is taken **every
+47th fixture across the whole season**, not the first 8, so a season that is only
+partly covered cannot read as fully covered — worth keeping in any probe that
+decides a season range.
+
+**The grill's "~1 minute per season" costing was wrong, and the reason matters for
+dial C.** It assumed a fixture list to sample from. There is none before 2012: the
+raw seasons jump 2007 → 2009 → 2011 → 2012, and those older files hold **31–64
+games each — international tournaments only** (2007 *is* Euro 2008). So probing a
+league season means scraping its fixtures first. Measured on GB1 2008: **380
+fixtures in 7m47s**, i.e. the `games` crawler costs about **1.2 requests per game**,
+against `game_lineups`' 2. A pre-2012 league season therefore costs roughly
+**2 hours of fixtures + 3.5 hours of team sheets**, and dial C must budget for the
+fixture scrape that dial A never needed — every season 2013-2025 already had its
+`games` file, and 2012's was on disk before stage 2 began.
+
+`scripts/` deliberately does not gain a probe script: it is eight lines of
+`tfmkt games` + `tfmkt game_lineups` around an existing parent file, and the
+reusable part (sample across the season, never the head) is recorded above.
+
 ### Reading order for a fresh context (item 30)
 
 CLAUDE.md → CONTEXT.md → [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md),
