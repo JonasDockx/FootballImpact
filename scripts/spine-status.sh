@@ -18,8 +18,26 @@ LOG=$(ls -t "$HOME"/spine/logs/*.log 2>/dev/null | head -1)
 echo "time: $(date '+%H:%M:%S')"
 echo "log:  $(basename "$LOG")"
 
-# Either the vendor's acquire script, or one of our own step runners.
-PARENT=$(pgrep -f 'acquiring/transfermarkt-scraper.py|stage1-inner' | head -1)
+# Detect on `tfmkt` itself, never on the name of whichever script is driving it.
+# The first version of this listed driver names - and stage 2's driver was not on
+# the list, so it reported NOT RUNNING for a perfectly healthy scrape. That was
+# believed, a phantom cause was diagnosed, and a SECOND scrape was started
+# alongside the first: two requests a second, against the one ADR 0009 pins.
+# The crawler process is the thing that is actually doing the work, so it is the
+# thing to look for.
+CRAWLERS=$(pgrep -f 'bin/tfmkt' | wc -l)
+
+# More than one crawler at a time IS the breach. Say so before anything else.
+if [ "$CRAWLERS" -gt 1 ]; then
+  echo
+  echo "*** WARNING: $CRAWLERS crawlers are running at once ***"
+  echo "*** That is $CRAWLERS requests/second against the 1/second ADR 0009 pins."
+  echo "*** Stop all but one before doing anything else:"
+  pgrep -af 'bin/tfmkt' | sed 's/^/      /'
+  echo
+fi
+
+PARENT=$(pgrep -f 'bin/tfmkt' | head -1)
 if [ -z "$PARENT" ]; then
   echo
   echo "STATUS: NOT RUNNING"
@@ -29,9 +47,22 @@ if [ -z "$PARENT" ]; then
   exit 0
 fi
 
-echo "STATUS: RUNNING (pid $PARENT, up $(ps -o etime= -p "$PARENT" | tr -d ' '))"
+echo "STATUS: RUNNING (crawler pid $PARENT, up $(ps -o etime= -p "$PARENT" | tr -d ' '))"
 
-CHILD=$(pgrep -f 'bin/tfmkt' | head -1)
+# Whatever script is driving it, named for information only - never used to
+# decide whether anything is running.
+DRIVER=$(ps -o args= -p "$(ps -o ppid= -p "$PARENT" | tr -d ' ')" 2>/dev/null | head -c 90)
+[ -n "$DRIVER" ] && echo "driver: $DRIVER"
+
+# Chunked runs can say exactly how far along they are.
+CHUNKDIR=$(ls -td "$HOME"/spine/scrapes/*-chunks 2>/dev/null | head -1)
+if [ -n "$CHUNKDIR" ]; then
+  total=$(ls "$CHUNKDIR"/chunk_*.json 2>/dev/null | wc -l)
+  done_n=$(ls "$CHUNKDIR"/chunk_*.out.jsonl.gz 2>/dev/null | wc -l)
+  echo "chunks: $done_n of $total complete  ($(basename "$CHUNKDIR"))"
+fi
+
+CHILD=$PARENT
 if [ -n "$CHILD" ]; then
   # The command line is "<venv>/bin/python <venv>/bin/tfmkt <asset> -s <season> ...",
   # so pick the asset by name rather than by position.

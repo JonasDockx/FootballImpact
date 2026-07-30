@@ -475,6 +475,28 @@ can restore. The *mechanism* (editing `transfermarkt-datasets`' `config.yml`
 season and competition lists and re-running the scraper + dbt) and the weekly
 freshness job are now items **26** and **27**.
 
+**CORRECTED 2026-07-30 (item 30, stage 2): "no lineup exists before 2013" is
+false.** It was true of the vendor's *snapshot* and was read, here and in item 26,
+as a fact about *Transfermarkt*. It is not. The vendor simply never ran the
+lineups crawler for season 2012 — there is no `2012/game_lineups.json.gz` in their
+raw data at all, while every season from 2013 has one. An 8-game sample across 8
+competitions (EFL Cup, Copa del Rey, Liga Portugal, four super cups) returned
+**complete team sheets for every one**: 11 starters and a full bench on both
+sides.
+
+So the premise of this item's opening paragraph — "no career curve can honestly
+begin earlier ... Iniesta's line starts at 29" — is a limit of what was scraped,
+not of what exists. Pre-2013 depth is **available**, and with it the fix for item
+**28**'s Messi hypothesis, which rests entirely on his 2008–2012 peak being
+unreachable. Item 30's dial C is therefore a real project rather than a hopeful
+one, and [ADR 0010](../docs/adr/0010-scoring-window.md)'s scoring window will need
+revisiting when it lands, since its 2015-07-01 start was chosen against a data
+set that began in 2013.
+
+Still untested, and not to be assumed from this: how far back the team sheets go.
+2012 is proven; 2008 is not. The same 8-game probe answers it for any season at a
+cost of about a minute, and should be run before any season range is committed to.
+
 ## 16. A prior for unrated players (the cup-minnow inflation)
 
 **Why (measured 2026-07-21):** 2,501 of the 3,274 clubs in the Transfermarkt
@@ -3578,3 +3600,97 @@ from 35,679 to 38,349).
 `DataFiles.SNAPSHOT` is back on the original vendor file; the widened rebuild sits
 beside it as `transfermarkt-datasets-widened.duckdb`. The switch happens when the
 backfill is complete, not per stage, so ratings do not churn mid-project.
+
+### Stage 2 in flight (2026-07-30) — and a second breach, caused by the monitor
+
+**The finding that outgrew the stage.** An 8-game sample across 8 competitions
+proved **2012 matches have complete team sheets on Transfermarkt** — 11 starters
+and a full bench on both sides, every one. Item 15's "no lineup exists before
+2013" was a fact about the vendor's *scrape*, not about the source, and is
+corrected in that item. Consequences: dial C is a real project, item **28**'s
+Messi hypothesis becomes testable, and [ADR 0010](../docs/adr/0010-scoring-window.md)'s
+window will need revisiting when pre-2013 data lands. **How far back sheets go is
+untested — 2012 is proven, 2008 is not**, and the same 8-game probe answers it for
+any season in about a minute. Run it before committing to a season range.
+
+Corrected sizing: 2012's raw file holds **6,036 games**, not the 3,514 quoted at
+grill time (that was calendar-year; the *season* runs Aug 2012–May 2013, so it
+also fills part of calendar 2013, where coverage is only 3,458 of 5,679). So
+~12,072 pages, **~7.5 hours**, not the ~2 the grill assumed.
+
+**A second unthrottled episode, and this one was caused by the monitoring.**
+`spine-status.sh` detected runs by matching *driver script names* —
+`acquiring/transfermarkt-scraper.py|stage1-inner` — and stage 2's driver was
+`stage2-inner.sh`, matching neither. It reported `NOT RUNNING` for a healthy
+scrape. That verdict was believed over the log, which showed pages being crawled
+seconds earlier; WSL's `who -b` was then read as evidence of a VM restart (its
+boot time is unreliable and reset); and a **second scrape was launched alongside
+the first** — two crawlers, two requests a second, for about four minutes before
+`ps -eo lstart` showed both processes and the mistake.
+
+Fixed at the root in `scripts/spine-status.sh`: it now detects on **`tfmkt`
+itself**, never on driver names (the crawler is the thing doing the work; a list
+of script names goes stale the moment a stage adds one), it **counts crawlers and
+leads with a warning if there is more than one**, because concurrent scrapes *are*
+the breach and nothing was watching for them, and it reports chunk progress. The
+generalisable lesson: when a monitor and the underlying data disagree, the monitor
+is the more likely liar — especially a monitor written that morning.
+
+**Scraping is now resumable**, which stage 3's ~50 hours needs regardless.
+`scripts/scrape-chunked.sh <asset> <season> <parents> [chunk_size]` splits the
+parent list, scrapes chunk by chunk, and **skips any chunk that already has an
+output file**, so re-running it resumes. Each chunk is written to `.part` and
+renamed only on success, so a half-written file can never be mistaken for a
+finished one — that rename is the whole basis of the resume. It deliberately does
+**not** merge: every failure on this pipeline has been in the merge, and a merge
+must never be able to cost a scrape.
+
+**State at handoff:** stage 2 running as 31 chunks of 200 games
+(`~/spine/scrapes/game_lineups-2012-chunks/`), ETA ~20:30. When it finishes:
+
+    python3 scripts/merge-scrape.py game_lineups 2012 ~/spine/scrapes/game_lineups_2012.jsonl.gz
+
+then rebuild and produce **the reconciliation report** — the reason stage 2 comes
+before stage 3: for each of the ~2,337 released 2012 matches that now has a real
+vendor team sheet, how many of the names agree. Nothing is changed automatically
+(ADR 0009's 2026-07-29 amendment: the sidecar still wins, disagreement is
+*reported*), but it grades the appearances-based reconstruction that 4,573 bulk
+releases rest on, for the first time ever.
+
+### Reading order for a fresh context (item 30)
+
+CLAUDE.md → CONTEXT.md → [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md),
+**2026-07-29 amendment** (politeness, and the no-override/report rule) → this item
+from the top → items 15 (corrected), 26 and 28.
+
+**The environment**, none of which is in this repo:
+
+- WSL distro **Ubuntu** (24.04, Python 3.12.3) — *not* the default `Ubuntu-20.04`.
+  Always `wsl -d Ubuntu`.
+- Vendor pipeline at `~/spine/transfermarkt-datasets`, pinned to commit
+  `59fa295c`, Poetry venv, raw data pulled from a **public** DVC remote.
+- Scrapes at `~/spine/scrapes`, logs at `~/spine/logs`.
+- `C:\Users\dockx\.wslconfig` sets `memory=24GB`. Not load-bearing — the real fix
+  for the dbt OOM was DuckDB's own `threads: 4` — but harmless and kept.
+
+**The four scripts in `scripts/`, and why each exists:**
+
+| script | purpose |
+|---|---|
+| `throttle-scraper.py` | pins 1 req/s across **all five** crawler entry points; `--check` fails unless every one is patched |
+| `patch-acquire.py` | four vendor fixes: two JSON casts, keep-scrape-on-merge-failure, scrapes out of `/tmp` |
+| `scrape-chunked.sh` | the resumable scrape |
+| `merge-scrape.py` | merges a preserved scrape; re-execs itself under the venv interpreter |
+| `spine-status.sh` | is it running, is it fetching, how far along, and **are there two of them** |
+| `compare-snapshots.sql` / `compare-ratings.sql` | the reproduction gate, split rating-bearing vs label columns |
+
+**Both patch scripts must be re-run after any vendor update** — Poetry reinstalls
+the scraper from git and silently restores the unthrottled original.
+
+**Habits this stage bought the hard way.** On this pipeline, *absence of output is
+never evidence*: buffering has hidden the truth four times — `gzip` making a
+healthy scrape look stalled, the vendor piping crawler stderr so the log froze for
+hours, `os.execve` discarding a `print` before a re-exec, and a dying process
+flushing its stderr buffer minutes after it was declared dead. Verify a rate limit
+by **enumerating entry points**, never by timing one crawler. And sample-test a
+merge the way the *job* invokes it, not the way that is convenient.
