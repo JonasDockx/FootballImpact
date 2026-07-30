@@ -3379,3 +3379,202 @@ invariant that must never drift was already asserted beside it — the search's
 count and the list's length have to agree. Worth noting as a shape: a fixture
 pinned to a number the user is actively trying to change will keep breaking, and
 every club-scoped test carries that property. 222 green after the fix.
+
+### Stage 1 launched (2026-07-29), and the grill's timings were optimistic
+
+Throttle applied and **verified behaviourally** before anything was scraped, not
+just applied and assumed: ten competition pages took 274 s, and Crawlee's own
+statistics report `requests_finished_per_minute 37`, `retry_histogram [21]` (no
+retries), `request_avg_finished_duration 1.52s`. A bare `curl` gets HTTP 200 in
+0.25 s, so nothing is being blocked or soft-throttled at Transfermarkt's end.
+
+**Real throughput is ~40 requests/minute, not the 60 the rate cap allows.** With
+concurrency pinned at 1, each request occupies ~1.5 s of wall clock, so the
+serialisation binds before the rate limit does. Decision 3's estimates were made
+on 60/min and are corrected here:
+
+| | grill estimate | measured |
+|---|---|---|
+| stage 1 (2023 probe, ~19,000 requests) | one night | **~8 hours** |
+| stage 3 (eleven seasons, no `appearances`) | ~30 hours | **~50 hours** |
+
+Also corrected: a per-competition crawl is **not one request**. The clubs crawler
+issues 21 for one competition — the competition page plus one per club — which is
+what made the first throttle test look 27× slower than it was.
+
+**Two operational facts worth keeping.** The scrape must be launched with
+`setsid`, not merely `nohup`: when the launching `wsl -e bash …` command exits,
+WSL tears the session down and a nohup'd child dies with it — observed, the first
+attempt wrote its header and not one line more. And
+`scripts/throttle-scraper.py --check` is wired as a **precondition** of the run
+script, which refuses to scrape if the patch is absent; poetry reinstalls the
+scraper from git, so the unthrottled original can come back silently and an
+accidental 19,000-request burst is exactly what must never happen.
+
+### Stage 1 attempts 1 and 2 (2026-07-29/30) — three crashes, four vendor bugs, one breach
+
+Stage 1 did not complete in one night. The record is kept in full because every
+failure was in the *merge* — a step taking seconds, with no network — destroying
+or blocking hours of throttled scraping that had already succeeded.
+
+**Attempt 1 (18:26–17:24, lost).** `clubs` merged (291 records). `players`
+scraped 11,567 profiles over 3h42m and then died in the merge:
+
+    ConversionException: Malformed JSON at byte 0. Input: "http://instagram.com/ivakhnov_7"
+
+`social_media` is a **list** of URLs. Where the existing raw file has the column
+all-null DuckDB infers JSON; the new scrape has `VARCHAR[]`; `UNION ALL BY NAME`
+then reads a bare URL as JSON and fails. The vendor's `VARCHAR_CASTS`/`JSON_CASTS`
+tables exist for this exact family and do not list the column — their own runs
+never scraped a player who had filled it in. **And the vendor's error handler
+`os.unlink`s the scrape before re-raising**, so 3h42m was deleted by an exception
+path. Fixed in `scripts/patch-acquire.py`: cast the column (safe beyond doubt —
+`social_media` is read by no dbt model, verified by grep across the project) and
+**keep the scrape on merge failure**, with `scripts/merge-scrape.py` to finish the
+job without re-scraping. The fix was proven *without* re-scraping, by replaying
+the crash on a copy with a one-record synthetic scrape carrying that same URL.
+
+**Attempt 2 (18:26–00:10, partly lost).** `clubs` and `players` both merged —
+`players.json.gz` 1.1M → 4.4M, 19,866 records, durable, and the `social_media`
+fix proven on live data. Then `appearances` died on a second column of the same
+family, `result`, a scoreline: `Input: "0:1"`.
+
+Two further defects surfaced with it, and both were mine rather than the vendor's:
+
+1. **The preserved scrape was lost anyway.** Patch 2 kept the file and logged its
+   path — into `/tmp`. WSL shuts an idle VM down and brings it back with an empty
+   `/tmp`; by morning the root device had changed `sdd` → `sdc` and every file in
+   `/tmp` was timestamped minutes old. 278,804 appearance rows gone. Patch 4 now
+   writes scrapes to `~/spine/scrapes`.
+2. **`appearances` ran unthrottled — a breach of ADR 0009's pinned rate.** It
+   scraped 278,804 records in **5m44s**: ~11,600 requests at roughly **34 per
+   second**. `throttle-scraper.py` patched `create_crawler()`, and five crawlers
+   never call it —`appearances` builds its own `HttpCrawler`, and `countries`,
+   `national_teams` and `tournament_editions` their own `ParselCrawler`. The
+   verification that "proved" the throttle had timed the `clubs` crawler, which
+   *does* use `create_crawler()`, so it demonstrated the rule only for the
+   crawlers already obeying it — a check that produced confidence without
+   evidence. The script now patches all five entry points, `--check` reports each
+   one, and it **exits non-zero unless every one is covered** so a run script's
+   precondition catches it. (`confederations.py` was in the first draft of that
+   list and removed: it issues no HTTP request at all, just prints five hardcoded
+   hrefs. It was there because the survey inferred "self-building" from the
+   absence of `create_crawler()`, which is not the same thing.)
+
+**Attempt 3 (05:13, running), reordered on the user's call.** `appearances` is
+**deferred rather than re-scraped**: throttled it is ~5 hours, its only role is a
+fallback for matches with *no* team sheet, and `game_lineups` — which is what
+stage 1's gate measures — had not run at all. So games + game_lineups go first
+and the appearances question is answered with coverage numbers in hand. Decision 3
+already leaned toward dropping it.
+
+Also on the user's call, **each remaining asset's merge is sample-tested before
+its long run**: one competition's `games` (228 records) and five games'
+`game_lineups` scraped, then merged into *copies* of the real files. Both passed,
+in about ten minutes — the cost of catching either of the night's crashes before
+it cost hours. The sample also produced the first real signal for the gate: all
+five K League 2023 games came back **11 starters + 9 substitutes on both sides**.
+
+Attempt 3 drives `tfmkt` directly rather than through `--asset all`, for three
+reasons worth keeping: `--asset all` would redo ~11 hours of work already done or
+deliberately deferred; `--asset game_lineups` with a `--competitions` filter
+silently runs **unfiltered**, because its parent is `games` rather than
+`competitions`, and would scrape lineups for every 2023 fixture in the vendor's
+file; and the scrape files then persist, so a merge failure costs a re-merge.
+A side benefit: routing the crawler's stderr to the log instead of into a pipe
+means this run reports progress **live**, which no vendor-driven run did —
+`scripts/spine-status.sh` now surfaces it.
+
+**A fourth failure, and the last of the night: the games merge died on
+`ModuleNotFoundError: No module named 'duckdb'`.** Not a data problem at all — the
+inner script called `merge-scrape.py` with the *system* python3, while the sample
+test had called it under `poetry run`. The sample proved the merge logic and not
+the way the job actually invokes it. `merge-scrape.py` now **re-execs itself under
+the venv interpreter** when duckdb is missing, so it cannot depend on a caller
+remembering. Cost: nothing — the scrape was preserved in `~/spine/scrapes` (patch
+4 working as designed) and re-merged in seconds, 10,400 records.
+
+The re-exec then appeared *not* to run, because `print()` to a redirected log is
+block-buffered and `os.execve` discards the buffer with the process image;
+`flush=True` fixes it. That is the **third** time buffering has hidden the truth
+on this stage — `gzip` making a healthy scrape look stalled, the vendor piping
+crawler stderr so the log looked frozen for hours, and now this. Worth carrying
+into stage 3 as a habit: on this pipeline, absence of output is never evidence.
+
+### Stage 1 outcome (2026-07-30) — DONE, gate answered decisively
+
+Finished 11:59:42, having scraped `games` (4,448 records, 1h17m) and
+`game_lineups` (8,896 pages, 5h29m, 3 failed), both merged.
+
+**The gate: 99.9% team-sheet coverage.** 4,205 of 4,208 games in the 18
+competitions' 2023 season carry a lineup; **sixteen of the eighteen are at exactly
+100.0%**, and the three misses are precisely the three failed requests. So
+`appearances` — whose only role is a fallback for matches with *no* team sheet —
+is **dropped**, confirming decision 3 with evidence rather than expectation. That
+removes ~60 hours from the project and makes attempt 2's lost 278,804 rows moot.
+
+**`players` is dropped from stage 3 as well (user, 2026-07-30), against decision
+3's plan.** Decision 3 kept it on the grounds it was cheap (~3,800 requests) and
+carried the DOBs item 21 needs. Measured, it is **11,598 requests, ~5.5 hours per
+season** — ~60 hours across the backfill, and nearly as expensive as the lineups
+themselves, because the crawler fetches one profile page *per player* on top of
+one squad page per club. Nothing the rating engine reads comes from it: lineups
+carry names and positions. Its unique contribution is dates of birth, which reach
+only the age curve. So stage 3 scrapes **`games` + `game_lineups` only**, and a
+DOB backfill becomes its own targeted job later, aimed at exactly the players
+found to lack one.
+
+**Two competitions returned nothing, both legitimately.** `ARG1` is
+`torneo-apertura`, which exists on Transfermarkt only from 2024 (Argentina's
+Apertura/Clausura restructure), so season 2023 is not a meaningful request. `AFCN`
+is a national-team tournament, and the vendor scrapes those through a separate
+`tournament_games` asset driven by `data/tournament_editions.json`, not the
+seasonal crawler. Stage 3 should expect the same from both.
+
+**The widening exposed a pre-existing hole in the vendor's data.** `dbt build`
+went from 0 errors to 2, and the meaningful one is
+`every_first_tier_league_has_games`:
+
+    JAP1  j1-league  season 2024  actual 296  clubs 20  expected 380
+
+The vendor's own J1 League 2024 scrape is **84 games short**. It had never failed
+because the test only checks leagues with more than one season of data, and JAP1
+had exactly one — our scrape gave it a second and switched the test on. Our JAP1
+2023 is complete (380 games, 20 clubs, 380 expected). The other failure,
+`too_many_missings_players_market_value_in_eur`, is market value on players from
+smaller leagues and reaches no rating. **Neither was caused by the widening; one
+was revealed by it.**
+
+Noted for stage 3: **season labels are not calendar-aligned across countries.**
+Japan's `season = 2023` covers matches from 2024-01-03 to 2024-12-08. Cosmetic
+here — the engine orders matches by *date* and never reads the label — but "season
+2023" means different things in different competitions.
+
+**The replay, as the staging requires after each stage:**
+
+| quantity | before (stage 0) | widened |
+|---|---|---|
+| games in the file | 88,958 | **93,166** (+4,208) |
+| matches replayed | 85,050 | **89,255** (+4,205) |
+| lineup rows | 3,179,016 | 3,347,899 |
+| base scoring rate | 0.01531 | **0.01532** |
+| league anchor `h` | 2.32 | 2.31 |
+| held matches | 3,908 | **3,911** (+3, the failed fetches) |
+| reachable by club | 3,908 of 3,908 | **3,911 of 3,911, 0 unreachable** |
+| peak heap | 1,394 MiB | 1,879 MiB of 8,116 |
+| log-loss | 0.6503 | 0.6513 |
+
+Every census figure closes: +4,208 games, of which +4,205 rate and +3 are Held
+for `no lineups`. The base rate and the anchor barely move, which is the reassuring
+answer — eighteen new leagues do not shift the population's scoring physics.
+
+**Log-loss 0.6513 vs 0.6503 is NOT a regression** and must not be read as one:
+different population, and knobs still tuned on the old one. Decision 5 fixed the
+honest comparison — champion against champion on the *old* match subset — and that
+is stage 4's business. The leaderboard is recognisably the same with Brazilian and
+Saudi sides now appearing (Fernandinho at Atlético Paranaense, Mané's minutes up
+from 35,679 to 38,349).
+
+`DataFiles.SNAPSHOT` is back on the original vendor file; the widened rebuild sits
+beside it as `transfermarkt-datasets-widened.duckdb`. The switch happens when the
+backfill is complete, not per stage, so ratings do not churn mid-project.
