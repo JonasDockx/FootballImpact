@@ -3657,6 +3657,132 @@ vendor team sheet, how many of the names agree. Nothing is changed automatically
 *reported*), but it grades the appearances-based reconstruction that 4,573 bulk
 releases rest on, for the first time ever.
 
+### Stage 2 outcome (2026-07-30) — DONE, and the reconstruction is vindicated
+
+The scrape finished 18:43:51, all 31 chunks, **0 failed requests**, 6,035 of the
+6,036 games in the parent file. Merged into
+`data/raw/transfermarkt-scraper/2012/game_lineups.json.gz`, a file that had never
+existed. The rebuild is `transfermarkt-datasets-2012.duckdb`; `DataFiles.SNAPSHOT`
+is back on the original vendor file, as at stage 1 — the cut-over happens once,
+when the backfill is complete.
+
+**The 2012 season, every game accounted for.** Nothing here is a residual:
+
+| | games |
+|---|---|
+| season-2012 games in the curated table | **5,700** |
+| — released in the sidecar, so the sidecar still wins | 4,392 |
+|   — of which now *also* carry a vendor sheet → **the reconciliation set** | **4,391** |
+|   — no vendor sheet: the single scrape miss, game 2224875 (BE1, OHL v Lierse) | 1 |
+| — not released | 1,308 |
+|   — gained a real sheet | 1,306 |
+|     — now replay | **1,276** |
+|     — still Held: 27 `XI is not 11`, 3 `no starting goalkeeper` | 30 |
+|   — scraped but the page carries no players at all, so still `no lineups` | 2 |
+
+The two empty pages are games 2223163 (UKR1, Volyn v Kryvbas) and 2251295 (IT1,
+Cagliari v Roma). Held falls 3,911 → 2,635, exactly the 1,276 above.
+
+Note the **336 games in the 2012 parent file that the curated table labels season
+2022/2023** — 6,036 = 5,700 + 336. They already had sheets from stage 1, and
+`base_game_lineups` de-duplicates with `row_number() over (partition by game_id
+order by season desc)`, so the 2023 directory wins and our records for them are
+ignored. Their 14,175 rows are untouched, and the scrape's own count for those
+games is 14,175 too — the two scrapes of the same pages agree exactly, which is a
+free determinism check nobody asked for.
+
+**The census, predicted from SQL before the rebuild and then reproduced** (decision
+5a). The only figure that missed was predicted before the two empty pages were
+known, and is off by exactly those two:
+
+| quantity | stage 1 | predicted | rebuilt |
+|---|---|---|---|
+| games | 93,166 | 93,166 | **93,166** |
+| game_lineups rows | 3,347,899 | 3,553,501 | **3,553,501** |
+| season-2012 games with a sheet | 0 | 5,699 | **5,697** (= 5,699 − 2 empty) |
+| game_events / appearances / players / clubs / competitions | — | unchanged | **unchanged** |
+
+Rating-bearing columns on all 93,166 shared games: **0 differing**. Lineup rows on
+games that already had a sheet: 3,347,899 before, **3,347,899 after** — the
+backfill adds and never disturbs.
+
+**The replay:**
+
+| quantity | stage 1 | with 2012 team sheets |
+|---|---|---|
+| matches replayed | 89,255 | **90,531** (+1,276) |
+| held matches | 3,911 | **2,635** (−1,276) |
+| reachable by club | 3,911 of 3,911 | **2,635 of 2,635, 0 unreachable** |
+| base scoring rate | 0.01532 | **0.01532** |
+| league anchor `h` | 2.31 | **2.31** |
+| venue | — | HOME 89,819 / AWAY 8 / NEITHER 704 |
+| peak heap | 1,879 MiB | 1,651 MiB of 8,116 |
+| log-loss | 0.6513 | 0.6511 windowed / 0.6518 whole |
+
+The base rate and the anchor do not move at all, which is the reassuring answer
+again. Log-loss moves 0.0002 even though **every new match is outside the scoring
+window** (grading starts 2015-07-01) — because 1,276 more matches of history feed
+the ratings that later matches are graded on. It is not a gate and must not be
+read as one; decision 5's champion-against-champion comparison is stage 4's job.
+
+### The reconciliation report (2026-07-30) — stage 2's gate
+
+For each of the **4,391** released 2012 matches that now has vendor ground truth,
+how many names agree. Produced by `scripts/reconcile-sidecar.py`, checked in beside the other item-30
+tooling so the next season's verdict is one command; detail per match in
+`FootballData/reconciliation-2012.csv`. Nothing was changed automatically
+(ADR 0009, 2026-07-29 amendment).
+
+| | all 4,391 | bulk reconstruction (4b-4) | earlier releases |
+|---|---|---|---|
+| matches | 4,391 | 4,339 | 52 |
+| starters agreeing | 96,588 of 96,602 — **99.99%** | 95,456 of 95,458 — **100.00%** | 1,132 of 1,144 — 98.95% |
+| matches with all 22 right, at the right club | **4,386 — 99.89%** | 4,337 — 99.95% | 49 — 94.23% |
+
+**The appearances-based reconstruction was right.** Stage 4b-4 bulk-released 4,573
+matches on a derivation nobody could check — "a starter is a listed player never
+subbed on" — and on the 4,339 of them now gradeable it recovers the starting
+elevens **essentially perfectly**: two matches wrong by one player each. This is
+the single most valuable thing stage 2 bought, and it was the argument that
+justified the scope creep in decision 7.
+
+**Only three of the five imperfect matches are errors at all.** The two worst
+(2262449 FCSB v Molde, 2282712 Córdoba v Barcelona) name the *same footballers* —
+Steenslid, Georgievski, Ekpo, Stamnestrø, Söderberg, Johansen, Aguilar, Fuentes,
+López Garai, Gálvez, Sánchez — under the editor's hand-minted
+`1000000000+` ids from `manual_players`, because the vendor's `players` table did
+not carry them. They are an **id-identity artifact, not a lineup error**, and
+`manual_players` even records the real Transfermarkt URL for four of them. The
+whole disagreement is exactly 14 starters — **11 synthetic ids + 3 genuine
+errors** — which is why 96,588 of 96,602 agree. (At squad level 17 sidecar names
+are absent from the vendor sheet; the extra 3 are synthetic ids appearing as
+substitutes.)
+
+The three real ones, each a single player, all a plausible starter-for-starter
+swap: 2224135 (FR1, Béria for Bonnart), 2242962 (ES1, Karabelas for Dudka),
+2244378 (ES1, Iñigo Martínez for Dani Estrada). **Genuine reconstruction error:
+3 players in 96,602, or 0.003%.** These are the matches to take through the editor
+one at a time; so is replacing the 14 synthetic ids with the real ones.
+
+**Squad membership agrees on only 75.39%, and that is correct behaviour.** The
+sidecar carries 120,923 names against the vendor's 160,370; the 39,464-row gap is
+**unused substitutes**, who the appearances record never names because they never
+played. They contribute zero minutes and reach no rating. The number to read is
+the starting-XI row, not this one.
+
+**Two operational notes.** `dbt build` reported **3** errors against stage 1's 2,
+and the new one is
+`expect_table_row_count_to_be_between_game_lineups_3500000__81000` — the vendor's
+own upper bound on `game_lineups`, which our 3,553,501 rows exceed. It is
+confirmation, not breakage, and stage 3 will exceed it much further. And
+`WorklistReaderTest` failed against the widened results DB, which is **the stage 2
+result showing up in a test**: its fixture is Jan Vertonghen, whose *appeared* rung
+was described in the comment as "Spurs 2012/13, the pre-team-sheet season". That
+season now has team sheets, so the rung is empty and `appeared().size() >= 1` no
+longer holds. The suite passes on the original snapshot; the assertion encodes a
+fact about the world that dial A is deliberately destroying, and it will have to be
+re-cut when the backfill lands rather than patched now.
+
 ### Reading order for a fresh context (item 30)
 
 CLAUDE.md → CONTEXT.md → [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md),
@@ -3683,6 +3809,7 @@ from the top → items 15 (corrected), 26 and 28.
 | `merge-scrape.py` | merges a preserved scrape; re-execs itself under the venv interpreter |
 | `spine-status.sh` | is it running, is it fetching, how far along, and **are there two of them** |
 | `compare-snapshots.sql` / `compare-ratings.sql` | the reproduction gate, split rating-bearing vs label columns |
+| `reconcile-sidecar.py` | grades a season's releases against a newly arrived vendor team sheet (stage 2's gate); reports, never overwrites |
 
 **Both patch scripts must be re-run after any vendor update** — Poetry reinstalls
 the scraper from git and silently restores the unthrottled original.
