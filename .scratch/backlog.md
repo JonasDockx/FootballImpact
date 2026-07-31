@@ -3813,6 +3813,71 @@ fixture scrape that dial A never needed — every season 2013-2025 already had i
 `tfmkt games` + `tfmkt game_lineups` around an existing parent file, and the
 reusable part (sample across the season, never the head) is recorded above.
 
+### Stage 3 in flight (2026-07-30, launched 21:31) — the runner, and two bugs it found
+
+Stage 3 is ~70 hours on a desktop that will be stopped, so the run is built to be
+interrupted: `scripts/backfill.sh` walks the twenty-two asset-seasons (2022 down
+to **2012, newest first** — a half-done backfill should own the seasons that
+overlap the scoring window) and `scrape-chunked.sh` does each one chunk at a
+time. `touch ~/spine/STOP` finishes the current chunk and exits; Ctrl-C and power
+loss cost the same one chunk. Both stop paths were **proved before any scraping**
+(rc=1 at launch, rc=3 mid-loop, `pgrep` confirming no crawler ever started).
+
+**One competition per chunk for `games`**, not the default 200: the parent list is
+only 18 long, so the default would have made the whole ~2h fixture scrape a
+single all-or-nothing unit. Worst case at risk is ~12 min (`games`, and the spread
+is wide — AFCN took 2 seconds, a 495-page competition took 11 minutes) or ~3.5 min
+(`game_lineups`, where ~80% of the time goes).
+
+**Bug 1 — the "produced nothing" check never worked, and would have deadlocked
+every season.** It tested output file size, but `gzip` of no input still writes a
+valid ~20-byte member, so `-s` is true either way. Worse, at one competition per
+chunk the *legitimately* empty chunks — AFCN (scraped via a different asset) and
+pre-2024 ARG1 — would have been "left for retry" forever and no season could ever
+report complete. Now decided by the crawler's own exit status via `PIPESTATUS`,
+with an explicit `crawler OK but empty - not covered this season` log line. It
+fired correctly on its first real chunk.
+
+**Bug 2 — `merge-scrape.py` assumed its working directory.** The vendor's
+`read_config()` opens `'config.yml'` relative to cwd. Every manual merge so far
+happened to run from inside the repo; `backfill.sh` did not, so season 2022's
+merge died with `FileNotFoundError: 'config.yml'` **after both its scrapes had
+finished**. The script now `os.chdir(REPO)`s itself (resolving the scrape path
+first). Being run from the wrong place is exactly the avoidable failure that
+script exists to absorb, so it fixes its own cwd rather than trusting callers.
+Fix verified by merging from `cwd=/`.
+
+**Bug 3, the dangerous one — chunk-directory collision between stages.** Stage 2
+scraped `game_lineups` season 2012 from one parent list; stage 3 scrapes the same
+asset and season from the eighteen competitions. Both landed in
+`game_lineups-2012-chunks`. The resume rule is deliberately dumb — "this chunk has
+an output file, skip it" — so stage 3 would have found stage 2's 31 finished
+chunks and its `.split-done`, declared season 2012 complete, **scraped none of the
+eighteen competitions, and logged success.** A silently incomplete backfill that
+would only have surfaced as a wrong census hours later. `scrape-chunked.sh` gained
+an optional `tag` argument namespacing the chunk dir, combined output and log;
+`backfill.sh` passes `s3`. Stage 2's untagged artefacts are left exactly as they
+are — the rule that a stage's evidence is never rewritten applies to scrape
+artefacts too.
+
+**A misdiagnosis worth recording.** WSL reported the `Ubuntu` distro *Stopped* and
+`wsl -d Ubuntu` failed three times with `HCS_E_CONNECTION_TIMEOUT`, which was
+first read as a repeat of stage 2's mid-run VM death. It was not: the driver had
+**exited by design** on the failed merge, which left nothing running, and WSL
+shuts an idle distro down. The distro stopping was the *consequence* of the run
+ending, not its cause. A watchdog was proposed on the strength of the wrong
+diagnosis and then dropped. `wsl --shutdown` and a restart cleared the timeout.
+
+**Season 2022 is done and banked:** 4,224 fixtures, **4,224 team sheets — 100%
+coverage**, the same shape as 2023's 4,205/4,208. `games.json.gz` 6,042 → 10,266
+and `game_lineups.json.gz` 5,823 → 10,047, both exactly +4,224.
+
+**Cost, corrected again.** Stage 1's note said ~50 hours for eleven seasons.
+Measured at ~43 requests/minute, season 2022 took roughly 2h of fixtures and 5–6h
+of team sheets, so **~70 hours** is the working figure. Note that stage 3 pays for
+`games` in every season, which dial A never did — the fixture lists for 2013+
+were already on disk.
+
 ### Reading order for a fresh context (item 30)
 
 CLAUDE.md → CONTEXT.md → [ADR 0009](../docs/adr/0009-transfermarkt-as-the-rating-spine.md),

@@ -18,6 +18,26 @@ LOG=$(ls -t "$HOME"/spine/logs/*.log 2>/dev/null | head -1)
 echo "time: $(date '+%H:%M:%S')"
 echo "log:  $(basename "$LOG")"
 
+# Stage 3 spans many nights and twenty-two asset-seasons, so "is it running" is
+# only half the question - the other half is how much of the backfill is done.
+# Printed whether or not a crawler is up, because that is exactly what you want
+# to know after stopping it.
+[ -f "$HOME/spine/STOP" ] && echo "STOP FLAG IS SET - the run will halt after the current chunk"
+if ls "$HOME"/spine/scrapes/game_lineups-*-chunks > /dev/null 2>&1; then
+  echo
+  echo "stage 3 progress (chunks complete / total, per asset-season):"
+  for d in "$HOME"/spine/scrapes/*-chunks; do
+    t=$(ls "$d"/chunk_*.json 2>/dev/null | wc -l)
+    c=$(ls "$d"/chunk_*.out.jsonl.gz 2>/dev/null | wc -l)
+    name=$(basename "$d" -chunks)
+    # The merge marker is named for the same asset-season-tag triple as the
+    # chunk directory, so it is exactly ".merged-<name>" and needs no parsing.
+    merged=""
+    [ -f "$HOME/spine/scrapes/.merged-$name" ] && merged="  merged"
+    printf '  %-28s %4d/%-4d%s\n' "$name" "$c" "$t" "$merged"
+  done
+fi
+
 # Detect on `tfmkt` itself, never on the name of whichever script is driving it.
 # The first version of this listed driver names - and stage 2's driver was not on
 # the list, so it reported NOT RUNNING for a perfectly healthy scrape. That was

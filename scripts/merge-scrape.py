@@ -80,9 +80,20 @@ def main() -> None:
     # Before anything else: this must run under an interpreter that has duckdb.
     reexec_in_venv()
 
-    scrape = pathlib.Path(args.scrape)
+    # Resolve before the chdir below, so a relative path on the command line
+    # still means what the caller meant.
+    scrape = pathlib.Path(args.scrape).resolve()
     if not scrape.exists():
         sys.exit(f"scrape file not found: {scrape}")
+
+    # The vendor's read_config() opens 'config.yml' relative to the working
+    # directory, so the merge only works when run from inside the repo. Every
+    # manual merge so far happened to be, and backfill.sh was not - which cost
+    # season 2022's merge on 2026-07-30 after both its scrapes had finished.
+    # Being run from the wrong directory is precisely the kind of avoidable
+    # failure this script exists to absorb, so it fixes its own cwd rather than
+    # relying on callers.
+    os.chdir(REPO)
 
     target = REPO / "data" / "raw" / "transfermarkt-scraper" / args.season / f"{args.asset}.json.gz"
     if not target.parent.is_dir():

@@ -5,4 +5,5 @@ CLAUDE.md
 *.csv
 .~lock*
 INGESTION-HANDOVER.md
+STAGE3-CHEATSHEET.md
 target/
