@@ -171,6 +171,29 @@ the age curve that is an artefact of where the data starts. Derived per run
 matches reclassifies it by itself.
 _Avoid_: cold start — that names the model's condition, not the career's
 
+**Bridge**:
+A match whose two sides are rated in different pools — a cross-division cup tie,
+a European fixture, a national-team match. Rating levels are only comparable
+across pools through bridges: a pool that plays only itself is zero-sum and its
+average is pinned near 0 whatever its true level. A division added without its
+bridges therefore floats at a false average, which is why width is not purely
+additive — some additions make the ratings worse (see #9).
+_Avoid_: link, connector
+
+**Island**:
+A pool with too few bridges for its level to be established, so its players are
+priced against each other rather than against football. Scotland is the measured
+example: it gave Scott Brown +122.9 index points that the rest of his career
+took only 35.0 back.
+
+**Spine width**:
+Which competitions and which seasons the spine covers — the finish line for the
+data layer, deliberately frozen rather than open-ended (see
+[ADR 0013](docs/adr/0013-spine-width.md)). Distinct from the spine itself, which
+is *which source* a run draws from; width is *how much of it*.
+_Avoid_: coverage — that names how complete a competition-season is, not which
+ones are in
+
 **Scoring window**:
 The stretch of a run over which predictions are *graded*, which need not be the
 stretch that is *replayed*. Everything is always replayed, in date order, every
