@@ -1,4 +1,15 @@
-# GoalImpact backlog
+# GoalImpact backlog — FROZEN ARCHIVE
+
+> **Superseded 2026-07-31 by GitHub issues on JonasDockx/FootballImpact.**
+> Item *N* below is issue **#N** there. Do not append here; this file is kept
+> for history only, and the issues are the tracker. See
+> [docs/agents/issue-tracker.md](../docs/agents/issue-tracker.md).
+>
+> Each item's head became the issue body and each dated section became a
+> comment, in order — re-derivable from this file with
+> `python scripts/split-backlog.py`. Section *order* here was rough priority;
+> that ordering did not survive the move.
+
 
 Future work, not yet scheduled. Captured during the design grill.
 

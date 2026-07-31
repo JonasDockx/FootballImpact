@@ -1,27 +1,61 @@
 # Triage Labels
 
-**This repo has no labels.** The issue tracker is
-[`.scratch/backlog.md`](../../.scratch/backlog.md) — numbered sections in a
-markdown file — so there is nothing to attach a label to. Status is expressed as
-prose inside the item; see the status vocabulary in
-[issue-tracker.md](./issue-tracker.md).
+Labels on [`JonasDockx/FootballImpact`](https://github.com/JonasDockx/FootballImpact)
+issues. Created 2026-07-31 with the migration from `.scratch/backlog.md`; before
+that this repo had no labels and status was prose inside each item.
 
-The skills speak in terms of five canonical triage roles. Map them onto the
-backlog like this:
+## Canonical triage roles
 
-| Role in the skills | How it appears here |
+The skills speak in terms of five canonical state roles and two category roles.
+This repo uses the default strings — label name equals role name, so no mapping
+is needed:
+
+| Role in the skills | Label here |
 |---|---|
-| `needs-triage` | A new item with a `**Why**` and nothing else. Untouched since it was filed. |
-| `needs-info` | A `**Data availability — CAUTION:**` note, or an open question in the body. The item cannot proceed until it is answered. |
-| `ready-for-agent` | `**Grill done (date), decisions in ADR NNNN … Ready to implement.**` — designed to the point where the work is mechanical. |
-| `ready-for-human` | Anything not yet grilled. In this repo design is interviewed before it is built, and the author hand-types the implementation. |
-| `wontfix` | `**Stage N run — REJECTED (date)**` or `**Superseded (date) by …**`. The item stays in the file as evidence; it is never deleted. |
-
-When a skill asks to apply a label, append the corresponding prose to the item
-instead, dated, following the house style. When a skill asks to *filter* by a
-label, read the file and match on these phrasings.
+| `needs-triage` | `needs-triage` |
+| `needs-info` | `needs-info` |
+| `ready-for-agent` | `ready-for-agent` |
+| `ready-for-human` | `ready-for-human` |
+| `wontfix` | `wontfix` |
+| `bug` | `bug` |
+| `enhancement` | `enhancement` |
 
 Note that `ready-for-agent` is rarer here than in a typical repo: the working
-convention is that non-trivial design is grilled first and the resulting code is
-written by hand, so most items reach "designed" without ever becoming
-autonomous work.
+convention is that non-trivial design is grilled first, so most items reach
+"designed" without ever becoming autonomous work.
+
+## House status labels
+
+The old backlog expressed status as prose. Those phrasings became labels so the
+same states stay queryable — they are **this repo's vocabulary**, additional to
+the canonical roles above, not a replacement for them:
+
+| Label | Old backlog phrasing | Meaning |
+|---|---|---|
+| `status:done` | `— DONE` in the heading | Shipped, gate passed |
+| `status:rejected` | `**Stage N run — REJECTED (date)**` | Tried, measured, lost; kept as evidence |
+| `status:superseded` | `**Superseded (date) by …**` | Replaced; body left for the record |
+| `status:blocked` | `**Prerequisite:** item N` | Blocked on another issue |
+
+`status:done`, `status:rejected` and `status:superseded` all sit on **closed**
+issues — the label says *why* it closed, which a bare closed state does not.
+`status:blocked` sits on open issues; prefer a native dependency edge (see the
+Wayfinding section of [issue-tracker.md](./issue-tracker.md)) once the blocker
+is expressed that way, and drop the label when you do.
+
+An item with a `**Why**` and nothing else is `needs-triage`. An item with an
+open `**Data availability — CAUTION:**` note or an unanswered question is
+`needs-info`.
+
+## Wayfinder labels
+
+Used by `/wayfinder`; see the Wayfinding operations section of
+[issue-tracker.md](./issue-tracker.md).
+
+| Label | Meaning |
+|---|---|
+| `wayfinder:map` | The map issue — the canonical artifact of a wayfinding effort |
+| `wayfinder:research` | Child ticket: a question answered by reading or probing |
+| `wayfinder:prototype` | Child ticket: a question answered by building a throwaway |
+| `wayfinder:grilling` | Child ticket: a question answered by interviewing the user |
+| `wayfinder:task` | Child ticket: a question answered by doing the work |
