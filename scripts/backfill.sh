@@ -4,11 +4,18 @@
 #
 #   backfill.sh [first_season] [last_season]      # defaults 2022 down to 2012
 #
-# Detached, so closing the terminal does not end it (from Windows PowerShell):
-#   wsl -d Ubuntu -e bash -lc 'setsid nohup /mnt/c/Users/dockx/Documents/Programmeren/GoalImpact/scripts/backfill.sh >> ~/spine/logs/stage3-nohup.log 2>&1 < /dev/null & echo started'
-# Stop it:    wsl -d Ubuntu -e touch  /home/$USER/spine/STOP
-# Resume it:  wsl -d Ubuntu -e rm -f /home/$USER/spine/STOP   then launch again
+# Launch it from Windows PowerShell with the launcher, never by hand:
+#   powershell -File C:\Users\dockx\Documents\Programmeren\GoalImpact\scripts\spine-start.ps1
+# Stop it:    wsl -d Ubuntu -e touch  /home/$USER/spine/STOP   (or close the window)
 # Watch it:   wsl -d Ubuntu -e bash /mnt/c/.../GoalImpact/scripts/spine-status.sh
+#
+# NOT `setsid nohup ... &` inside `wsl -e bash -lc`. That was the documented
+# launch until 2026-07-31 and it silently does nothing on this machine: the
+# launching wsl.exe exits as soon as it prints `started`, the distro is torn down
+# with it, and the job is killed before it writes a byte. The launcher instead
+# holds one wsl.exe open in a minimised window for the whole run, and waits for
+# the crawler to appear before it claims to have started anything. See the header
+# of spine-start.ps1 for how that was measured.
 #
 # WHY A DRIVER. Stage 3 is ~70 hours of scraping and the machine running it is
 # somebody's desktop, not a server - it will be stopped, and it must lose almost
