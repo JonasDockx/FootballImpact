@@ -173,7 +173,7 @@ public class Main {
     //     over 80,471 matches, 2013-07-02 to 2026-07-06; 0.6508 whole replay.
     //   Transfermarkt 2026-08-01: 0.6503 (same knobs) over 85,050 matches,
     //     2012-07-09 to 2026-07-06; 0.6510 whole replay. Not an experiment
-    //     result - item 30 stage 3 widened the spine underneath the old
+    //     result - item 30 stage 3 is widening the spine underneath the old
     //     number, and #43's rule is that a champion belongs to a population,
     //     so the reigning model is simply re-run for a fresh baseline. The
     //     0.6502 line is kept because it is the last number belonging to the
@@ -182,6 +182,14 @@ public class Main {
     //     same 85,050 matches; 0.6488 whole replay. Item 16, and this one IS
     //     an experiment result - gated on bridge matches against the line
     //     above, which is its same-run baseline (ADR 0014).
+    //
+    // BOTH 2026-08-01 NUMBERS ARE MID-FLIGHT. Item 30 stage 3 was still
+    // scraping when they were measured - 2015 lineups in progress, seasons
+    // 2022 down to 2012, with more scraping after that - so 85,050 is a
+    // snapshot of a moving spine and not the finish line ADR 0013 pins. Every
+    // one of these lines is expected to be superseded by a re-measure on the
+    // wide spine; that is ADR 0014 rules 3 and 4, working as intended, and not
+    // a sign that anything here is wrong.
     private static final double CHAMPION = switch (SPINE) {
         case STATSBOMB -> 0.6259;
         case TRANSFERMARKT -> 0.6481;

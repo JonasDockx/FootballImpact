@@ -45,9 +45,14 @@ mechanism-on cell in exactly one thing.
 
 **3. A champion log-loss belongs to a population.** A widening resets the
 record: the reigning model is simply re-run for a fresh baseline, and every
-number quoted states its match count and date range. Item 16 landed while this
-was live — the spine had already moved from 80,471 to 85,050 matches under item
-30 stage 3, so 0.6503 and not the recorded 0.6502 was the number to beat.
+number quoted states its match count and date range. Item 16 landed in the
+middle of exactly that — item 30 stage 3 was *still scraping* while it was
+measured, having already carried the spine from 80,471 to 85,050 matches, so
+0.6503 and not the recorded 0.6502 was the number to beat, and 85,050 is
+itself a waypoint rather than a destination. **A number measured on a moving
+spine is still worth measuring**, provided it says so: the alternative is to
+stop deciding anything until the scraping finishes, and #43 chose the opposite
+deliberately when it cleared item 16 to build on today's spine.
 
 **4. After a widening: re-derive the constant, then re-gate the mechanism, one
 fix at a time.** A measured constant is measured on a population, so a wider

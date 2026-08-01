@@ -16,9 +16,14 @@
 -- both deliberate:
 --
 --   * it attaches transfermarkt-datasets-2012.duckdb and this attaches
---     transfermarkt-datasets.duckdb, which is DataFiles.SNAPSHOT. That file now
---     carries item 30 stage 3's backfill itself - 88,958 games from 2012 - so
---     the separate -2012 file is no longer where the wide spine lives.
+--     transfermarkt-datasets.duckdb, which is DataFiles.SNAPSHOT. Enough of
+--     item 30 stage 3 has been merged into DataFiles.SNAPSHOT for it to carry
+--     88,958 games back to 2012, which is why this reads it - but STAGE 3 IS
+--     STILL RUNNING (2015 lineups in flight on 2026-08-01, seasons 2022 down
+--     to 2012, and #30 has further scraping after that). So this file is a
+--     MOVING population, not a finished one: re-running this script on a later
+--     snapshot will not reproduce the numbers below, and by ADR 0014 rule 3
+--     that is correct behaviour rather than a bug.
 --   * league_clubs below matches ClubPools.java and that file's does not; see
 --     the note on it. TransfermarktLoader.LEAGUE_COMPETITIONS is the authority
 --     for that list and this is a copy of it - there is no way to share a

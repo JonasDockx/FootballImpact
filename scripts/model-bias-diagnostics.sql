@@ -19,6 +19,16 @@
 -- 85,050 matches, 2012-07-09 to 2026-07-06. Item 30 stage 3 is mid-flight, so
 -- re-running this after the spine moves will not reproduce the recorded
 -- figures - it will produce that run's figures, which is the point.
+--
+-- AND THE MODEL HAS MOVED TOO, not only the spine (2026-08-01). The results
+-- file now holds a run with item 16's unpriced-club seed ON (run id ends
+-- `-s2.58`), where every figure recorded here was measured with it off. The
+-- item 16 section below is the one that changes most, and by design: the gap
+-- it measures is what the seed was derived from, and re-reading it on a seeded
+-- run measures the RESIDUE - 0.2931 goals/90 rather than 0.3568. Check the
+-- run_id before trusting a comparison:
+--     SELECT DISTINCT run_id FROM res.rating_history;
+-- scripts/unpriced-seed.sql carries the full before/after and the derivation.
 
 ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-results.duckdb'          AS res (READ_ONLY);
 ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets-2012.duckdb' AS tm  (READ_ONLY);

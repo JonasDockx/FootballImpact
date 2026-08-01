@@ -15,6 +15,14 @@
 -- failing. The results file present on 2026-07-31 holds a run over the 2012
 -- backfill (item 30 stage 3), hence -2012 below; point this at
 -- DataFiles.SNAPSHOT again when the backfill lands there.
+--
+-- THE MODEL HAS MOVED SINCE THE RECORDED FIGURES (2026-08-01). The results
+-- file now holds a run with item 16's unpriced-club seed ON (run id ends
+-- `-s2.58`). Every career number quoted from this script on #28 and #32 -
+-- Messi 172.2 and 44th, Scott Brown 182.8 and 17th - was measured with it off,
+-- and cup-minnow inflation is exactly what the seed removes, so they have
+-- moved. Brown is 18th on the leaderboard now. Check the run before comparing:
+--     SELECT DISTINCT run_id FROM res.rating_history;
 
 ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-results.duckdb'          AS res (READ_ONLY);
 ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets-2012.duckdb' AS tm  (READ_ONLY);
