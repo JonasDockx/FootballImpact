@@ -1,0 +1,537 @@
+<!doctype html>
+<!--
+  PROTOTYPE — THROWAWAY. Issue #35, wayfinder map #31.
+  Three variants of "find one player among 94,807", switchable via ?variant=A|B|C.
+  Real data: every one of the 25,970 players past 1,000 minutes, monthly-sampled,
+  from the designated run in goalimpact-results.duckdb. Rebuild with build.sql.
+  Not production code: no tests, no error handling, no abstractions.
+-->
+<meta charset="utf-8">
+<title>PROTOTYPE — find a player (#35)</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --ink: #e6e9ef;
+    --dim: #8b93a7; --accent: #4ea1ff; --peak: #ffb454; --warn: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  input, button, select { font: inherit; color: inherit; }
+  input, select { background: var(--panel); border: 1px solid var(--line);
+                  border-radius: 6px; padding: 8px 10px; }
+  .dim { color: var(--dim); }
+  .chip { display: inline-block; background: #202634; border: 1px solid var(--line);
+          border-radius: 99px; padding: 1px 8px; font-size: 12px; color: var(--dim);
+          margin-right: 5px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+
+  /* the switcher — deliberately not part of any design being judged */
+  #switcher { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+    background: #fff; color: #111; border-radius: 99px; padding: 6px 8px; z-index: 999;
+    box-shadow: 0 6px 24px rgba(0,0,0,.5); display: flex; align-items: center; gap: 8px;
+    font-weight: 600; }
+  #switcher button { background: #111; color: #fff; border: 0; border-radius: 99px;
+    width: 26px; height: 26px; cursor: pointer; }
+  #switcher .load { font-weight: 400; color: #555; font-size: 12px;
+    border-left: 1px solid #ddd; padding-left: 8px; }
+
+  /* --- variant A: spotlight --- */
+  .a-wrap { min-height: 100vh; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; padding: 40px 20px 90px; }
+  .a-wrap.picked { justify-content: flex-start; padding-top: 24px; }
+  .a-title { font-size: 30px; font-weight: 300; letter-spacing: .5px; margin-bottom: 18px; }
+  .a-wrap.picked .a-title { display: none; }
+  .a-box { width: min(640px, 100%); }
+  .a-box input { width: 100%; padding: 14px 16px; font-size: 18px; }
+  .a-results { width: min(640px, 100%); margin-top: 8px; }
+  .a-hit { display: flex; justify-content: space-between; align-items: baseline;
+           gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--line);
+           cursor: pointer; }
+  .a-hit:hover, .a-hit.sel { background: var(--panel); }
+  .a-hit b { font-weight: 600; }
+  .a-seeds { margin-top: 22px; text-align: center; }
+  .a-seeds span { cursor: pointer; text-decoration: underline dotted; margin: 0 8px;
+                  color: var(--dim); }
+  .a-chart { width: min(980px, 100%); margin-top: 18px; }
+
+  /* --- variant B: browse rail --- */
+  .b-grid { display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
+  .b-rail { border-right: 1px solid var(--line); display: flex; flex-direction: column;
+            min-height: 0; }
+  .b-filters { padding: 12px; border-bottom: 1px solid var(--line);
+               display: grid; gap: 8px; }
+  .b-filters .row > * { flex: 1; min-width: 0; }
+  .b-list { overflow: auto; flex: 1; }
+  .b-item { padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer;
+            display: grid; grid-template-columns: 34px 1fr auto; gap: 10px;
+            align-items: baseline; }
+  .b-item:hover, .b-item.sel { background: var(--panel); }
+  .b-item .rk { color: var(--dim); font-size: 12px; text-align: right; }
+  .b-item .pk { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .b-main { padding: 20px 24px 90px; overflow: auto; }
+
+  /* --- variant C: player page + palette --- */
+  .c-page { max-width: 1000px; margin: 0 auto; padding: 28px 24px 90px; }
+  .c-top { display: flex; justify-content: space-between; align-items: center;
+           border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 20px; }
+  .c-hint { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+            padding: 8px 14px; cursor: pointer; color: var(--dim); }
+  .c-empty { text-align: center; padding: 80px 0; }
+  .c-overlay { position: fixed; inset: 0; background: rgba(4,6,10,.7); z-index: 500;
+               display: none; padding-top: 12vh; }
+  .c-overlay.on { display: block; }
+  .c-palette { width: min(620px, 92%); margin: 0 auto; background: var(--panel);
+               border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .c-palette input { width: 100%; border: 0; border-bottom: 1px solid var(--line);
+                     border-radius: 0; padding: 14px 16px; font-size: 17px; }
+  .c-hits { max-height: 46vh; overflow: auto; }
+  .c-hit { padding: 9px 16px; cursor: pointer; display: flex;
+           justify-content: space-between; gap: 10px; }
+  .c-hit.sel, .c-hit:hover { background: #202634; }
+  .c-load { color: var(--peak); font-size: 12px; }
+
+  .idcard { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
+  .idcard h2 { margin: 0; font-size: 24px; font-weight: 600; }
+  .big { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .warnbar { background: #351d1d; border: 1px solid #5b2b2b; color: #ffc9c9;
+             border-radius: 6px; padding: 7px 11px; font-size: 13px; margin-top: 10px; }
+  .notebar { background: #1b2330; border: 1px solid #2c3a4d; color: #a9c0da;
+             border-radius: 6px; padding: 7px 11px; font-size: 13px; margin-top: 10px; }
+
+  .chartwrap { position: relative; }
+  .chartwrap svg { cursor: crosshair; }
+  .tip { position: absolute; display: none; transform: translateX(-50%);
+         background: #0b0d12; border: 1px solid var(--line); border-radius: 6px;
+         padding: 5px 10px; font-size: 13px; white-space: nowrap;
+         pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+  .tip b { font-size: 15px; font-variant-numeric: tabular-nums; margin-right: 4px; }
+  .tip .sep { display: inline-block; width: 1px; height: 11px; background: var(--line);
+              margin: 0 8px; vertical-align: -1px; }
+</style>
+
+<div id="app"></div>
+
+<div id="switcher">
+  <button id="prev">‹</button>
+  <span id="vlabel"></span>
+  <button id="next">›</button>
+  <span class="load" id="vload"></span>
+</div>
+
+<script src="data.js"></script>
+<script>
+// ---------------------------------------------------------------- data prep
+// data.js rows: {id,name,club,pos,mins,y0,y1,peak,ms,vs}
+// ms = month indices, m=0 is 2012-01. vs = Impact index at the end of that month.
+const ALL = window.DATA;
+const fold = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+ALL.forEach(p => { p.f = fold(p.name); p.low = Math.min(...p.vs); });
+
+// duplicate-name groups, so the UI can prove it can tell two Paulinhos apart
+const byName = new Map();
+ALL.forEach(p => { const k = p.f; byName.set(k, (byName.get(k) || 0) + 1); });
+ALL.forEach(p => p.dupe = byName.get(p.f) > 1);
+
+const BYTES_INDEX = 2167613;      // measured: compact index for all 25,970
+const BYTES_ALL_CAREERS = 4916068; // measured: every eligible career, monthly
+
+function search(q, limit = 40) {
+  q = fold(q.trim());
+  if (!q) return [];
+  const terms = q.split(/\s+/);
+  const out = [];
+  for (const p of ALL) {
+    let ok = true, exact = p.f === q, prefix = p.f.startsWith(q);
+    for (const t of terms) if (!p.f.includes(t)) { ok = false; break; }
+    if (!ok) continue;
+    // rank: exact name, then prefix, then peak index — the player you meant is
+    // almost always the better one, so peak is the tiebreak that does the work
+    out.push([p, (exact ? 3e6 : 0) + (prefix ? 1e6 : 0) + (p.peak || 0) * 1000 + p.mins / 1000]);
+  }
+  out.sort((a, b) => b[1] - a[1]);
+  return out.slice(0, limit).map(x => x[0]);
+}
+
+const monthLabel = m => (2012 + Math.floor(m / 12)) + '-' + String(m % 12 + 1).padStart(2, '0');
+
+// ------------------------------------------------------- Peak Impact stand-in
+// The real thing is unbuilt: #41 re-specified it so that the ENGINE stores the
+// estimated peak P, and the drawn rating is P - D(age_at_kickoff). Rearranged,
+// P = index + D(age) — so a stand-in only needs a D, and it inherits the two
+// properties that matter here: it is re-estimated at every update, and it can
+// be revised DOWN as well as up. A running maximum has neither.
+//
+// D is piecewise linear in exact age between knots, which is the shape #41
+// chose. These knots are INVENTED — the real curve is fitted once and pinned on
+// the wide spine, and fitting it is #41's own work, not this prototype's.
+const D_KNOTS = [[17, 15], [21, 7], [24, 2], [26, 0], [29, 2], [32, 6], [35, 12], [39, 20]];
+const D_MEAN = 3.5;  // stands in for the population-average penalty #41 gives an unknown DOB
+function ageingPenalty(age) {
+  if (age == null) return D_MEAN;
+  if (age <= D_KNOTS[0][0]) return D_KNOTS[0][1];
+  for (let i = 1; i < D_KNOTS.length; i++) {
+    const [a0, d0] = D_KNOTS[i - 1], [a1, d1] = D_KNOTS[i];
+    if (age <= a1) return d0 + (d1 - d0) * (age - a0) / (a1 - a0);
+  }
+  return D_KNOTS[D_KNOTS.length - 1][1];
+}
+function peakStandIn(p) {
+  return p.ms.map((m, i) =>
+    p.vs[i] + ageingPenalty(p.dobm == null ? null : (m - p.dobm) / 12));
+}
+
+// ---------------------------------------------------------------- the chart
+// yMode: 'fixed' = ADR 0011's 70..215;  'auto' = fit the career;
+//        'floor-fit' = ADR 0011's 70..215, but drop the floor for the 10.3% of
+//        careers that go under it, so nothing is ever silently flattened.
+// peakMode: 'line' | 'marker' | 'envelope' — the three places Peak Impact could live
+// ageAxis: whole ages along the top, calendar years along the bottom. Needs a
+//        date of birth, which 2,982 of the 25,970 eligible players do not have.
+function chart(p, { yMode = 'auto', peakMode = 'line', h = 380, ageAxis = false, hover = false } = {}) {
+  const hasAge = ageAxis && p.dobm != null;
+  const W = 980, H = h, L = 46, R = 14, T = hasAge ? 32 : 16, B = 26;
+  const m0 = p.ms[0], m1 = p.ms[p.ms.length - 1];
+  let lo = 70, hi = 215, clipped = false, dropped = false;
+  if (yMode === 'auto') {
+    lo = Math.min(70, Math.floor((p.low - 6) / 10) * 10);
+    hi = Math.max(160, Math.ceil((Math.max(...peakStandIn(p)) + 8) / 10) * 10);
+  } else if (yMode === 'floor-fit') {
+    if (p.low < 70) { lo = Math.floor((p.low - 6) / 10) * 10; dropped = true; }
+  } else {
+    clipped = p.low < 70;
+  }
+  const x = m => L + (m - m0) / Math.max(1, m1 - m0) * (W - L - R);
+  const y = v => T + (hi - Math.max(lo, Math.min(hi, v))) / (hi - lo) * (H - T - B);
+
+  let g = '';
+  const gridlines = [100, 140, 150, 170];
+  if (lo < 70) for (let v = Math.ceil(lo / 20) * 20; v < 100; v += 20) gridlines.push(v);
+  for (const b of gridlines) {
+    if (b < lo || b > hi) continue;
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(b)}" y2="${y(b)}" stroke="#2b3140"/>`
+       + `<text x="${L - 6}" y="${y(b) + 4}" fill="#6d768c" font-size="11" text-anchor="end">${b}</text>`;
+  }
+  if (yMode === 'auto' && lo < 70) {
+    g += `<text x="${L - 6}" y="${y(lo) + 4}" fill="#6d768c" font-size="11" text-anchor="end">${lo}</text>`;
+  }
+  for (let yr = 2012; yr <= 2027; yr++) {
+    const m = (yr - 2012) * 12;
+    if (m < m0 || m > m1) continue;
+    g += `<line x1="${x(m)}" x2="${x(m)}" y1="${T}" y2="${H - B}" stroke="#1c212c"/>`
+       + `<text x="${x(m)}" y="${H - 8}" fill="#6d768c" font-size="11" text-anchor="middle">${yr}</text>`;
+  }
+
+  // Age along the top. #37 found the original ended up carrying both, so the two
+  // axes are the same line read two ways: a birthday tick and a new-year tick.
+  if (hasAge) {
+    const a0 = (m0 - p.dobm) / 12, a1 = (m1 - p.dobm) / 12;
+    const step = (a1 - a0) > 14 ? 2 : 1;
+    for (let a = Math.ceil(a0 / step) * step; a <= a1; a += step) {
+      const m = p.dobm + a * 12;
+      g += `<line x1="${x(m)}" x2="${x(m)}" y1="${T}" y2="${T + 4}" stroke="#39404f"/>`
+         + `<text x="${x(m)}" y="${T - 8}" fill="#6d768c" font-size="11" text-anchor="middle">${a}</text>`;
+    }
+    g += `<text x="${L - 6}" y="${T - 8}" fill="#525b70" font-size="10" text-anchor="end">age</text>`;
+  } else if (ageAxis) {
+    g += `<text x="${L}" y="${T - 8}" fill="#7a5c3a" font-size="11">no date of birth — no age axis</text>`;
+  }
+
+  const d = p.ms.map((m, i) => (i ? 'L' : 'M') + x(m).toFixed(1) + ' ' + y(p.vs[i]).toFixed(1)).join(' ');
+
+  const peakSeries = peakStandIn(p);
+  const dPeak = p.ms.map((m, i) => (i ? 'L' : 'M') + x(m).toFixed(1) + ' ' + y(peakSeries[i]).toFixed(1)).join(' ');
+
+  let peakArt = '';
+  if (peakMode === 'line') {
+    peakArt = `<path d="${dPeak}" fill="none" stroke="var(--peak)" stroke-width="2"
+                 stroke-dasharray="6 4" opacity=".9"/>`;
+  } else {
+    const env = `${dPeak} L ${x(m1).toFixed(1)} ${y(lo)} L ${x(m0).toFixed(1)} ${y(lo)} Z`;
+    peakArt = `<path d="${env}" fill="var(--peak)" opacity=".10"/>
+               <path d="${dPeak}" fill="none" stroke="var(--peak)" stroke-width="1.5" opacity=".7"/>`;
+  }
+
+  // Geometry the hover handler needs to turn a mouse x back into a month.
+  const geom = { W, H, L, R, T, B, m0, m1, lo, hi, dobm: p.dobm ?? null,
+                 ms: p.ms, vs: p.vs, peak: peakSeries };
+
+  return `<div class="chartwrap"${hover ? ` data-geom='${JSON.stringify(geom)}'` : ''}>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+      <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="#12151c"/>
+      ${g}${peakArt}
+      <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+      ${hover ? `<g class="cursor" style="display:none">
+        <line class="cx" y1="${T}" y2="${H - B}" stroke="#6d768c" stroke-dasharray="3 3"/>
+        <circle class="pdot" r="4" fill="var(--peak)" stroke="#0f1115" stroke-width="2"/>
+        <circle class="cdot" r="4.5" fill="var(--accent)" stroke="#0f1115" stroke-width="2"/>
+      </g>` : ''}
+    </svg>
+    ${hover ? '<div class="tip"></div>' : ''}
+  </div>` + (clipped
+    ? `<div class="warnbar">This career drops to <b>${p.low.toFixed(1)}</b>, below the
+         fixed floor of 70 — everything under the floor is drawn flat against it.
+         2,672 of 25,970 eligible players (10.3%) do this.</div>` : '')
+    + (dropped
+    ? `<div class="notebar">Floor dropped from 70 to <b>${lo}</b> — this career
+         reaches <b>${p.low.toFixed(1)}</b>, and 2,672 of 25,970 eligible players
+         (10.3%) go below 70 at some point.</div>` : '');
+}
+
+// Reads the geometry off the wrapper and wires the crosshair readout. Snaps to
+// the nearest sampled month rather than interpolating: the line only knows what
+// the model thought after a match, and inventing a value between two months
+// would be a picture of nothing.
+function wireHover(root) {
+  const wrap = root.querySelector('.chartwrap[data-geom]');
+  if (!wrap) return;
+  const G = JSON.parse(wrap.dataset.geom);
+  const svg = wrap.querySelector('svg'), cur = wrap.querySelector('.cursor');
+  const cx = wrap.querySelector('.cx'), dot = wrap.querySelector('.cdot');
+  const pdot = wrap.querySelector('.pdot');
+  const tip = wrap.querySelector('.tip');
+  const px = m => G.L + (m - G.m0) / Math.max(1, G.m1 - G.m0) * (G.W - G.L - G.R);
+  const py = v => G.T + (G.hi - Math.max(G.lo, Math.min(G.hi, v))) / (G.hi - G.lo) * (G.H - G.T - G.B);
+
+  svg.onmousemove = e => {
+    const r = svg.getBoundingClientRect();
+    const vx = (e.clientX - r.left) / r.width * G.W;
+    const m = G.m0 + (vx - G.L) / (G.W - G.L - G.R) * (G.m1 - G.m0);
+    let best = 0;
+    for (let i = 1; i < G.ms.length; i++)
+      if (Math.abs(G.ms[i] - m) < Math.abs(G.ms[best] - m)) best = i;
+    const mm = G.ms[best], v = G.vs[best], pk = G.peak[best];
+    cur.style.display = '';
+    cx.setAttribute('x1', px(mm)); cx.setAttribute('x2', px(mm));
+    dot.setAttribute('cx', px(mm)); dot.setAttribute('cy', py(v));
+    pdot.setAttribute('cx', px(mm)); pdot.setAttribute('cy', py(pk));
+    const age = G.dobm == null ? null : ((mm - G.dobm) / 12);
+    tip.innerHTML = `<b>${v.toFixed(1)}</b><span class="dim">Impact</span>
+      <span class="sep"></span><b style="color:var(--peak)">${pk.toFixed(1)}</b><span class="dim">peak</span>
+      <span class="sep"></span>${monthLabel(mm)}
+      ${age == null ? '<span class="dim">age unknown</span>'
+                    : `<span class="sep"></span>age ${age.toFixed(1)}`}
+      ${v < 70 ? '<span class="sep"></span><span style="color:var(--warn)">below 70</span>' : ''}`;
+    tip.style.display = 'block';
+    tip.style.left = Math.min(Math.max(px(mm) / G.W * r.width, 60), r.width - 60) + 'px';
+    tip.style.top = (py(v) / G.H * r.height - 44) + 'px';
+  };
+  svg.onmouseleave = () => { cur.style.display = 'none'; tip.style.display = 'none'; };
+}
+
+function idcard(p) {
+  return `<div class="idcard">
+    <h2>${p.name}</h2>
+    <span class="chip">${p.club || 'club unknown'}</span>
+    <span class="chip">${p.pos || 'position unknown'}</span>
+    <span class="chip">${p.y0}–${p.y1}</span>
+    <span class="chip">${p.mins.toLocaleString()} min</span>
+    ${p.dupe ? '<span class="chip" style="color:#ffb454">shares this name</span>' : ''}
+  </div>`;
+}
+
+function hitLine(p) {
+  return `<b>${p.name}</b> <span class="dim">${p.club || '—'} · ${p.y0}–${p.y1}
+    · ${(p.mins / 90 | 0)} apps</span>`;
+}
+
+// ------------------------------------------------------------- variant A
+// "Spotlight": nothing but a search field. One file, everything embedded.
+function variantA(root) {
+  root.innerHTML = `<div class="a-wrap" id="w">
+    <div class="a-title">GoalImpact</div>
+    <div class="a-box"><input id="q" placeholder="Search 25,970 players" autofocus></div>
+    <div class="a-results" id="res"></div>
+    <div class="a-seeds" id="seeds"><span data-n="Iniesta">Iniesta</span>
+      <span data-n="Messi">Messi</span><span data-n="Paulinho">Paulinho</span>
+      <span data-n="Nicolo Barella">Nicolo Barella</span>
+      <span data-n="Benjamin Andre">Benjamin Andre</span></div>
+    <div class="a-chart" id="chart"></div>
+  </div>`;
+  const q = root.querySelector('#q'), res = root.querySelector('#res');
+  let hits = [], sel = 0;
+  const draw = () => {
+    res.innerHTML = hits.map((p, i) =>
+      `<div class="a-hit ${i === sel ? 'sel' : ''}" data-i="${i}">
+        <div>${hitLine(p)}</div><div class="pk">${p.peak ?? '—'}</div></div>`).join('');
+  };
+  const pick = p => {
+    root.querySelector('#w').classList.add('picked');
+    res.innerHTML = ''; q.value = p.name;
+    root.querySelector('#chart').innerHTML = idcard(p) + chart(p, { yMode: 'auto', peakMode: 'line' });
+  };
+  q.oninput = () => { hits = search(q.value, 12); sel = 0; draw();
+                      root.querySelector('#chart').innerHTML = ''; };
+  q.onkeydown = e => {
+    if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, hits.length - 1); draw(); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); draw(); e.preventDefault(); }
+    if (e.key === 'Enter' && hits[sel]) pick(hits[sel]);
+  };
+  res.onclick = e => { const el = e.target.closest('.a-hit'); if (el) pick(hits[+el.dataset.i]); };
+  root.querySelector('#seeds').onclick = e => {
+    if (!e.target.dataset.n) return;
+    q.value = e.target.dataset.n; q.oninput();
+  };
+  return { name: 'Spotlight — search is the whole page',
+           load: `one file · ${((BYTES_INDEX + BYTES_ALL_CAREERS) / 1e6).toFixed(1)} MB up front` };
+}
+
+// ------------------------------------------------------------- variant B
+// "Browse rail": the population is the page; search is one filter among several.
+function variantB(root) {
+  root.innerHTML = `<div class="b-grid">
+    <div class="b-rail">
+      <div class="b-filters">
+        <input id="q" placeholder="Filter by name">
+        <div class="row">
+          <select id="pos"><option value="">Any position</option><option>Goalkeeper</option>
+            <option>Defender</option><option>Midfield</option><option>Attack</option></select>
+          <select id="min"><option value="1000">1,000+ min</option>
+            <option value="9000">9,000+ min</option><option value="20000">20,000+ min</option></select>
+        </div>
+        <div class="row"><select id="sort"><option value="peak">Sort: peak Impact</option>
+          <option value="mins">Sort: minutes</option><option value="name">Sort: name</option>
+          <option value="recent">Sort: most recent</option></select></div>
+        <div class="dim" id="count"></div>
+      </div>
+      <div class="b-list" id="list"></div>
+    </div>
+    <div class="b-main" id="main"></div>
+  </div>`;
+  const $ = s => root.querySelector(s);
+  let rows = [], cur = null;
+  const apply = () => {
+    const q = fold($('#q').value.trim()), pos = $('#pos').value, min = +$('#min').value, s = $('#sort').value;
+    rows = ALL.filter(p => p.mins >= min && (!pos || p.pos === pos) && (!q || p.f.includes(q)));
+    rows.sort(s === 'peak' ? (a, b) => b.peak - a.peak
+      : s === 'mins' ? (a, b) => b.mins - a.mins
+      : s === 'name' ? (a, b) => a.f.localeCompare(b.f)
+      : (a, b) => b.y1 - a.y1 || b.peak - a.peak);
+    $('#count').textContent = rows.length.toLocaleString() + ' of 25,970 players';
+    $('#list').innerHTML = rows.slice(0, 400).map((p, i) =>
+      `<div class="b-item ${p === cur ? 'sel' : ''}" data-i="${i}">
+        <div class="rk">${i + 1}</div>
+        <div>${p.name}<div class="dim" style="font-size:12px">${p.club || '—'} · ${p.y0}–${p.y1}</div></div>
+        <div class="pk">${p.peak ?? '—'}</div></div>`).join('')
+      + (rows.length > 400 ? `<div class="dim" style="padding:12px">…${(rows.length - 400).toLocaleString()} more; keep filtering</div>` : '');
+    if (!cur && rows[0]) show(rows[0]);
+  };
+  const show = p => { cur = p;
+    // Peak Impact is a moving estimate, not a career high-water mark: it is
+    // re-estimated at every update and can be revised down. So the number
+    // beside the chart is the LATEST estimate, and the chart carries the whole
+    // series as the dashed line.
+    const pk = peakStandIn(p), pkNow = pk[pk.length - 1], pkPrev = pk[Math.max(0, pk.length - 13)];
+    const drift = pkNow - pkPrev;
+    $('#main').innerHTML = idcard(p)
+      + `<div class="row" style="margin:14px 0 6px">
+           <div><div class="dim">Peak Impact <span style="font-size:11px">estimated now</span></div>
+             <div class="big" style="color:var(--peak)">${pkNow.toFixed(1)}
+               <span style="font-size:14px;font-weight:400" class="dim">
+                 ${drift >= 0 ? '▲' : '▼'} ${Math.abs(drift).toFixed(1)} over the last year</span></div></div>
+           <div style="margin-left:24px"><div class="dim">Impact now</div>
+             <div class="big">${p.vs[p.vs.length - 1]}</div></div>
+           <div style="margin-left:24px"><div class="dim">Highest Impact reached</div>
+             <div class="big" style="font-size:24px">${p.peak}</div></div></div>`
+      + chart(p, { yMode: 'floor-fit', peakMode: 'line', h: 340, ageAxis: true, hover: true })
+      + `<p class="dim" style="font-size:12px">Dashed line is the estimated peak,
+           re-estimated at every update (#41). <b>Stand-in</b>: the real one is
+           unbuilt, so this is <code>Impact + D(age)</code> with an invented
+           ageing curve — the shape is right, the numbers are not.</p>`;
+    wireHover($('#main'));
+  };
+  $('#list').onclick = e => { const el = e.target.closest('.b-item'); if (el) { show(rows[+el.dataset.i]); apply(); } };
+  ['#q', '#pos', '#min', '#sort'].forEach(s => $(s).oninput = apply);
+  apply();
+  return { name: 'Browse rail — the population is the page',
+           load: `index embedded ${(BYTES_INDEX / 1e6).toFixed(1)} MB · careers on click` };
+}
+
+// ------------------------------------------------------------- variant C
+// "Player page + palette": the URL is a player. Careers arrive one at a time,
+// which is what options 2 and 3 on #22 actually feel like.
+function variantC(root) {
+  const url = new URL(location);
+  const pid = +url.searchParams.get('p') || 0;
+  root.innerHTML = `<div class="c-page">
+    <div class="c-top">
+      <div class="dim">goalimpact · local</div>
+      <div class="c-hint" id="open">Search players <span class="chip">/</span></div>
+    </div>
+    <div id="body"></div>
+  </div>
+  <div class="c-overlay" id="ov"><div class="c-palette">
+    <input id="q" placeholder="Type a player's name">
+    <div class="c-hits" id="hits"></div>
+  </div></div>`;
+  const $ = s => root.querySelector(s);
+  const seeds = [ALL[0], ALL[3], ALL[9], ALL[25]];
+  const empty = () => `<div class="c-empty">
+      <div style="font-size:22px;font-weight:300">No player chosen</div>
+      <p class="dim">Every one of the 25,970 eligible players has a page at
+        <code>?variant=C&amp;p=&lt;id&gt;</code>. Press <b>/</b> to find one.</p>
+      <p>${seeds.map(p => `<span class="chip" style="cursor:pointer" data-id="${p.id}">${p.name}</span>`).join('')}</p>
+    </div>`;
+  const show = p => {
+    // simulate fetching this one career rather than having it already
+    $('#body').innerHTML = `<div class="c-load">fetching career…</div>`;
+    setTimeout(() => {
+      $('#body').innerHTML = idcard(p) + chart(p, { yMode: 'fixed-warn', peakMode: 'envelope', h: 360 })
+        + `<p class="dim">Fetched ${(p.vs.length * 6 / 1000).toFixed(1)} kB for this
+           career — one of 25,970. Nothing else was loaded.</p>`;
+      url.searchParams.set('p', p.id); history.replaceState({}, '', url);
+    }, 140);
+  };
+  const start = ALL.find(p => p.id === pid);
+  $('#body').innerHTML = start ? '' : empty();
+  if (start) show(start);
+  $('#body').onclick = e => { const id = e.target.dataset.id; if (id) show(ALL.find(p => p.id === +id)); };
+
+  let hits = [], sel = 0;
+  const drawHits = () => $('#hits').innerHTML = hits.map((p, i) =>
+    `<div class="c-hit ${i === sel ? 'sel' : ''}" data-i="${i}"><div>${hitLine(p)}</div>
+      <div class="pk">${p.peak ?? '—'}</div></div>`).join('');
+  const open = () => { $('#ov').classList.add('on'); $('#q').value = ''; $('#hits').innerHTML = ''; $('#q').focus(); };
+  const close = () => $('#ov').classList.remove('on');
+  $('#open').onclick = open;
+  $('#ov').onclick = e => { if (e.target.id === 'ov') close(); };
+  $('#q').oninput = () => { hits = search($('#q').value, 20); sel = 0; drawHits(); };
+  $('#q').onkeydown = e => {
+    if (e.key === 'Escape') close();
+    if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, hits.length - 1); drawHits(); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); drawHits(); e.preventDefault(); }
+    if (e.key === 'Enter' && hits[sel]) { close(); show(hits[sel]); }
+  };
+  $('#hits').onclick = e => { const el = e.target.closest('.c-hit'); if (el) { close(); show(hits[+el.dataset.i]); } };
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && !/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) { e.preventDefault(); open(); }
+  });
+  return { name: 'Player page + palette — the URL is a player',
+           load: `index ${(BYTES_INDEX / 1e6).toFixed(1)} MB · one career per view` };
+}
+
+// ------------------------------------------------------------- switcher
+const VARIANTS = { A: variantA, B: variantB, C: variantC };
+const keys = Object.keys(VARIANTS);
+function render() {
+  const v = (new URL(location).searchParams.get('variant') || 'A').toUpperCase();
+  const k = VARIANTS[v] ? v : 'A';
+  const meta = VARIANTS[k](document.getElementById('app'));
+  document.getElementById('vlabel').textContent = k + ' — ' + meta.name;
+  document.getElementById('vload').textContent = meta.load;
+}
+function go(step) {
+  const url = new URL(location);
+  const i = keys.indexOf((url.searchParams.get('variant') || 'A').toUpperCase());
+  url.searchParams.set('variant', keys[(i + step + keys.length) % keys.length]);
+  url.searchParams.delete('p');
+  history.replaceState({}, '', url); render();
+}
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.addEventListener('keydown', e => {
+  if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  if (e.key === 'ArrowLeft') go(-1);
+  if (e.key === 'ArrowRight') go(1);
+});
+render();
+</script>
