@@ -1,5 +1,6 @@
 package com.goalimpact.data;
 
+import com.goalimpact.model.Competition;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
 import com.goalimpact.model.Player;
@@ -52,6 +53,36 @@ public class TransfermarktLoader implements AutoCloseable {
     // name their country. No evidence, no advantage: the same posture
     // classifyHomeSide already takes for an uncurated tournament edition.
     private static final Set<String> NEUTRAL_COMPETITIONS = Set.of("KLUB", "UKRS");
+
+    // Curated source facts (ADR 0009) again: the competitions that ARE league
+    // football and that games.competition_type does not say so for. Item 16
+    // reads that column to decide which clubs the run ever prices, so a
+    // misfiled league is not cosmetic - it would hand every one of its clubs
+    // the unpriced seed.
+    //
+    // Two families, both verified against tm.competitions on 2026-08-01:
+    //
+    //   COL1 - the Colombian first division, 200 matches with full lineups.
+    //     It is one of five competitions the item 15 scraper added without a
+    //     competitions row at all (with CGB, POCP, KLUB and UKRS), so its
+    //     games carry competition_type NULL. Its 20 clubs appear nowhere else
+    //     in the snapshot, so left alone every one of them reads as a cup
+    //     minnow - which is exactly wrong: they are an ISLAND (item 9), a
+    //     pool the run sees plenty of and cannot place, not a pool it barely
+    //     sees at all.
+    //   EJPL / POBE / BPO4 - the Belgian championship, Europe and relegation
+    //     play-offs, filed by the vendor as type "other", sub_type "play_off".
+    //     They are the second half of the Jupiler Pro League season, played by
+    //     the same clubs. Listed for correctness rather than for consequence:
+    //     those clubs already play BE1, so nothing about pricing changes. The
+    //     home-advantage league anchor gains their 72 matches.
+    //
+    // The other four unnamed competitions need no entry - CGB is the English
+    // League Cup, POCP the Taça de Portugal, KLUB the Club World Cup and UKRS
+    // the Ukrainian Super Cup, and OTHER is already the right answer for all
+    // four.
+    private static final Set<String> LEAGUE_COMPETITIONS =
+        Set.of("COL1", "EJPL", "POBE", "BPO4");
 
 
     // One row of the games table, reduced to what the home-side rule
@@ -116,16 +147,6 @@ public class TransfermarktLoader implements AutoCloseable {
     private final Map<Long, List<EventRow>> stagedEvents = new HashMap<>();
     private final Map<Long, Integer> stagedLastMinute = new HashMap<>();
     
-    // Which loaded matches are domestic league fixtures. Source-specific
-    // knowledge - "domestic_league" is Transfermarkt's word - so it lives
-    // here rather than on Match, which the engine and the StatsBomb loader
-    // also share (ADR 0004).
-    private final Set<Long> leagueMatches = new HashSet<>();
-
-    public Set<Long> leagueMatches() {
-        return leagueMatches;
-    }
-
     // The certain-tier worklist (item 25): every player named in a Held match,
     // recorded as the gate throws. Reusing the one gate means this list and the
     // skip report are one decision recorded twice, so they cannot drift.
@@ -461,11 +482,9 @@ public class TransfermarktLoader implements AutoCloseable {
             rows.getString("competition_id"), rows.getString("season"),
             rows.getString("competition_type"), rows.getString("round"),
             rows.getLong("home_club_id"), rows.getLong("away_club_id"));
-        if ("domestic_league".equals(fixture.competitionType())) {
-            leagueMatches.add(matchId);
-        }
         return new Match(
             matchId,
+            classifyCompetition(fixture),
             rows.getDate("date").toLocalDate(),
             new Team(rows.getLong("home_club_id"), rows.getString("home_club_name")),
             new Team(rows.getLong("away_club_id"), rows.getString("away_club_name")),
@@ -970,6 +989,23 @@ public class TransfermarktLoader implements AutoCloseable {
             return Match.HomeSide.NEITHER;
         }
         return Match.HomeSide.HOME;
+    }
+
+    // Item 16: the vendor's competition_type, corrected, and mapped into the
+    // engine's three kinds (ADR 0004 - "domestic_league" is Transfermarkt's
+    // word, and it stops at this boundary). The curated set wins over the
+    // column because five competitions have no competitions row at all and so
+    // carry no type, and because a misfiled league is the one error that
+    // changes an answer here.
+    static Competition classifyCompetition(Fixture fixture) {
+        if (LEAGUE_COMPETITIONS.contains(fixture.competitionId())
+            || "domestic_league".equals(fixture.competitionType())) {
+            return new Competition(fixture.competitionId(), Competition.Kind.LEAGUE);
+        }
+        if ("national_team_competition".equals(fixture.competitionType())) {
+            return new Competition(fixture.competitionId(), Competition.Kind.NATIONAL_TEAM);
+        }
+        return new Competition(fixture.competitionId(), Competition.Kind.OTHER);
     }
 
 }

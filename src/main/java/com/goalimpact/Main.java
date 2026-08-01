@@ -9,8 +9,10 @@ import com.goalimpact.data.HeldMatch;
 import com.goalimpact.data.MaybePlayer;
 import com.goalimpact.data.TransfermarktLoader;
 import com.goalimpact.data.UnusableMatchException;
+import com.goalimpact.engine.ClubPools;
 import com.goalimpact.engine.MatchObserver;
 import com.goalimpact.engine.MatchProcessor;
+import com.goalimpact.engine.RatingSeed;
 import com.goalimpact.engine.PlayerTally;
 import com.goalimpact.engine.PredictionQuality;
 import com.goalimpact.engine.SmoothFadeSchedule;
@@ -18,6 +20,7 @@ import com.goalimpact.engine.UpdateSchedule;
 import com.goalimpact.model.CompetitionSeason;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
+import com.goalimpact.model.Team;
 import com.goalimpact.report.CsvWriter;
 import com.goalimpact.report.HeldAppearanceWriter;
 import com.goalimpact.report.HeldMatchWriter;
@@ -63,7 +66,36 @@ public class Main {
     // rating is worth 0.0002 of real predictive signal. Flip to {true} to
     // re-run on it.
     private static final boolean[] FIELD_PLAYERS_ONLY = {false};
-    
+
+    // Item 16: rating points a player enters the run below average at, when
+    // the club he is first seen for is one this run never prices - one that
+    // plays no league football anywhere in it (see ClubPools). 0.0 is the
+    // status quo, where every debutant enters at exactly world-average.
+    //
+    // STAGE 1 PINS IT OFF. The seam, the classification and the bridge-scoped
+    // gate all land here inert, and this run must be byte-identical to the one
+    // before it - same CSV, same log-loss. Stage 2 measures the constant and
+    // turns it on.
+    //
+    // This is a MEASURED constant, not a grid knob: it is derived from the
+    // residual gap unpriced sides actually run - they underperform
+    // expectation by ~0.346 goals per 90 against rated ones (#32) - inverted
+    // through the link function into rating points, then pinned and dated
+    // like BASE_RATE and h. A sweep here is a CHECK on that derivation, never
+    // the source of the value; the winner of a sweep is not evidence.
+    //
+    // Which is why the shipped value and the swept values are two separate
+    // fields rather than one array with a winner: UNPRICED_SEED is what the
+    // designated run uses, and nothing the grid reports can change it.
+    private static final double UNPRICED_SEED = 0.0;
+
+    // The check, and the gate's own baseline. 0.0 must stay in it: the gate is
+    // two cells of one grid differing in exactly one thing (ADR 0014), so
+    // dropping the mechanism-off cell would make the decision unreproducible
+    // without editing source - the same reason FIELD_PLAYERS_ONLY keeps the
+    // arm that lost. At stage 1 there is only that cell, so the gate is silent.
+    private static final double[] UNPRICED_SEEDS = {0.0};
+
     // ADR 0009: exactly one spine per run. The same match arriving under
     // two sources' identities would be replayed twice, inflating exposure
     // and double-counting residuals - so this is a switch, never a merge.
@@ -113,13 +145,22 @@ public class Main {
     };
 
     // The current champion: what a new experiment must beat, and the
-    // regression check that the shipped model still scores what it did.
-    //   StatsBomb     2026-07-16: 0.6259 (k .10, K0 1.0, H 4000, h 2.5).
+    // regression check that the shipped model still scores what it did. A
+    // champion belongs to a POPULATION (#43), so each line states one.
+    //   StatsBomb     2026-07-16: 0.6259 (k .10, K0 1.0, H 4000, h 2.5),
+    //     over the whole men's corpus.
     //   Transfermarkt 2026-07-22: 0.6502 (k .10, K0 1.0, H 4000, h 2.0),
-    //     scored from 2015-07-01; 0.6508 over the whole replay.
+    //     over 80,471 matches, 2013-07-02 to 2026-07-06; 0.6508 whole replay.
+    //   Transfermarkt 2026-08-01: 0.6503 (same knobs) over 85,050 matches,
+    //     2012-07-09 to 2026-07-06; 0.6510 whole replay. Not an experiment
+    //     result - item 30 stage 3 widened the spine underneath the old
+    //     number, and #43's rule is that a champion belongs to a population,
+    //     so the reigning model is simply re-run for a fresh baseline. The
+    //     0.6502 line is kept because it is the last number belonging to the
+    //     narrower spine, not because it is comparable to this one.
     private static final double CHAMPION = switch (SPINE) {
         case STATSBOMB -> 0.6259;
-        case TRANSFERMARKT -> 0.6502;
+        case TRANSFERMARKT -> 0.6503;
     };
     
     // The window over which predictions are GRADED - not the window that is
@@ -175,7 +216,6 @@ public class Main {
         System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
                 List<Match> matches = new ArrayList<>();
         List<List<MatchEvent>> replays = new ArrayList<>();
-        Set<Long> leagueMatches = new HashSet<>();
         List<HeldAppearance> held = new ArrayList<>();
         List<AppearedPlayer> appeared = new ArrayList<>();
         List<MaybePlayer> maybe = new ArrayList<>();
@@ -183,7 +223,7 @@ public class Main {
         switch (SPINE) {
             case STATSBOMB -> loadStatsBomb(matches, replays);
             case TRANSFERMARKT -> loadTransfermarkt(
-                matches, replays, leagueMatches, held, appeared, maybe, heldMatches);
+                matches, replays, held, appeared, maybe, heldMatches);
         }
         System.out.printf("%nSpine: %s - %d matches replay (%s to %s).%n%n",
             SPINE, replays.size(),
@@ -206,7 +246,7 @@ public class Main {
             long homeTeamId = m.homeSide() == Match.HomeSide.HOME
                 ? m.home().id()
                 : m.away().id();
-            boolean league = leagueMatches.contains(m.matchId());
+            boolean league = m.competition().isLeague();
             for (MatchEvent e : replays.get(i)) {
                 if (e instanceof MatchEvent.Goal goal) {
                     boolean byHomeSide = goal.scoringTeam().id() == homeTeamId;
@@ -265,27 +305,68 @@ public class Main {
         }
         System.out.println();
 
+        // Item 16: which clubs this run never prices, and how much of the
+        // replay they account for. Derived from the run's own fixture list -
+        // a fact about COVERAGE, not about results - and reported before the
+        // grid because it describes the population, not the model. The
+        // per-player breakdown ADR 0009 asked for is the same verdict read
+        // off rating_history in scripts/model-bias-diagnostics.sql; this is
+        // the run-level reconciliation it must agree with.
+        ClubPools pools = ClubPools.of(matches);
+        Appearances census = census(pools, replays);
+        long bridgeMatches = matches.stream().filter(pools::isBridge).count();
+        System.out.printf(Locale.US,
+            "Unpriced clubs (item 16): %,d of %,d clubs play no league football in this run"
+            + " (%.1f%%), %,d of %,d appearances (%.1f%%)%n",
+            pools.unpricedClubs(), pools.clubs(),
+            100.0 * pools.unpricedClubs() / pools.clubs(),
+            census.unpriced(), census.all(),
+            100.0 * census.unpriced() / census.all());
+        System.out.printf(Locale.US,
+            "Bridge matches (item 39 gate population): %,d of %,d (%.1f%%)%n%n",
+            bridgeMatches, matches.size(), 100.0 * bridgeMatches / matches.size());
+
         // Grid search: prequential mean log-loss per (k, K). 0.6931 = ln 2 is
-        // the know-nothing baseline; lower is better.
-        System.out.printf("%8s %8s %8s %8s %8s %8s %10s %10s%n",
-            "k", "K0", "H", "floor", "home", "field", "logloss", "whole");
+        // the know-nothing baseline; lower is better. "bridge" is the same
+        // windowed loss over bridge matches only - reported for every cell,
+        // and the primary arm of the item 16 gate below.
+        System.out.printf("%8s %8s %8s %8s %8s %8s %8s %10s %10s %10s%n",
+            "k", "K0", "H", "floor", "home", "field", "seed", "logloss", "whole", "bridge");
 
         double bestGain = 0, bestK0 = 0, bestH = 0, bestFloor = 0, bestHome = 0, bestLoss = Double.MAX_VALUE;
         boolean bestFieldOnly = false;
+        // The seed is NOT among the knobs a winner is picked from - it is
+        // measured, and UNPRICED_SEED alone decides what the designated run
+        // uses. The grid only reports it, keyed here so the item 16 gate can
+        // compare two cells of THIS grid rather than a pinned historical
+        // number (#39): bridge log-loss has no champion on any population, and
+        // a bias fix must be judged against a baseline that ran on the same
+        // spine.
+        Map<Double, Scores> bySeed = new TreeMap<>();
         for (double gain : LINK_GAINS) {
             for (double k0 : K0S) {
                 for (double h : HALVING_MINUTES) {
                     for (double floor : FLOOR_FRACTIONS) {
                         for (double home : HOME_ADVANTAGES) {
                             for (boolean fieldOnly : FIELD_PLAYERS_ONLY ) {
-                                ScoringWindow window = new ScoringWindow();
+                              for (double seed : UNPRICED_SEEDS) {
+                                ScoringWindow window = new ScoringWindow(pools);
                                 replay(matches, replays, gain, home, fieldOnly,
-                                    new SmoothFadeSchedule(k0, h, floor), window, MatchObserver.NONE);
+                                    new SmoothFadeSchedule(k0, h, floor),
+                                    RatingSeed.unpricedBelowAverage(pools, seed),
+                                    window, MatchObserver.NONE);
                                 double loss = window.windowed.meanLogLoss();
                                 double whole = window.whole.meanLogLoss();
-                                System.out.printf(Locale.US, "%8.2f %8.2f %8.0f %8.2f %8.2f %8s %10.4f %10.4f%n",
-                                    gain, k0, h, floor, home, fieldOnly ? "yes" : "no", loss, whole);
-                                if (loss < bestLoss) {
+                                double bridge = window.bridged.meanLogLoss();
+                                System.out.printf(Locale.US,
+                                    "%8.2f %8.2f %8.0f %8.2f %8.2f %8s %8.2f %10.4f %10.4f %10.4f%n",
+                                    gain, k0, h, floor, home, fieldOnly ? "yes" : "no", seed,
+                                    loss, whole, bridge);
+                                bySeed.put(seed, new Scores(loss, whole, bridge));
+                                // Only cells at the shipped seed are eligible
+                                // to win, so widening the check sweep can
+                                // never quietly change which knobs ship.
+                                if (seed == UNPRICED_SEED && loss < bestLoss) {
                                     bestLoss = loss;
                                     bestGain = gain;
                                     bestK0 = k0;
@@ -294,6 +375,7 @@ public class Main {
                                     bestHome = home;
                                     bestFieldOnly = fieldOnly;
                                 }
+                              }
                             }
                         }
                     }
@@ -327,16 +409,60 @@ public class Main {
                     ? "adop field-player-only-Strength" : "keep Goalkeepers in Strength");
         }
 
+        // Item 16's gate, settled in #39, and it is a change to house
+        // practice. PRIMARY: log-loss on bridge matches only, which must
+        // STRICTLY improve. GUARD: whole-population log-loss must not worsen
+        // at four decimals. Both arms against the seed = 0 cell of this very
+        // grid - a same-run baseline, like VENUE_BLIND_BASELINE and for the
+        // same reason, and necessary anyway because bridge log-loss has no
+        // champion on any population.
+        //
+        // The gate needs two cells that differ only in the seed, so it prints
+        // only when the seed is the one thing this grid sweeps.
+        boolean seedSweepOnly = LINK_GAINS.length == 1 && K0S.length == 1
+            && HALVING_MINUTES.length == 1 && FLOOR_FRACTIONS.length == 1
+            && HOME_ADVANTAGES.length == 1 && FIELD_PLAYERS_ONLY.length == 1;
+        Scores unseeded = bySeed.get(0.0);
+        if (seedSweepOnly && unseeded != null && bySeed.size() > 1
+            && (SPINE == Spine.STATSBOMB || SCOPE == Scope.ALL)) {
+
+            for (Map.Entry<Double, Scores> cell : bySeed.entrySet()) {
+                if (cell.getKey() == 0.0) {
+                    continue;
+                }
+                Scores seeded = cell.getValue();
+                // BOTH arms read at four decimals, which is what the house
+                // rule says and all it can support: a move in the fifth
+                // decimal is noise, and noise must not pass as an improvement
+                // any more than it may count as a regression.
+                boolean primary = round4(seeded.bridge()) < round4(unseeded.bridge());
+                boolean guard = round4(seeded.whole()) <= round4(unseeded.whole());
+                System.out.printf(Locale.US,
+                    "Item 16 gate, seed %.2f: bridge %.4f vs %.4f baseline -> %s;"
+                    + " whole %.4f vs %.4f -> %s => %s%n",
+                    cell.getKey(), seeded.bridge(), unseeded.bridge(),
+                    primary ? "improves" : "NOT strictly better",
+                    seeded.whole(), unseeded.whole(), guard ? "no worse" : "WORSENS",
+                    primary && guard ? "ADOPT the unpriced seed" : "keep every debutant at average");
+            }
+            System.out.println();
+        }
+
         // Final replay with the winning knobs; the reports come from this one,
         // and so does the rating history. ADR 0009: history belongs to ONE
         // designated run, never to the grid. The run_id carries the knobs,
         // which is what turns a spine-versus-spine comparison into a join.
         String runId = String.format(Locale.ROOT, "%s-%s-k%.2f-K0%.2f-H%.0f-f%.2f-h%.2f",
-            SPINE, SCOPE, bestGain, bestK0, bestH, bestFloor, bestHome);
+            SPINE, SCOPE, bestGain, bestK0, bestH, bestFloor, bestHome)
+            // Only when it is on, so a run at the status quo keeps the run id
+            // it has always had and a seeded run is never mistaken for one.
+            + (UNPRICED_SEED == 0.0 ? "" : String.format(Locale.ROOT, "-s%.2f", UNPRICED_SEED));
         Map<Long, PlayerTally> tallies;
         try (RatingHistoryWriter history = new RatingHistoryWriter(DataFiles.RESULTS, runId)) {
             tallies = replay(matches, replays, bestGain, bestHome, bestFieldOnly,
-                new SmoothFadeSchedule(bestK0, bestH, bestFloor), new ScoringWindow(), history);
+                new SmoothFadeSchedule(bestK0, bestH, bestFloor),
+                RatingSeed.unpricedBelowAverage(pools, UNPRICED_SEED),
+                new ScoringWindow(pools), history);
             System.out.printf(Locale.US, "%nRating history: %,d rows -> %s (run %s)%n",
                 history.rows(), DataFiles.RESULTS.toAbsolutePath(), runId);
         }
@@ -421,7 +547,7 @@ public class Main {
     // drives the update factor, so quietly thin data manufactures
     // false debutants.
     private static void loadTransfermarkt(List<Match> matches, List<List<MatchEvent>> replays,
-        Set<Long> leagueMatches, List<HeldAppearance> held,
+        List<HeldAppearance> held,
         List<AppearedPlayer> appeared, List<MaybePlayer> maybe,
         List<HeldMatch> heldMatches) throws Exception {
 
@@ -441,7 +567,6 @@ public class Main {
                     }
                 }
             }
-            leagueMatches.addAll(loader.leagueMatches());
             // One pooled run in date order: one spine is one rating pool, so
             // a player's cup, league and international minutes all move the
             // same rating, and every rating is read only from matches before.
@@ -536,16 +661,72 @@ public class Main {
         }
     }
 
+    // How much of the replay is played by men at clubs the run never prices -
+    // the exposure behind item 16's seed, counted the way the engine counts a
+    // player onto the pitch: a starter once, a substitute once when he comes
+    // on. Read off the events rather than the tallies because a tally holds a
+    // career, and the question here is about appearances.
+    private record Appearances(long unpriced, long all) {
+    }
+
+    // One grid cell's three log-losses: the windowed score the grid picks on,
+    // the whole replay beside it (ADR 0010), and the same window over bridge
+    // matches only (ADR 0014).
+    private record Scores(double windowed, double whole, double bridge) {
+    }
+
+    // Four decimals is the resolution every gate in this project is stated at,
+    // and comparisons happen at it rather than below it.
+    private static long round4(double logLoss) {
+        return Math.round(logLoss * 10000);
+    }
+
+    private static Appearances census(ClubPools pools, List<List<MatchEvent>> replays) {
+        long unpriced = 0, all = 0;
+        for (List<MatchEvent> events : replays) {
+            for (MatchEvent e : events) {
+                Team side = switch (e) {
+                    case MatchEvent.StartingXI s -> s.team();
+                    case MatchEvent.Substitution sub -> sub.team();
+                    default -> null;
+                };
+                if (side == null) {
+                    continue;
+                }
+                int men = e instanceof MatchEvent.StartingXI s ? s.players().size() : 1;
+                all += men;
+                if (pools.unpriced(side.id())) {
+                    unpriced += men;
+                }
+            }
+        }
+        return new Appearances(unpriced, all);
+    }
+
     // Hears every goal's expected probability and grades it twice: once
     // over the whole replay, once over the scoring window only. Reporting
     // both keeps the choice of window visible instead of buried.
     private static final class ScoringWindow implements DoubleConsumer {
+        private final ClubPools pools;
         private final PredictionQuality windowed = new PredictionQuality();
         private final PredictionQuality whole = new PredictionQuality();
+        // Item 39's scoped gate: the same window, restricted to matches
+        // between clubs from different leagues. A whole-league mispricing
+        // moves both sides of a DOMESTIC match equally, so the gap the
+        // prediction reads barely moves and a correct bias fix scores as a
+        // tie - which the house rule would then reject. Bridges are where
+        // such a fix can show up at all.
+        private final PredictionQuality bridged = new PredictionQuality();
         private boolean open = true;
+        private boolean bridge = false;
 
-        void openFrom(LocalDate matchDate) {
-            open = !matchDate.isBefore(SCORING_FROM);
+        ScoringWindow(ClubPools pools) {
+            this.pools = pools;
+        }
+
+        void startMatch(Match match) {
+            open = !match.date().isBefore(SCORING_FROM);
+            bridge = pools.isBridge(match);
         }
 
         @Override
@@ -553,6 +734,9 @@ public class Main {
             whole.observe(p);
             if (open) {
                 windowed.observe(p);
+                if (bridge) {
+                    bridged.observe(p);
+                }
             }
         }
     }
@@ -563,13 +747,14 @@ public class Main {
     // rating, and the replay order is untouched.
     private static Map<Long, PlayerTally> replay(List<Match> matches, List<List<MatchEvent>> replays,
         double linkGain, double homeAdvantage, boolean fieldPlayersOnly, UpdateSchedule schedule,
-        ScoringWindow window, MatchObserver observer) {
+        RatingSeed seed, ScoringWindow window, MatchObserver observer) {
 
         MatchProcessor processor = new MatchProcessor(
-            new TimeIntegratedResidual(BASE_RATE, linkGain, homeAdvantage, fieldPlayersOnly, window), schedule);
+            new TimeIntegratedResidual(BASE_RATE, linkGain, homeAdvantage, fieldPlayersOnly, window),
+            schedule, seed);
         Map<Long, PlayerTally> tallies = new HashMap<>();
         for (int i = 0; i < replays.size(); i++) {
-            window.openFrom(matches.get(i).date());
+            window.startMatch(matches.get(i));
             observer.startMatch(matches.get(i).matchId(), matches.get(i).date());
             processor.process(replays.get(i), tallies, observer);
         }

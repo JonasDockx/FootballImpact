@@ -18,10 +18,20 @@ public class MatchProcessor {
     
     private final ResidualSource residualSource;
     private final UpdateSchedule schedule;
+    private final RatingSeed seed;
 
     public MatchProcessor(ResidualSource residualSource, UpdateSchedule schedule) {
+        this(residualSource, schedule, RatingSeed.AVERAGE);
+    }
+
+    // Item 16's seam. The two-argument form above is what every caller that
+    // does not care about seeding still writes, and it is the status quo:
+    // every debutant enters at the population mean.
+    public MatchProcessor(ResidualSource residualSource, UpdateSchedule schedule,
+        RatingSeed seed) {
         this.residualSource = residualSource;
         this.schedule = schedule;
+        this.seed = seed;
     }
 
     // The two-argument form is the contract every existing caller has, and it
@@ -51,11 +61,11 @@ public class MatchProcessor {
             switch(e) {
                 case MatchEvent.StartingXI s -> {
                     for (Player p : s.players()) {
-                        freeze(p.id(), tallies, frozen, frozenMinutes);
+                        freeze(p.id(), s.team(), tallies, frozen, frozenMinutes);
                     }
                 }
                 case MatchEvent.Substitution sub ->
-                    freeze(sub.playerOn().id(), tallies, frozen, frozenMinutes);
+                    freeze(sub.playerOn().id(), sub.team(), tallies, frozen, frozenMinutes);
                 default -> { }
             }
         }
@@ -81,8 +91,7 @@ public class MatchProcessor {
                     for (Player p : s.players()) {
                         set.add(p);
                         enterTime.put(p.id(), t);
-                        tallies.computeIfAbsent(p.id(), k -> new PlayerTally(p, s.team()))
-                            .playsFor(s.team());
+                        tallyFor(p, s.team(), tallies).playsFor(s.team());
                     }
                     tallies.get(s.goalkeeper().id()).startedInGoal();
                     if (s.home()) {
@@ -98,8 +107,7 @@ public class MatchProcessor {
 
                     onPitch.get(sub.team().id()).add(sub.playerOn());
                     enterTime.put(sub.playerOn().id(), t);
-                    tallies.computeIfAbsent(sub.playerOn().id(), k -> new PlayerTally(sub.playerOn(), sub.team()))
-                        .playsFor(sub.team());
+                    tallyFor(sub.playerOn(), sub.team(), tallies).playsFor(sub.team());
                 }
                 case MatchEvent.RedCard rc -> {
                     closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
@@ -162,24 +170,40 @@ public class MatchProcessor {
     }
 
 
-    // A player the run has not seen before has no tally yet, so there is
-    // nothing to freeze: the getOrDefault at both read sites supplies the
-    // debutant's 0.0, exactly as it did when this map held everybody.
-    private static void freeze(long id, Map<Long, PlayerTally> tallies,
+    // A player the run has not seen before has no tally yet, so his pre-match
+    // rating is whatever the RatingSeed says a debutant at this club starts
+    // at - written in here rather than left to the read sites' getOrDefault,
+    // because his own debut must be priced at the seed too. Exposure is
+    // untouched: a debutant has none, so frozenMinutes stays absent and the
+    // getOrDefault at the update site still supplies 0.0.
+    //
+    // Under RatingSeed.AVERAGE this puts 0.0 where the read sites would have
+    // defaulted to 0.0, so it is byte-identical to leaving the key out.
+    private void freeze(long id, Team team, Map<Long, PlayerTally> tallies,
         Map<Long, Double> frozen, Map<Long, Double> frozenMinutes) {
 
             PlayerTally tally = tallies.get(id);
-            if (tally != null) {
-                frozen.put(id, tally.rating());
-                frozenMinutes.put(id, tally.minutes());
+            if (tally == null) {
+                frozen.put(id, seed.forDebutant(team));
+                return;
             }
+            frozen.put(id, tally.rating());
+            frozenMinutes.put(id, tally.minutes());
         }
+
+    // Every place a tally is born. A player's rating starts at his seed and
+    // moves from there; a player already in the run keeps the tally he has, so
+    // he is seeded exactly once, at the club he was first seen at.
+    private PlayerTally tallyFor(Player p, Team team, Map<Long, PlayerTally> tallies) {
+        return tallies.computeIfAbsent(p.id(),
+            k -> new PlayerTally(p, team, seed.forDebutant(team)));
+    }
 
     private void leavePitch(Map<Long, PlayerTally> tallies, Map<Long, Integer> enterTime,
         Map<Long, Integer> playedSeconds, Player p, Team team, int t) {
         Integer start = enterTime.remove(p.id());
         if (start != null) {
-            tallies.computeIfAbsent(p.id(), k -> new PlayerTally(p, team)).addSeconds(t - start);
+            tallyFor(p, team, tallies).addSeconds(t - start);
             playedSeconds.merge(p.id(), t - start, Integer::sum);
         }
     }

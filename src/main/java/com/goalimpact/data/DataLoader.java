@@ -1,5 +1,6 @@
 package com.goalimpact.data;
 
+import com.goalimpact.model.Competition;
 import com.goalimpact.model.CompetitionSeason;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
@@ -98,11 +99,31 @@ public class DataLoader {
                 int homeScore = obj.get("home_score").getAsInt();
                 int awayScore = obj.get("away_score").getAsInt();
 
-                matches.add(new Match(matchId, date, home, away, homeScore, awayScore,
+                matches.add(new Match(matchId, competitionOf(competition), date,
+                    home, away, homeScore, awayScore,
                     classifyHomeSide(competition, obj, matchId)));
             }
         }
         return matches;
+    }
+
+    // Item 16: this spine's competition kinds. StatsBomb's competitions.json
+    // carries no type at all, only competition_international - which is true
+    // exactly for the national-team tournaments - so club competitions all
+    // land on LEAGUE.
+    //
+    // That is deliberately generous rather than accurate: the Champions League
+    // is not a league, and calling it one costs nothing, because the only
+    // question this kind decides is which clubs the run never prices. Every
+    // StatsBomb club plays in a competition this labels LEAGUE, so this
+    // corpus has no unpriced club and item 16's seed can never fire on it -
+    // which keeps StatsBomb's pinned numbers where they are, forever. The
+    // cup-minnow bias is a Transfermarkt problem; this corpus has no minnows.
+    private static Competition competitionOf(CompetitionSeason competition) {
+        return new Competition(String.valueOf(competition.competitionId()),
+            competition.international()
+                ? Competition.Kind.NATIONAL_TEAM
+                : Competition.Kind.LEAGUE);
     }
 
     // ADR 0008: who, if anyone, is genuinely at home. National-team

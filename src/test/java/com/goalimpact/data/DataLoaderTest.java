@@ -1,5 +1,6 @@
 package com.goalimpact.data;
 
+import com.goalimpact.model.Competition;
 import com.goalimpact.model.CompetitionSeason;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
@@ -45,7 +46,8 @@ class DataLoaderTest {
     }
 
     private static Match eventsFixtureMatch(Match.HomeSide homeSide) {
-        return new Match(9001, LocalDate.of(2024, 1, 1),
+        return new Match(9001, new Competition("2", Competition.Kind.LEAGUE),
+            LocalDate.of(2024, 1, 1),
             new Team(100, "Alpha FC"), new Team(200, "Beta United"), 0, 0, homeSide);
     }
 
@@ -148,7 +150,8 @@ class DataLoaderTest {
 
     @Test
     void tripwireFiresWhenMatchesAndEventsDisagreeOnTeamIds() {
-        Match ghost = new Match(9001, LocalDate.of(2024, 1, 1),
+        Match ghost = new Match(9001, new Competition("2", Competition.Kind.LEAGUE),
+            LocalDate.of(2024, 1, 1),
             new Team(999, "Ghost"), new Team(998, "Phantom"), 0, 0, Match.HomeSide.HOME);
 
         assertThrows(IllegalStateException.class, () -> loader.loadEvents(ghost));

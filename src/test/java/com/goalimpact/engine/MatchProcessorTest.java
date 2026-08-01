@@ -539,4 +539,102 @@ class MatchProcessorTest {
         assertEquals(heard.get(0).minutesPlayed(), heard.get(1).minutesBefore(), 1e-12);
     }
 
+    // Item 16. Team B stands in for a club this run never prices; its men
+    // enter three points below average, Team A's still at the mean.
+    private static final RatingSeed TEAM_B_IS_UNPRICED =
+        team -> team.id() == TEAM_B.id() ? -3.0 : 0.0;
+
+    @Test
+    void aDebutantEntersAtHisClubsSeed() {
+        MatchProcessor processor =
+            new MatchProcessor(new FlatCreditRule(), m -> 1.0, TEAM_B_IS_UNPRICED);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(90, TEAM_A)), tallies);
+
+        // Everyone debuted and K = 1, so the tally is seed + residual.
+        assertEquals(1.0, rating(tallies, 1), 1e-9);
+        assertEquals(-3.0 - 1.0, rating(tallies, 12), 1e-9);
+    }
+
+    @Test
+    void aDebutantsOwnMatchIsPricedAtHisSeed() {
+        // The half that is easy to miss: the seed has to reach the FROZEN
+        // pre-match ratings too, or the lineup his opponents are judged
+        // against is still the average one and the match he actually plays
+        // is the one match the fix does not touch.
+        MatchProcessor processor =
+            new MatchProcessor(new FlatCreditRule(), m -> 1.0, TEAM_B_IS_UNPRICED);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+        List<Heard> heard = new ArrayList<>();
+        MatchObserver observer = (id, mb, rb, res, mp, ra) -> heard.add(new Heard(id, mb, rb, res, mp, ra));
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(90, TEAM_A)), tallies, observer);
+
+        assertEquals(0.0, heard.stream().filter(h -> h.id() == 1L).findFirst().orElseThrow()
+            .ratingBefore(), 1e-9);
+        assertEquals(-3.0, heard.stream().filter(h -> h.id() == 12L).findFirst().orElseThrow()
+            .ratingBefore(), 1e-9);
+    }
+
+    @Test
+    void aSubstituteIsSeededToo() {
+        MatchProcessor processor =
+            new MatchProcessor(new FlatCreditRule(), m -> 1.0, TEAM_B_IS_UNPRICED);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            sub(60, TEAM_B, 13, 14)), tallies);
+
+        assertEquals(-3.0, rating(tallies, 14), 1e-9);
+    }
+
+    @Test
+    void aPlayerIsSeededOnceAndOnlyAtTheClubHeWasFirstSeenAt() {
+        // A minnow's man who later signs for a league club keeps the career
+        // he has: the seed decides where a rating STARTS, and after that he
+        // is an ordinary player. Re-seeding on transfer would be a club
+        // rating in disguise, which CONTEXT rules out.
+        MatchProcessor processor =
+            new MatchProcessor(new FlatCreditRule(), m -> 1.0, TEAM_B_IS_UNPRICED);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(90, TEAM_A)), tallies);
+        double afterDebut = rating(tallies, 12);
+
+        // Player 12 turns out for Team A this time, and picks up +1 there.
+        processor.process(List.of(
+            xi(TEAM_A, 12, 2),
+            xi(TEAM_B, 22, 23),
+            goal(90, TEAM_A)), tallies);
+
+        assertEquals(afterDebut + 1.0, rating(tallies, 12), 1e-9);
+    }
+
+    @Test
+    void theDefaultSeedIsTheStatusQuo() {
+        // The stage 1 pin: without a seed nobody moves off the mean, which is
+        // what every caller of the two-argument constructor still gets.
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13)), tallies);
+
+        assertEquals(0.0, rating(tallies, 1), 1e-12);
+        assertEquals(0.0, rating(tallies, 12), 1e-12);
+    }
+
 }

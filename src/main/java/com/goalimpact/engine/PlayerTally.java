@@ -15,8 +15,16 @@ public class PlayerTally {
     private boolean goalkeeper; // sticky: ever started in goal, per the glossary's career-level tag
 
     public PlayerTally(Player player, Team team) {
+        this(player, team, 0.0);
+    }
+
+    // Item 16: a career starts where the RatingSeed puts it, which is 0.0 -
+    // the population mean - for everyone except a player first seen at a club
+    // the run never prices.
+    public PlayerTally(Player player, Team team, double seed) {
         this.player = player;
         this.team = team;
+        this.rating = seed;
     }
 
     public void applyUpdate(double delta) { this.rating += delta; }

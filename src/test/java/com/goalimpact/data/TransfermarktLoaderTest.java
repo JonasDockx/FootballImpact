@@ -1,5 +1,6 @@
 package com.goalimpact.data;
 
+import com.goalimpact.model.Competition;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
 
@@ -27,6 +28,50 @@ class TransfermarktLoaderTest {
         String competitionType, String round, long homeClubId, long awayClubId) {
         return TransfermarktLoader.classifyHomeSide(new TransfermarktLoader.Fixture(
             competitionId, season, competitionType, round, homeClubId, awayClubId));
+    }
+
+    private static Competition.Kind kind(String competitionId, String competitionType) {
+        return TransfermarktLoader.classifyCompetition(new TransfermarktLoader.Fixture(
+            competitionId, "2024", competitionType, "12. Matchday", 1, 2)).kind();
+    }
+
+    @Test
+    void theVendorsOwnLeagueLabelIsBelieved() {
+        assertEquals(Competition.Kind.LEAGUE, kind("GB1", "domestic_league"));
+    }
+
+    @Test
+    void aCupIsNotEvidenceOfAClubsLevel() {
+        assertEquals(Competition.Kind.OTHER, kind("FAC", "domestic_cup"));
+        assertEquals(Competition.Kind.OTHER, kind("CL", "international_cup"));
+        assertEquals(Competition.Kind.OTHER, kind("SUC", "other"));
+    }
+
+    @Test
+    void aNationalTeamCompetitionIsItsOwnKind() {
+        // Not OTHER: a national side plays no league either, and lumping it in
+        // would make every one of them read as an unpriced cup minnow.
+        assertEquals(Competition.Kind.NATIONAL_TEAM, kind("EURO", "national_team_competition"));
+    }
+
+    @Test
+    void aLeagueTheVendorNeverTypedIsStillALeague() {
+        // COL1 has no competitions row at all - one of five the item 15
+        // scraper added - so its games carry a NULL competition_type. Left to
+        // the column, all 20 Colombian clubs would read as cup minnows.
+        assertEquals(Competition.Kind.LEAGUE, kind("COL1", null));
+        // And the four unnamed competitions that really are not leagues.
+        assertEquals(Competition.Kind.OTHER, kind("CGB", null));
+        assertEquals(Competition.Kind.OTHER, kind("POCP", null));
+        assertEquals(Competition.Kind.OTHER, kind("KLUB", null));
+        assertEquals(Competition.Kind.OTHER, kind("UKRS", null));
+    }
+
+    @Test
+    void belgianPlayOffsAreTheSecondHalfOfTheirLeagueSeason() {
+        assertEquals(Competition.Kind.LEAGUE, kind("EJPL", "other"));
+        assertEquals(Competition.Kind.LEAGUE, kind("POBE", "other"));
+        assertEquals(Competition.Kind.LEAGUE, kind("BPO4", "other"));
     }
 
     @Test
