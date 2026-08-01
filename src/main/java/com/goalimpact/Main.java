@@ -72,29 +72,49 @@ public class Main {
     // plays no league football anywhere in it (see ClubPools). 0.0 is the
     // status quo, where every debutant enters at exactly world-average.
     //
-    // STAGE 1 PINS IT OFF. The seam, the classification and the bridge-scoped
-    // gate all land here inert, and this run must be byte-identical to the one
-    // before it - same CSV, same log-loss. Stage 2 measures the constant and
-    // turns it on.
+    // MEASURED 2026-08-01, not tuned, and pinned and dated like BASE_RATE and
+    // h. Unpriced sides underperform expectation by 0.3568 goals per 90 -
+    // their opponents collect +0.3196 residual per 90 against them where the
+    // rest of the run runs -0.0373 - and that shortfall inverted through the
+    // link function is
+    //     d = (2 / k) * asinh(0.3568 / (180 * BASE_RATE)) = 2.58 rating points.
+    // Derivation and its bias statistics: scripts/unpriced-seed.sql, over the
+    // designated run of 85,050 matches, 2012-07-09 to 2026-07-06. 2,074 of
+    // 2,867 clubs are unpriced there, 11.4% of appearances, and 58.7% of all
+    // debuts happen at one - which is what the seed can actually reach, since
+    // it prices a player once and never again.
     //
-    // This is a MEASURED constant, not a grid knob: it is derived from the
-    // residual gap unpriced sides actually run - they underperform
-    // expectation by ~0.346 goals per 90 against rated ones (#32) - inverted
-    // through the link function into rating points, then pinned and dated
-    // like BASE_RATE and h. A sweep here is a CHECK on that derivation, never
-    // the source of the value; the winner of a sweep is not evidence.
+    // GATE (#39), against the seed = 0 cell of the same grid: bridge log-loss
+    // 0.6341 vs 0.6457, whole-population 0.6488 vs 0.6510. Both arms pass, so
+    // the seed ships.
     //
-    // Which is why the shipped value and the swept values are two separate
-    // fields rather than one array with a winner: UNPRICED_SEED is what the
-    // designated run uses, and nothing the grid reports can change it.
-    private static final double UNPRICED_SEED = 0.0;
+    // The check sweep does NOT turn over at the measured value, and that is
+    // recorded rather than acted on. Bridge / whole at 0, 2.58, 8, 15, 30:
+    //   0.6457/0.6510, 0.6341/0.6488, 0.6169/0.6458, 0.6081/0.6448, 0.6269/0.6515.
+    // A seed near 15 scores better on both arms. It is not adopted, for two
+    // reasons that are the same reason twice: #39 fixed this constant as
+    // DERIVED, so the winner of a sweep is not evidence about it; and 15
+    // points is over two population standard deviations, which is no longer
+    // pricing a minnow honestly but calibrating whole pools - item 9's fix,
+    // which #39 sequenced after this one and which arrives with its own gate.
+    // Taking it here would spend item 9's evidence under item 16's name and
+    // leave nothing to measure it with.
+    //
+    // Which is why the shipped value and the swept values are two different
+    // fields, and not one array with a winner. UNPRICED_SEED is what the
+    // DESIGNATED RUN uses, full stop; UNPRICED_SEEDS is the grid's check, and
+    // nothing it reports can change what ships. Every other knob here is
+    // genuinely tuned and a grid winner is the right answer for it - for this
+    // one it is not, and a comment saying so would only hold until the next
+    // person widened the sweep.
+    private static final double UNPRICED_SEED = 2.58;
 
     // The check, and the gate's own baseline. 0.0 must stay in it: the gate is
     // two cells of one grid differing in exactly one thing (ADR 0014), so
     // dropping the mechanism-off cell would make the decision unreproducible
     // without editing source - the same reason FIELD_PLAYERS_ONLY keeps the
-    // arm that lost. At stage 1 there is only that cell, so the gate is silent.
-    private static final double[] UNPRICED_SEEDS = {0.0};
+    // arm that lost.
+    private static final double[] UNPRICED_SEEDS = {0.0, UNPRICED_SEED};
 
     // ADR 0009: exactly one spine per run. The same match arriving under
     // two sources' identities would be replayed twice, inflating exposure
@@ -158,9 +178,13 @@ public class Main {
     //     so the reigning model is simply re-run for a fresh baseline. The
     //     0.6502 line is kept because it is the last number belonging to the
     //     narrower spine, not because it is comparable to this one.
+    //   Transfermarkt 2026-08-01: 0.6481 (same knobs, unpriced seed 2.58),
+    //     same 85,050 matches; 0.6488 whole replay. Item 16, and this one IS
+    //     an experiment result - gated on bridge matches against the line
+    //     above, which is its same-run baseline (ADR 0014).
     private static final double CHAMPION = switch (SPINE) {
         case STATSBOMB -> 0.6259;
-        case TRANSFERMARKT -> 0.6503;
+        case TRANSFERMARKT -> 0.6481;
     };
     
     // The window over which predictions are GRADED - not the window that is

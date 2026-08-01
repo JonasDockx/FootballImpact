@@ -180,6 +180,31 @@ bridges therefore floats at a false average, which is why width is not purely
 additive — some additions make the ratings worse (see #9).
 _Avoid_: link, connector
 
+**Unpriced club**:
+A club a run never sees play league football, so it never watches the club
+against a pool it knows and never learns what the club is worth. Its players sit
+at 0, which this model reads as *exactly world-average* rather than *unknown* —
+so a cup minnow's eleven arrive priced as the equals of whoever draws them.
+2,074 of 2,867 clubs on the 85,050-match spine, 11.4% of appearances, and 58.7%
+of all debuts. A fact about **coverage**, not about results: it says which
+competitions the run happens to carry, never how anyone did in them. A national
+side plays no league either and is nobody's minnow, so it is never unpriced.
+Distinct from an *Island*, which the run sees plenty of and still cannot place.
+_Avoid_: unrated club, unknown club — every club's players carry ratings; what
+is missing is evidence about their level
+
+**Rating seed**:
+The rating a player enters a run at, the first time it is ever seen him — 0 for
+everyone except a player first seen at an *Unpriced club*, who enters below
+average by a measured, pinned constant (see
+[ADR 0015](docs/adr/0015-seeding-a-rating-below-average.md)). Set once, at the club he
+debuted for, and never revisited: a player who later signs for a league club
+keeps the career he has. Strength stays emergent from players — nothing
+club-level is stored or updated, and the club decides only where a rating
+*starts*.
+_Avoid_: prior, initial rating — the seed is one number at one moment, not a
+distribution and not a per-match adjustment
+
 **Island**:
 A pool with too few bridges for its level to be established, so its players are
 priced against each other rather than against football. Scotland is the measured
