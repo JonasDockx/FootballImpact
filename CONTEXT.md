@@ -205,6 +205,27 @@ is near even, whatever the knobs are — does not decide which knobs win (see
 reason, never a tuned one.
 _Avoid_: training window, test set — nothing is held out and nothing is fitted
 
+**Designated run**:
+The one replay whose numbers the project stands behind — the full ingest over
+every competition-season, at the pinned constants, and the run every calibration
+was measured on: the base scoring rate, *h*, `K0`, `H` and the champion
+log-loss. Only it writes the results file; a grid cell never does. Re-running it
+is a deliberate, dated act, because a champion log-loss belongs to a population
+and re-measuring is what moves the record.
+_Avoid_: the main run, production run — what marks it is that the constants were
+measured on it, not that it is the usual one
+
+**Refresh run**:
+A replay whose only purpose is to carry newly scraped matches through to the
+viewer: fixed constants, no tuning grid, no re-measurement. It is what the weekly
+job (#27) is allowed to do unattended, and the distinction from a *Designated
+run* is the whole point — refreshing the data and re-measuring the model are two
+different acts, and only the first happens while nobody is watching. Its output
+is the same results file plus a rebuilt viewer; what it must never do is report a
+new champion.
+_Avoid_: incremental run — nothing is incremental, the whole spine is replayed
+every time; only the grid is skipped
+
 **Value**:
 A player's current GoalImpact rating — an accumulated point total, not a
 per-match or per-90 average. Population totals are not conserved (per-player
