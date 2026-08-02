@@ -546,7 +546,10 @@ public class Main {
 
         new Leaderboard().print(tallies.values(), 20);
 
-        Path csv = Path.of("goalimpact.csv");
+        // Overridable for the same reason DataFiles' paths are, and never for
+        // any other: a diagnostic run against a rebuilt snapshot must not
+        // overwrite the designated run's leaderboard.
+        Path csv = Path.of(System.getProperty("goalimpact.csv", "goalimpact.csv"));
         new CsvWriter().write(csv, tallies.values());
         System.out.println();
         System.out.println("Full results written to " + csv.toAbsolutePath());

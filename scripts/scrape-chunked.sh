@@ -53,6 +53,13 @@ GI=/mnt/c/Users/dockx/Documents/Programmeren/GoalImpact/scripts
 python3 "$GI/throttle-scraper.py" --check > /dev/null \
   || { echo "THROTTLE NOT APPLIED - refusing to scrape"; exit 1; }
 
+# Checked here rather than trusted, because its absence is INVISIBLE: without it
+# every cup and every tournament returns 0 fixtures, 0 failed requests, and a
+# clean exit. A poetry install silently reverts it, and the next thing anyone
+# would see is a census short by 47 competitions after the scraping was done.
+python3 "$GI/patch-cup-fixtures.py" --check > /dev/null \
+  || { echo "CUP FIXTURE-LIST PATCH NOT APPLIED - cups would scrape as silence"; exit 1; }
+
 DIR="$HOME/spine/scrapes/${ASSET}-${SEASON}${SUFFIX}-chunks"
 mkdir -p "$DIR"
 LOG="$HOME/spine/logs/${ASSET}-${SEASON}${SUFFIX}.log"

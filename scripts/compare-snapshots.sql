@@ -17,6 +17,7 @@
 --     games        url, home_club_name, away_club_name      ~900 rows
 --     game_events  club_name                                ~350 rows
 --     players      name, first_name, last_name, url, ...    ~3 rows
+--     appearances  player_name, player_current_club_id       ~400 / ~30 rows
 --
 -- The cause is that a label is chosen by a window function over several raw
 -- records, so where a club or player appears under two spellings the tie-break
@@ -35,14 +36,26 @@
 -- The row hash is order-independent on purpose: dbt does not promise a stable
 -- row order and a reordered table is not a changed table.
 --
--- Usage:
+-- WHY THE FORMATION COLUMNS ARE EXCLUDED TOO (added 2026-08-02, stage 3).
+-- games.home_club_formation and games.away_club_formation are not read from the
+-- `games` scrape at all -- base_games joins them in from the TEAM SHEET. So a
+-- fixture that gains a sheet in a backfill has its `games` row rewritten from
+-- NULL to "4-4-2 Diamond" without one rating-bearing field moving. Left in, they
+-- would report every newly-sheeted fixture as a defect, which on stage 3 is
+-- 42,000 of them. They are counted in section 3 instead, where the count is the
+-- interesting number: it should equal the fixtures the census says gained a
+-- sheet.
+--
+-- Usage. The two ATTACH lines below name the PREVIOUS snapshot and the one just
+-- built, and they are edited per comparison -- there is only ever one pair worth
+-- comparing and hard-coding it keeps the run a single command:
 --   duckdb -init scripts/compare-snapshots.sql -c ".quit"
 
 .mode box
 
-ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets.duckdb'
+ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets-2012.duckdb'
   AS old (READ_ONLY);
-ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets-rebuilt.duckdb'
+ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-datasets-stage3.duckdb'
   AS new (READ_ONLY);
 
 .print "=== 1. row counts ==="
@@ -72,9 +85,11 @@ WITH parts AS (
   -- games without the three unstable label columns
   SELECT 'games' AS t,
          (SELECT count(*) FROM (
-            SELECT * EXCLUDE (url, home_club_name, away_club_name) FROM old.games
+            SELECT * EXCLUDE (url, home_club_name, away_club_name,
+                              home_club_formation, away_club_formation) FROM old.games
             EXCEPT ALL
-            SELECT * EXCLUDE (url, home_club_name, away_club_name) FROM new.games)) AS n
+            SELECT * EXCLUDE (url, home_club_name, away_club_name,
+                              home_club_formation, away_club_formation) FROM new.games)) AS n
   UNION ALL
   SELECT 'game_events',
          (SELECT count(*) FROM (
@@ -85,11 +100,16 @@ WITH parts AS (
   SELECT 'game_lineups',
          (SELECT count(*) FROM (SELECT * FROM old.game_lineups EXCEPT ALL SELECT * FROM new.game_lineups))
   UNION ALL
+  -- player_current_club_id joins in from `players`, which is one of the tables
+  -- the vendor builds non-deterministically -- it is where the player is TODAY,
+  -- not who he played for in the fixture, and nothing in src/ reads it. Found on
+  -- stage 3, where it was the whole of an otherwise clean appearances diff: 26
+  -- rows, every other column identical, appearance_id sets equal on both sides.
   SELECT 'appearances',
          (SELECT count(*) FROM (
-            SELECT * EXCLUDE (player_name) FROM old.appearances
+            SELECT * EXCLUDE (player_name, player_current_club_id) FROM old.appearances
             EXCEPT ALL
-            SELECT * EXCLUDE (player_name) FROM new.appearances))
+            SELECT * EXCLUDE (player_name, player_current_club_id) FROM new.appearances))
   UNION ALL
   SELECT 'clubs',
          (SELECT count(*) FROM (SELECT * FROM old.clubs EXCEPT ALL SELECT * FROM new.clubs))
@@ -113,7 +133,18 @@ WHERE o.away_club_name IS DISTINCT FROM x.away_club_name
 UNION ALL
 SELECT 'players.name', count(*)
 FROM old.players o JOIN new.players x USING (player_id)
-WHERE o.name IS DISTINCT FROM x.name;
+WHERE o.name IS DISTINCT FROM x.name
+UNION ALL
+SELECT 'appearances.player_current_club_id', count(*)
+FROM old.appearances o JOIN new.appearances x USING (appearance_id)
+WHERE o.player_current_club_id IS DISTINCT FROM x.player_current_club_id
+UNION ALL
+-- Not label churn: a shared fixture that GAINED a team sheet. Zero on a
+-- reproduction, and on a backfill it should equal the census's "games that
+-- gained a sheet" restricted to fixtures both files already held.
+SELECT 'games.formation filled in (backfill only)', count(*)
+FROM old.games o JOIN new.games x USING (game_id)
+WHERE o.home_club_formation IS NULL AND x.home_club_formation IS NOT NULL;
 
 .print ""
 .print "=== 4. added or lost fixtures (nonzero is expected only when widening) ==="

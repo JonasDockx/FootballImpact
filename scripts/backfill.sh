@@ -1,8 +1,19 @@
 #!/bin/bash
-# Item 30 stage 3: the backfill. The eighteen competitions of stage 1, across the
-# eleven seasons 2012-2022, `games` then `game_lineups` and nothing else.
+# Item 30: the backfill. A set of competitions across a range of seasons,
+# `games` then `game_lineups` and nothing else.
 #
-#   backfill.sh [first_season] [last_season]      # defaults 2022 down to 2012
+#   backfill.sh [first_season] [last_season] [parents.json] [tag] [logname]
+#
+# Stage 3, which is what this was written for and what its defaults still are:
+# the eighteen competitions of stage 1, seasons 2022 down to 2012.
+#
+#   backfill.sh                                   # = 2022 2012 comps18.json s3
+#
+# Pass 2 (ADR 0013): the 53 competitions the config gained -- 22 domestic cups,
+# six second tiers, the qualifiers and both Nations Leagues -- across 2000-2025.
+# Its parents file is built by scripts/widen-config.py.
+#
+#   backfill.sh 2025 2000 ~/spine/scrapes/comps-pass2.json p2 pass2-backfill.log
 #
 # Launch it from Windows PowerShell with the launcher, never by hand:
 #   powershell -File C:\Users\dockx\Documents\Programmeren\GoalImpact\scripts\spine-start.ps1
@@ -45,34 +56,41 @@ FIRST=${1:-2022}
 LAST=${2:-2012}
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-COMPS="$HOME/spine/scrapes/comps18.json"
-# Namespaces every scrape artefact, so stage 3's season 2012 cannot collide with
-# stage 2's - same asset, same season, an entirely different parent list. See the
-# header of scrape-chunked.sh for what the collision would have done silently.
-TAG=s3
+COMPS=${3:-$HOME/spine/scrapes/comps18.json}
+# TAG namespaces every scrape artefact, so stage 3's season 2012 cannot collide
+# with stage 2's - same asset, same season, an entirely different parent list -
+# and so pass 2's cannot collide with stage 3's. See the header of
+# scrape-chunked.sh for what the collision would have done silently. It is also
+# why a run must never be given a tag another run has used with a different
+# parents file: the resume logic is deliberately dumb.
+TAG=${4:-s3}
 STOP="$HOME/spine/STOP"
-LOG="$HOME/spine/logs/stage3-backfill.log"
+LOG="$HOME/spine/logs/${5:-stage3-backfill.log}"
 mkdir -p "$(dirname "$LOG")"
 
 [ -s "$COMPS" ] || { echo "missing parents file $COMPS"; exit 1; }
 
 say() { echo "$*" | tee -a "$LOG"; }
 
-say "=== stage 3 backfill: seasons $FIRST..$LAST, started $(date -Is) ==="
+say "=== backfill [$TAG]: seasons $FIRST..$LAST from $(basename "$COMPS"), started $(date -Is) ==="
 if [ -f "$STOP" ]; then
   say "!!! $STOP exists - remove it before starting, or nothing will run"
   exit 1
 fi
 
 for SEASON in $(seq "$FIRST" -1 "$LAST"); do
+  # Created rather than skipped. Stage 3 only ever ran over seasons the vendor
+  # had already pulled, so a missing directory there meant a typo and skipping
+  # was right. Pass 2 reaches back to 2000, where the vendor's raw tree simply
+  # stops - the seasons jump 2005, 2007, 2009, 2011, 2012 - so for most of its
+  # range the directory not existing is the normal case and creating it is the
+  # job. merge-scrape.py still refuses a missing directory, which keeps the
+  # typo guard where a human types a season by hand.
   RAW="$HOME/spine/transfermarkt-datasets/data/raw/transfermarkt-scraper/$SEASON"
-  if [ ! -d "$RAW" ]; then
-    say "--- season $SEASON: no raw directory, skipping (merge would fail anyway)"
-    continue
-  fi
+  mkdir -p "$RAW"
 
-  # One competition per chunk for `games`: the parent list is only 18 long, so
-  # the default chunking would make the whole 1h17m fixture scrape a single
+  # One competition per chunk for `games`: the parent list is tens of entries,
+  # so the default chunking would make a season's whole fixture scrape a single
   # all-or-nothing unit - exactly what this stage is trying to avoid.
   say "--- season $SEASON: games ($(date -Is))"
   "$HERE/scrape-chunked.sh" games "$SEASON" "$COMPS" 1 "$TAG"
@@ -119,5 +137,7 @@ for SEASON in $(seq "$FIRST" -1 "$LAST"); do
   say "=== season $SEASON COMPLETE $(date -Is) ==="
 done
 
-say "=== stage 3 backfill finished $(date -Is) ==="
-say "=== next: rebuild the snapshot (just prepare_local + export-duckdb.py), then the census ==="
+say "=== backfill [$TAG] finished $(date -Is) ==="
+say "=== next: predict the census (scripts/census-predict.py), rebuild the snapshot"
+say "=== (dbt build --threads 4 --target dev, then scripts/synching/export-duckdb.py),"
+say "=== then reproduce the census and run scripts/compare-snapshots.sql"

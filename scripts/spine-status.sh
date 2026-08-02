@@ -18,14 +18,20 @@ LOG=$(ls -t "$HOME"/spine/logs/*.log 2>/dev/null | head -1)
 echo "time: $(date '+%H:%M:%S')"
 echo "log:  $(basename "$LOG")"
 
-# Stage 3 spans many nights and twenty-two asset-seasons, so "is it running" is
-# only half the question - the other half is how much of the backfill is done.
-# Printed whether or not a crawler is up, because that is exactly what you want
-# to know after stopping it.
+# A backfill spans many nights and tens of asset-seasons, so "is it running" is
+# only half the question - the other half is how much of it is done. Printed
+# whether or not a crawler is up, because that is exactly what you want to know
+# after stopping it.
+#
+# Every pass's chunk directories are listed, finished ones included. They are
+# named <asset>-<season>-<tag>, so `-s3` is stage 3 and `-p2` is ADR 0013's
+# pass 2; a directory with no tag is stage 2's, from before tags existed. Old
+# passes staying visible is deliberate - it is the same reason the scrape
+# artefacts are never deleted.
 [ -f "$HOME/spine/STOP" ] && echo "STOP FLAG IS SET - the run will halt after the current chunk"
-if ls "$HOME"/spine/scrapes/game_lineups-*-chunks > /dev/null 2>&1; then
+if ls "$HOME"/spine/scrapes/*-chunks > /dev/null 2>&1; then
   echo
-  echo "stage 3 progress (chunks complete / total, per asset-season):"
+  echo "progress (chunks complete / total, per asset-season-tag):"
   for d in "$HOME"/spine/scrapes/*-chunks; do
     t=$(ls "$d"/chunk_*.json 2>/dev/null | wc -l)
     c=$(ls "$d"/chunk_*.out.jsonl.gz 2>/dev/null | wc -l)

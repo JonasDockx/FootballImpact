@@ -1,6 +1,10 @@
-# Item 30 stage 3: start or resume the backfill, and prove it actually started.
+# Item 30: start or resume a backfill, and prove it actually started.
 #
-#   powershell -File C:\Users\dockx\Documents\Programmeren\GoalImpact\scripts\spine-start.ps1
+#   powershell -File C:\Users\...\GoalImpact\scripts\spine-start.ps1 pass2
+#   powershell -File C:\Users\...\GoalImpact\scripts\spine-start.ps1        # stage3
+#
+# The argument is the pass name, and it must stay free of spaces - see the
+# ArgumentList comment below and the header of backfill-launch.sh.
 #
 # WHY THIS EXISTS. The documented launch used to be
 #
@@ -21,6 +25,8 @@
 # And `started` is never printed on faith again. This waits for the crawler
 # process to appear and says PASS or FAIL.
 
+param([ValidateSet('stage3', 'pass2')][string]$Pass = 'pass2')
+
 $ErrorActionPreference = 'Stop'
 
 # Every argument below must be free of spaces. PowerShell 5.1's Start-Process
@@ -30,7 +36,8 @@ $ErrorActionPreference = 'Stop'
 # command therefore lives in backfill-launch.sh, which takes no arguments. See
 # that file's header for how it was measured.
 $LaunchScript = '/mnt/c/Users/dockx/Documents/Programmeren/GoalImpact/scripts/backfill-launch.sh'
-$NohupLog = '~/spine/logs/stage3-nohup.log'
+$NohupLog = "~/spine/logs/$Pass-nohup.log"
+if ($Pass -eq 'stage3') { $NohupLog = '~/spine/logs/stage3-nohup.log' }
 
 # NOT named `Wsl`: PowerShell resolves a function ahead of an external command,
 # so a function called `Wsl` calling `wsl` calls itself until the call depth
@@ -69,9 +76,9 @@ if ($running -ne '0') {
     exit 1
 }
 
-Write-Host "starting stage 3 backfill (minimised window - leave it open)..."
+Write-Host "starting $Pass backfill (minimised window - leave it open)..."
 Start-Process -WindowStyle Minimized wsl -ArgumentList `
-    '-d', 'Ubuntu', '-e', 'bash', $LaunchScript
+    '-d', 'Ubuntu', '-e', 'bash', $LaunchScript, $Pass
 
 # The first chunk has to get through poetry's startup and the crawler's own boot
 # before `tfmkt` is visible in the process table, which is tens of seconds on a
