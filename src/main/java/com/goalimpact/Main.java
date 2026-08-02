@@ -9,6 +9,7 @@ import com.goalimpact.data.HeldMatch;
 import com.goalimpact.data.MaybePlayer;
 import com.goalimpact.data.TransfermarktLoader;
 import com.goalimpact.data.UnusableMatchException;
+import com.goalimpact.engine.AgeingCurve;
 import com.goalimpact.engine.ClubPools;
 import com.goalimpact.engine.MatchObserver;
 import com.goalimpact.engine.MatchProcessor;
@@ -20,6 +21,7 @@ import com.goalimpact.engine.UpdateSchedule;
 import com.goalimpact.model.CompetitionSeason;
 import com.goalimpact.model.Match;
 import com.goalimpact.model.MatchEvent;
+import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
 import com.goalimpact.report.CsvWriter;
 import com.goalimpact.report.HeldAppearanceWriter;
@@ -252,10 +254,16 @@ public class Main {
         List<AppearedPlayer> appeared = new ArrayList<>();
         List<MaybePlayer> maybe = new ArrayList<>();
         List<HeldMatch> heldMatches = new ArrayList<>();
+        // ADR 0016: every man on the pitch needs an age now, so the dates of
+        // birth are loaded with the fixtures rather than looked up at
+        // reporting time. StatsBomb's files carry none, which the curve reads
+        // as "unknown age" for the whole population - correct, and at the
+        // pinned flat table it costs nothing either way.
+        Map<Long, LocalDate> birthDates = new HashMap<>();
         switch (SPINE) {
             case STATSBOMB -> loadStatsBomb(matches, replays);
             case TRANSFERMARKT -> loadTransfermarkt(
-                matches, replays, held, appeared, maybe, heldMatches);
+                matches, replays, held, appeared, maybe, heldMatches, birthDates);
         }
         System.out.printf("%nSpine: %s - %d matches replay (%s to %s).%n%n",
             SPINE, replays.size(),
@@ -345,7 +353,7 @@ public class Main {
         // off rating_history in scripts/model-bias-diagnostics.sql; this is
         // the run-level reconciliation it must agree with.
         ClubPools pools = ClubPools.of(matches);
-        Appearances census = census(pools, replays);
+        Appearances census = census(pools, birthDates, replays);
         long bridgeMatches = matches.stream().filter(pools::isBridge).count();
         System.out.printf(Locale.US,
             "Unpriced clubs (item 16): %,d of %,d clubs play no league football in this run"
@@ -357,6 +365,19 @@ public class Main {
         System.out.printf(Locale.US,
             "Bridge matches (item 39 gate population): %,d of %,d (%.1f%%)%n%n",
             bridgeMatches, matches.size(), 100.0 * bridgeMatches / matches.size());
+
+        // ADR 0016: how much of the replay the ageing curve can actually age.
+        // Everyone else is charged the unknown-age penalty, so this is the
+        // exposure of that one constant - reported before the grid, like the
+        // unpriced census above, because it describes the population.
+        AgeingCurve ageing = AgeingCurve.pinned(birthDates);
+        System.out.printf(Locale.US,
+            "Dates of birth (ADR 0016): %,d of %,d men on the pitch (%.1f%%),"
+            + " %,d of %,d appearances (%.1f%%)%n%n",
+            census.datedMen(), census.men(),
+            100.0 * census.datedMen() / Math.max(1, census.men()),
+            census.datedAppearances(), census.all(),
+            100.0 * census.datedAppearances() / Math.max(1, census.all()));
 
         // Grid search: prequential mean log-loss per (k, K). 0.6931 = ln 2 is
         // the know-nothing baseline; lower is better. "bridge" is the same
@@ -386,7 +407,7 @@ public class Main {
                                 replay(matches, replays, gain, home, fieldOnly,
                                     new SmoothFadeSchedule(k0, h, floor),
                                     RatingSeed.unpricedBelowAverage(pools, seed),
-                                    window, MatchObserver.NONE);
+                                    ageing, window, MatchObserver.NONE);
                                 double loss = window.windowed.meanLogLoss();
                                 double whole = window.whole.meanLogLoss();
                                 double bridge = window.bridged.meanLogLoss();
@@ -499,7 +520,7 @@ public class Main {
             tallies = replay(matches, replays, bestGain, bestHome, bestFieldOnly,
                 new SmoothFadeSchedule(bestK0, bestH, bestFloor),
                 RatingSeed.unpricedBelowAverage(pools, UNPRICED_SEED),
-                new ScoringWindow(pools), history);
+                ageing, new ScoringWindow(pools), history);
             System.out.printf(Locale.US, "%nRating history: %,d rows -> %s (run %s)%n",
                 history.rows(), DataFiles.RESULTS.toAbsolutePath(), runId);
         }
@@ -586,9 +607,10 @@ public class Main {
     private static void loadTransfermarkt(List<Match> matches, List<List<MatchEvent>> replays,
         List<HeldAppearance> held,
         List<AppearedPlayer> appeared, List<MaybePlayer> maybe,
-        List<HeldMatch> heldMatches) throws Exception {
+        List<HeldMatch> heldMatches, Map<Long, LocalDate> birthDates) throws Exception {
 
         try (TransfermarktLoader loader = new TransfermarktLoader(DataFiles.SNAPSHOT, DataFiles.SIDECAR)) {
+            birthDates.putAll(loader.birthDates());
             List<Match> all = new ArrayList<>();
             switch (SCOPE) {
                 case ALL -> {
@@ -703,7 +725,14 @@ public class Main {
     // player onto the pitch: a starter once, a substitute once when he comes
     // on. Read off the events rather than the tallies because a tally holds a
     // career, and the question here is about appearances.
-    private record Appearances(long unpriced, long all) {
+    // ADR 0016 asks the same walk a second question - how many of those men the
+    // ageing curve can actually age - so it is answered on the same pass rather
+    // than on one of its own. Dates of birth are counted twice, once per man and
+    // once per appearance, and the two differ sharply: the players without one
+    // are the ones who play least, which is the same fact ADR 0011 saw at the
+    // chart's threshold (15 of 17,030 past 1,000 minutes).
+    private record Appearances(long unpriced, long all,
+        long datedMen, long men, long datedAppearances) {
     }
 
     // One grid cell's three log-losses: the windowed score the grid picks on,
@@ -718,26 +747,43 @@ public class Main {
         return Math.round(logLoss * 10000);
     }
 
-    private static Appearances census(ClubPools pools, List<List<MatchEvent>> replays) {
-        long unpriced = 0, all = 0;
+    private static Appearances census(ClubPools pools, Map<Long, LocalDate> birthDates,
+        List<List<MatchEvent>> replays) {
+
+        long unpriced = 0, all = 0, datedAppearances = 0;
+        Set<Long> seen = new HashSet<>();
+        Set<Long> dated = new HashSet<>();
         for (List<MatchEvent> events : replays) {
             for (MatchEvent e : events) {
-                Team side = switch (e) {
-                    case MatchEvent.StartingXI s -> s.team();
-                    case MatchEvent.Substitution sub -> sub.team();
-                    default -> null;
-                };
-                if (side == null) {
-                    continue;
+                Team side;
+                List<Player> men;
+                switch (e) {
+                    case MatchEvent.StartingXI s -> {
+                        side = s.team();
+                        men = s.players();
+                    }
+                    case MatchEvent.Substitution sub -> {
+                        side = sub.team();
+                        men = List.of(sub.playerOn());
+                    }
+                    default -> {
+                        continue;
+                    }
                 }
-                int men = e instanceof MatchEvent.StartingXI s ? s.players().size() : 1;
-                all += men;
+                all += men.size();
                 if (pools.unpriced(side.id())) {
-                    unpriced += men;
+                    unpriced += men.size();
+                }
+                for (Player p : men) {
+                    seen.add(p.id());
+                    if (birthDates.containsKey(p.id())) {
+                        dated.add(p.id());
+                        datedAppearances++;
+                    }
                 }
             }
         }
-        return new Appearances(unpriced, all);
+        return new Appearances(unpriced, all, dated.size(), seen.size(), datedAppearances);
     }
 
     // Hears every goal's expected probability and grades it twice: once
@@ -784,7 +830,7 @@ public class Main {
     // rating, and the replay order is untouched.
     private static Map<Long, PlayerTally> replay(List<Match> matches, List<List<MatchEvent>> replays,
         double linkGain, double homeAdvantage, boolean fieldPlayersOnly, UpdateSchedule schedule,
-        RatingSeed seed, ScoringWindow window, MatchObserver observer) {
+        RatingSeed seed, AgeingCurve ageing, ScoringWindow window, MatchObserver observer) {
 
         MatchProcessor processor = new MatchProcessor(
             new TimeIntegratedResidual(BASE_RATE, linkGain, homeAdvantage, fieldPlayersOnly, window),
@@ -793,7 +839,11 @@ public class Main {
         for (int i = 0; i < replays.size(); i++) {
             window.startMatch(matches.get(i));
             observer.startMatch(matches.get(i).matchId(), matches.get(i).date());
-            processor.process(replays.get(i), tallies, observer);
+            // ADR 0016: the age term is bound to this match's kickoff here, at
+            // the one place that has both the curve and the date, so nothing
+            // downstream carries a calendar.
+            processor.process(replays.get(i), tallies,
+                ageing.at(matches.get(i).date()), observer);
         }
         return tallies;
     }

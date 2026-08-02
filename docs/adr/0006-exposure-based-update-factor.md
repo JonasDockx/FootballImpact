@@ -1,5 +1,10 @@
 # The update factor is per-player, shrinking with exposure
 
+*(Untouched by [ADR 0016](0016-peak-impact-and-the-ageing-curve.md): the ageing
+curve changes what the stored number means and what a lineup is worth, never how
+far a residual moves it. `K` is still exposure and nothing else — a 34-year-old
+is expected to be worse, not to learn more slowly.)*
+
 The update factor `K` is no longer one global constant: each player's update is
 scaled by a **deterministic function of their exposure** (career minutes on
 pitch), fading smoothly as `K(m) = K0 · H / (H + m)` — `H` is the exposure at

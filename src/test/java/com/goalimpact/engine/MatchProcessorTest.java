@@ -11,6 +11,7 @@ import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -635,6 +636,130 @@ class MatchProcessorTest {
 
         assertEquals(0.0, rating(tallies, 1), 1e-12);
         assertEquals(0.0, rating(tallies, 12), 1e-12);
+    }
+
+    // ADR 0016. Player 12 is past it: five rating points below his own peak
+    // today. Nobody else is aged.
+    private static final AgePenalty TWELVE_IS_OLD =
+        id -> id == 12L ? 5.0 : 0.0;
+
+    @Test
+    void theAgeTermEntersLineupStrengthAndNotTheStoredRating() {
+        // The load-bearing half of ADR 0016: what the credit rule sees is
+        // P - D, so an ageing player weakens the side he plays for while the
+        // match is being judged. If the curve were only drawn on the chart,
+        // this lookup would still read 0.0 for him.
+        List<Double> seen = new ArrayList<>();
+        ResidualSource strengthRecorder = new ResidualSource() {
+            @Override
+            public Map<Player, Double> goal(Lineup scoring, Lineup conceding, RatingLookup ratings) {
+                return Map.of();
+            }
+            @Override
+            public Map<Player, Double> segment(Lineup teamA, Lineup teamB, double seconds,
+                RatingLookup ratings) {
+                seen.add(ratings.rating(12L));
+                return Map.of();
+            }
+        };
+        MatchProcessor processor = new MatchProcessor(strengthRecorder, m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            new MatchEvent.MatchEnd(1, 90, 0)), tallies, TWELVE_IS_OLD, MatchObserver.NONE);
+
+        assertFalse(seen.isEmpty());
+        assertEquals(-5.0, seen.get(0), 1e-12);
+        // ...and his stored number is his PEAK, untouched by the age term.
+        assertEquals(0.0, rating(tallies, 12), 1e-12);
+    }
+
+    @Test
+    void theHistoryRecordsThePeakNotTheAgedStrength() {
+        // The chart draws two lines from one stored number (#41), so the
+        // history has to carry P. Recording P - D here would collapse them.
+        MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+        List<Heard> heard = new ArrayList<>();
+        MatchObserver observer = (id, mb, rb, res, mp, ra) ->
+            heard.add(new Heard(id, mb, rb, res, mp, ra));
+
+        List<MatchEvent> match = List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(90, TEAM_A));
+        processor.process(match, tallies, TWELVE_IS_OLD, observer);
+        processor.process(match, tallies, TWELVE_IS_OLD, observer);
+
+        // Match 2 opens on exactly what match 1 closed at - the continuity the
+        // career chart rests on - and neither number carries the 5-point age
+        // term the strength lookup saw.
+        Heard second = heard.stream().filter(h -> h.id() == 12L).toList().get(1);
+        assertEquals(-1.0, second.ratingBefore(), 1e-12);
+        assertEquals(-2.0, second.ratingAfter(), 1e-12);
+    }
+
+    @Test
+    void aDebutantIsSeededAtHisPeakAndThenAged() {
+        // #42, absorbed. An unseen player enters at the population average as
+        // a PEAK, and the age term prices him for the age he actually is - so
+        // a seventeen-year-old and a twenty-seven-year-old no longer arrive as
+        // the same player.
+        List<Double> seen = new ArrayList<>();
+        ResidualSource strengthRecorder = new ResidualSource() {
+            @Override
+            public Map<Player, Double> goal(Lineup scoring, Lineup conceding, RatingLookup ratings) {
+                seen.add(ratings.rating(12L));
+                return Map.of();
+            }
+            @Override
+            public Map<Player, Double> segment(Lineup teamA, Lineup teamB, double seconds,
+                RatingLookup ratings) {
+                return Map.of();
+            }
+        };
+        MatchProcessor processor =
+            new MatchProcessor(strengthRecorder, m -> 1.0, TEAM_B_IS_UNPRICED);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_A)), tallies, TWELVE_IS_OLD, MatchObserver.NONE);
+
+        // Seeded at -3 for his unpriced club, then aged by 5 on his debut.
+        assertEquals(-8.0, seen.get(0), 1e-12);
+        assertEquals(-3.0, rating(tallies, 12), 1e-12);
+    }
+
+    @Test
+    void aFlatCurveIsTheStatusQuo() {
+        // ADR 0016's stage 1 gate, held as a test rather than only as a run:
+        // the whole mechanism wired up with every penalty zero has to be the
+        // replay that was there before it.
+        MatchProcessor processor =
+            new MatchProcessor(new ResidualCreditRule(new LogisticLinkFunction(1.0)), m -> 1.0);
+        List<MatchEvent> match = List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_A),
+            sub(60, TEAM_B, 13, 14),
+            goal(80, TEAM_B),
+            new MatchEvent.MatchEnd(1, 90, 0));
+
+        Map<Long, PlayerTally> undated = new HashMap<>();
+        processor.process(match, undated);
+        Map<Long, PlayerTally> flat = new HashMap<>();
+        processor.process(match, flat, AgeingCurve.pinned(Map.of()).at(LocalDate.of(2024, 5, 1)),
+            MatchObserver.NONE);
+
+        assertEquals(undated.keySet(), flat.keySet());
+        for (long id : undated.keySet()) {
+            // Bit-for-bit, not within a tolerance: "byte-identical" is the gate.
+            assertEquals(rating(undated, id), rating(flat, id), 0.0);
+        }
     }
 
 }

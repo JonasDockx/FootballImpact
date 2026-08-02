@@ -6,6 +6,13 @@ import com.goalimpact.model.Team;
 // A player's running state across the whole replay: the accumulated
 // GoalImpact rating, plus total on-pitch time - the exposure that sizes the
 // player's update factor (ADR 0006) and feeds reporting.
+//
+// ADR 0016 changed what the rating MEANS without changing how it moves. It is
+// now P, the player's estimated PEAK - Peak Impact - and what he contributes
+// to a lineup today is P minus the ageing curve's penalty for his age that
+// day. The update is untouched: residuals still land on P, with ADR 0006's K
+// schedule as-is. While the curve is pinned flat (stage 1) the two numbers
+// coincide, so nothing downstream reads differently yet.
 public class PlayerTally {
 
     private final Player player;

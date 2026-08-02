@@ -35,14 +35,23 @@ public class MatchProcessor {
     }
 
     // The two-argument form is the contract every existing caller has, and it
-    // keeps it: no history, no observer, no change. ADR 0011's seam is the
-    // overload below.
+    // keeps it: no history, no observer, no ageing, no change. ADR 0011's seam
+    // is the observer overload, ADR 0016's the four-argument one below.
     public void process(List<MatchEvent> events, Map<Long, PlayerTally> tallies) {
         process(events, tallies, MatchObserver.NONE);
     }
 
     public void process(List<MatchEvent> events, Map<Long, PlayerTally> tallies,
         MatchObserver observer) {
+        process(events, tallies, AgePenalty.NONE, observer);
+    }
+
+    // ADR 0016. The age term arrives already bound to this match's kickoff
+    // date (AgeingCurve.at), so the engine still knows nothing about a
+    // calendar - it asks a lookup for a number, exactly as it does for a
+    // rating. The forms above pass AgePenalty.NONE, which is the status quo.
+    public void process(List<MatchEvent> events, Map<Long, PlayerTally> tallies,
+        AgePenalty ageing, MatchObserver observer) {
         // Rating period: freeze every player's rating AND exposure at their
         // pre-match values. Every goal is judged against the frozen ratings,
         // every update sized by the frozen exposure; updates apply only at
@@ -55,21 +64,31 @@ public class MatchProcessor {
         // Freezing all of tallies costs matches x players: ~1.6M map writes
         // over one season, ~8,9 billion over the full spine - per replay,
         // per grid cell
+        //
+        // ADR 0016 splits what used to be one map in two, because the stored
+        // number and the strength number stopped being the same thing. frozen
+        // holds P, the player's estimated peak - the thing the update moves and
+        // the thing the history records. strength holds P - D(age at kickoff),
+        // which is what he actually contributes today and all the credit rule
+        // ever sees. The age term is read ONCE per player here rather than on
+        // every rating read, and it cannot change inside a match.
         Map<Long, Double> frozen = new HashMap<>();
+        Map<Long, Double> strength = new HashMap<>();
         Map<Long, Double> frozenMinutes = new HashMap<>();
         for (MatchEvent e : events) {
             switch(e) {
                 case MatchEvent.StartingXI s -> {
                     for (Player p : s.players()) {
-                        freeze(p.id(), s.team(), tallies, frozen, frozenMinutes);
+                        freeze(p.id(), s.team(), tallies, ageing, frozen, strength, frozenMinutes);
                     }
                 }
                 case MatchEvent.Substitution sub ->
-                    freeze(sub.playerOn().id(), sub.team(), tallies, frozen, frozenMinutes);
+                    freeze(sub.playerOn().id(), sub.team(), tallies, ageing,
+                        frozen, strength, frozenMinutes);
                 default -> { }
             }
         }
-        RatingLookup preMatch = id -> frozen.getOrDefault(id, 0.0);
+        RatingLookup preMatch = id -> strength.getOrDefault(id, 0.0);
 
         Map<Long, Set<Player>> onPitch = new HashMap<>(); // teamId -> players currently on
         Map<Long, Integer> enterTime = new HashMap<>(); // playerId -> stint start (seconds)
@@ -179,17 +198,29 @@ public class MatchProcessor {
     //
     // Under RatingSeed.AVERAGE this puts 0.0 where the read sites would have
     // defaulted to 0.0, so it is byte-identical to leaving the key out.
-    private void freeze(long id, Team team, Map<Long, PlayerTally> tallies,
-        Map<Long, Double> frozen, Map<Long, Double> frozenMinutes) {
+    //
+    // ADR 0016: the same pass fixes what he is worth TODAY, his peak less the
+    // age term. A debutant is seeded at his peak and then aged like everyone
+    // else, which is exactly the age-aware prior #42 asked for - a
+    // seventeen-year-old and a twenty-seven-year-old no longer enter the run
+    // as the same player.
+    //
+    // EVERY man is aged here, Goalkeepers included, and ADR 0016 says the curve
+    // is field players only. That is a contradiction the flat stage 1 curve
+    // hides and stage 2 must not: a keeper's career runs on a different clock,
+    // and what he should be charged instead is the open question on #44. Stage 2
+    // does not ship until #44 answers it, and this is where the answer lands.
+    private void freeze(long id, Team team, Map<Long, PlayerTally> tallies, AgePenalty ageing,
+        Map<Long, Double> frozen, Map<Long, Double> strength, Map<Long, Double> frozenMinutes) {
 
-            PlayerTally tally = tallies.get(id);
-            if (tally == null) {
-                frozen.put(id, seed.forDebutant(team));
-                return;
-            }
-            frozen.put(id, tally.rating());
+        PlayerTally tally = tallies.get(id);
+        double peak = tally == null ? seed.forDebutant(team) : tally.rating();
+        frozen.put(id, peak);
+        strength.put(id, peak - ageing.forPlayer(id));
+        if (tally != null) {
             frozenMinutes.put(id, tally.minutes());
         }
+    }
 
     // Every place a tally is born. A player's rating starts at his seed and
     // moves from there; a player already in the run keeps the tally he has, so

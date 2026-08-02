@@ -424,6 +424,47 @@ public class TransfermarktLoader implements AutoCloseable {
         connection.close();
     }
 
+    // Every date of birth the snapshot knows, for ADR 0016's ageing curve.
+    //
+    // ADR 0011 said this needed "no date-of-birth loading in Java at all", and
+    // that was true of the CHART: the index is computed at reporting time,
+    // where SQL can reach players.date_of_birth itself. ADR 0016 moves the age
+    // term INSIDE the replay, so every man on the pitch now needs an age while
+    // the match is being played - not just the 17,030 the chart draws. That is
+    // what changed, and it is why this method exists.
+    //
+    // Read whole rather than per match: 95k rows of (id, date) is a few MiB
+    // against a replay that already holds the fixture list, and the alternative
+    // is a query per match. Players with no row and players whose row carries
+    // no date are simply absent - AgeingCurve charges them the
+    // population-average penalty, which is what an unknown age is worth.
+    //
+    // ADR 0012 decision 7 again: the register is authoritative for a
+    // hand-typed player, here too. It is read second so it wins, and it is the
+    // only source for a created player, who appears in no vendor table at all.
+    public Map<Long, LocalDate> birthDates() throws SQLException {
+        Map<Long, LocalDate> born = new HashMap<>();
+        readBirthDatesInto(
+            "SELECT player_id, TRY_CAST(date_of_birth AS DATE) AS dob FROM players", born);
+        if (hasRegister) {
+            readBirthDatesInto("SELECT player_id, CAST(date_of_birth AS DATE) AS dob"
+                + " FROM sidecar.manual_players", born);
+        }
+        return born;
+    }
+
+    private void readBirthDatesInto(String sql, Map<Long, LocalDate> into) throws SQLException {
+        try (Statement statement = connection.createStatement();
+            ResultSet rows = statement.executeQuery(sql)) {
+            while (rows.next()) {
+                java.sql.Date dob = rows.getDate("dob");
+                if (dob != null) {
+                    into.put(rows.getLong("player_id"), dob.toLocalDate());
+                }
+            }
+        }
+    }
+
     // The whole spine in one query. 630 competition-seasons exist, so the
     // enumerated slice list was never going to reach them; the slice form
     // below stays for the pinned regression runs and for reading one

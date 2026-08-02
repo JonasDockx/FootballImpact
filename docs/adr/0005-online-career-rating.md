@@ -8,6 +8,12 @@ picture of GoalImpact as a batch quantity aggregated over a fixed dataset (the
 flat rule of [ADR 0002](0002-swappable-goal-crediting-rule.md), which summed
 credit/blame over one competition).
 
+[ADR 0016](0016-peak-impact-and-the-ageing-curve.md) later changed what that
+single running number **means** — it is a player's estimated *peak*, and what he
+contributes to a lineup today is that peak less an ageing penalty — without
+changing anything on this page. It is still one number per player, still updated
+once per match, still by `r ← r + K·residual`.
+
 Each match is a **rating period**: player ratings are frozen at their pre-match
 values, every goal in the match produces a per-player residual against those
 frozen strengths, and one net update per player is applied at the final whistle

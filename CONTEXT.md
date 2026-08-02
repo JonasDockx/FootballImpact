@@ -79,10 +79,12 @@ touched it last). Excludes penalty-shootout goals and disallowed/VAR-ruled-out
 goals.
 
 **Strength**:
-A lineup's rating at a moment in a match: the average of the current GoalImpact
-ratings of that team's on-pitch players. Emergent from players — there is no
-separate team rating. Count-invariant, so a red-carded side keeps roughly its
-level.
+A lineup's rating at a moment in a match: the average of what that team's
+on-pitch players are worth *that day* — each man's *Peak Impact* less the
+*Ageing curve*'s penalty for his exact age at kickoff (see
+[ADR 0016](docs/adr/0016-peak-impact-and-the-ageing-curve.md)). Emergent from
+players — there is no separate team rating. Count-invariant, so a red-carded
+side keeps roughly its level.
 
 **Home side**:
 The side of a match, if any, genuinely playing at its own venue. At most one
@@ -263,21 +265,49 @@ _Avoid_: the chart, the site — the viewer is one file, and the chart is what i
 draws
 
 **Value**:
-A player's current GoalImpact rating — an accumulated point total, not a
-per-match or per-90 average. Population totals are not conserved (per-player
-update factors let one side gain more than the other loses), so only rating
-*gaps* between players and lineups are meaningful, never absolute levels.
+A player's current GoalImpact rating — the one number the engine stores and
+updates, an accumulated point total rather than a per-match or per-90 average.
+It is his estimated **peak**, not his level today (ADR 0016). Population totals
+are not conserved (per-player update factors let one side gain more than the
+other loses), so only rating *gaps* between players and lineups are meaningful,
+never absolute levels.
+
+**Peak Impact**:
+A player's estimated best, on the *Impact index* scale — the latent parameter
+the engine actually stores and moves, and the dashed line of the career chart.
+Everything else about him is read off it: what he is worth in a match today is
+his Peak Impact less the *Ageing curve*. The arrow points this way round and not
+the other — the peak is not projected from the current level, the current level
+is the peak bent down by age (see
+[ADR 0016](docs/adr/0016-peak-impact-and-the-ageing-curve.md)).
+_Avoid_: ceiling, potential — it is an estimate of a best that may already be in
+the past, not a forecast of one still to come
+
+**Ageing curve**:
+How far below his own peak a player of a given age is, in rating points —
+`D(age)`, zero at the peak age, and never negative. Piecewise linear in **exact**
+age between fixed knots, so no season and no birthday is a boundary. Fitted once
+outside the engine over the whole population, then pinned and dated like the
+base scoring rate and `h`; a missing date of birth is charged the
+population-average penalty. Subtracted **inside the replay**, before a goal is
+judged, which is what makes ageing something the model expects rather than
+something it discovers afterwards. Deliberately not drawn as a chart background:
+with two lines on the chart the envelope is already there.
+_Avoid_: decline curve, age adjustment — it covers the climb as well as the fall,
+and it is part of the expectation, not a correction applied to a result
 
 **Impact index**:
-A player's Value placed on the population scale where the average player is 100
-(see [ADR 0011](docs/adr/0011-impact-index-and-the-career-chart.md)) — a linear
+What a player is worth *at a given moment* — his Peak Impact less the *Ageing
+curve*'s penalty for his age that day — placed on the population scale where the
+average player is 100 (see
+[ADR 0011](docs/adr/0011-impact-index-and-the-career-chart.md)) — a linear
 rescale, and the only form in which a rating may be quoted as an absolute
-number. Value converges rather than accumulating, because a player's own rating
-raises the bar his side is expected to clear, so the index reads as a level and
-a veteran and a newcomer are directly comparable. Its centre and spread are
-pinned, dated constants measured once on one spine's population, never
-re-centred per season — a career must be read with a ruler that does not change
-length.
+number. It is the thick line of the career chart. Value converges rather than
+accumulating, because a player's own rating raises the bar his side is expected
+to clear, so the index reads as a level and a veteran and a newcomer are
+directly comparable. Its centre and spread are pinned, dated constants measured
+once on one spine's population, never re-centred per season — a career must be
+read with a ruler that does not change length.
 _Avoid_: score, normalised rating
 
 **Worklist tier**:

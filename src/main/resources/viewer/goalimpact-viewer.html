@@ -112,12 +112,15 @@ ALL.forEach(p => p.dupe = seen.get(p.f) > 1);
 const monthLabel = m => Math.floor(m / 12) + '-' + String(m % 12 + 1).padStart(2, '0');
 const yearOf = m => Math.floor(m / 12);
 
-// Peak Impact (#41) is not built. The engine does not store the estimated peak
-// P yet, so there is no second series to draw and none is invented here - the
-// prototype's dashed line was an admitted stand-in over an invented ageing
-// curve, and a stand-in is not something this page ships. When #41 lands it
-// arrives as a second array beside vs, and this flag turns the line, the
-// "estimated now" figure and #40's no-date-of-birth clause on together.
+// Peak Impact (#41) is not drawn. ADR 0016 stage 1 landed the mechanism, so the
+// engine DOES store the estimated peak P now - but with the ageing curve pinned
+// flat at zero, P is the Impact index exactly and the second line would sit on
+// top of the first. There is still nothing to draw, and none is invented here:
+// the prototype's dashed line was an admitted stand-in over an invented ageing
+// curve, and a stand-in is not something this page ships. When ADR 0016 stage 2
+// fits the curve on the wide spine, the second series arrives beside vs and this
+// flag turns the line, the "estimated now" figure and #40's no-date-of-birth
+// clause on together.
 const PEAK_LINE = false;
 
 // ---------------------------------------------------------------- the chart

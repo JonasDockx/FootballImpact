@@ -133,12 +133,27 @@ shape of item 2 and turned out to be unnecessary. `rating_history` carries
 attaches both files in one DuckDB connection. The date of birth was never
 missing; it was unreachable, and the results file is what reaches it.
 
+*(True of the chart, and no longer true of the model:
+[ADR 0016](0016-peak-impact-and-the-ageing-curve.md) moved the age term inside
+the replay, so an age is needed while a match is being played and not only when
+one is being drawn. `TransfermarktLoader.birthDates()` loads the column.)*
+
 It does **not** build Goalimpact's second line — **Peak Goalimpact**, the
 dashed projection derived from a population ageing curve. That is a separate
 object needing selection-corrected within-player comparison, birthday-to-
 birthday binning, and a decision about left-censored careers. All of it runs
 off the very history this ADR lands, so it is deferred rather than designed
 away (item 21).
+
+**Discharged by [ADR 0016](0016-peak-impact-and-the-ageing-curve.md)** — and it
+turned the paragraph above inside out. The second line is not derived from the
+first: the *peak* is the number the engine stores, and the index on this page is
+that peak less an ageing penalty for the player's age that day. The
+birthday-to-birthday binning is gone with it, since the curve is piecewise
+linear in exact age. Two things here survive unchanged: this rescale is still
+the only form in which a rating may be quoted absolutely, and the quality bands
+stay **flat** — bending them by the curve would cancel the age term exactly
+(#40).
 
 ## Considered options
 
