@@ -484,11 +484,16 @@ public class Main {
         // and so does the rating history. ADR 0009: history belongs to ONE
         // designated run, never to the grid. The run_id carries the knobs,
         // which is what turns a spine-versus-spine comparison into a join.
+        // Read into a local so the suffix test below stays a real test: as a
+        // compile-time constant the shipped seed folds the mechanism-off arm
+        // away, and that arm is the promise that pinning the seed back to 0.0
+        // restores the run id this project has always used.
+        double designatedSeed = UNPRICED_SEED;
         String runId = String.format(Locale.ROOT, "%s-%s-k%.2f-K0%.2f-H%.0f-f%.2f-h%.2f",
             SPINE, SCOPE, bestGain, bestK0, bestH, bestFloor, bestHome)
             // Only when it is on, so a run at the status quo keeps the run id
             // it has always had and a seeded run is never mistaken for one.
-            + (UNPRICED_SEED == 0.0 ? "" : String.format(Locale.ROOT, "-s%.2f", UNPRICED_SEED));
+            + (designatedSeed == 0.0 ? "" : String.format(Locale.ROOT, "-s%.2f", designatedSeed));
         Map<Long, PlayerTally> tallies;
         try (RatingHistoryWriter history = new RatingHistoryWriter(DataFiles.RESULTS, runId)) {
             tallies = replay(matches, replays, bestGain, bestHome, bestFieldOnly,
