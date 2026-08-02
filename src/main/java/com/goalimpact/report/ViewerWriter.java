@@ -212,22 +212,12 @@ public final class ViewerWriter {
         for (RankLadder.Tick t : RankLadder.TICKS) {
             ticks.add("{\"index\":" + number(t.index()) + ",\"label\":\"" + escape(t.label()) + "\"}");
         }
-        StringJoiner bands = new StringJoiner(",", "[", "]");
-        for (double b : ImpactIndex.BANDS) {
-            bands.add(number(b));
-        }
-        StringJoiner glosses = new StringJoiner(",", "[", "]");
-        for (String g : RankLadder.BAND_GLOSSES) {
-            glosses.add("\"" + escape(g) + "\"");
-        }
         return "{"
             + "\"CENTRE\":" + number(ImpactIndex.CENTRE)
             + ",\"POINTS_PER_SD\":" + number(ImpactIndex.POINTS_PER_SD)
             + ",\"VALUE_MEAN\":" + number(ImpactIndex.VALUE_MEAN)
             + ",\"VALUE_SD\":" + number(ImpactIndex.VALUE_SD)
             + ",\"ELIGIBLE_MINUTES\":" + ImpactIndex.ELIGIBLE_MINUTES
-            + ",\"BANDS\":" + bands
-            + ",\"BAND_GLOSSES\":" + glosses
             + ",\"TICKS\":" + ticks
             + ",\"RANK_POOL\":" + RankLadder.POOL
             + ",\"RANK_MEASURED\":\"" + escape(RankLadder.MEASURED) + "\""

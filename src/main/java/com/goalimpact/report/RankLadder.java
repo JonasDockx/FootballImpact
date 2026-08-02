@@ -33,10 +33,11 @@ public final class RankLadder {
         new Tick(123.5, "Top 2000"),
     };
 
-    // The gloss beside each of ADR 0011's four bands. #40 left the bands
-    // carrying numbers only and sent naming to #47; these are what #47 sent
-    // back - a rank reading, not a borrowed quality label.
-    public static final String[] BAND_GLOSSES = {"halfway", "≈Top 600", "≈Top 300", "≈Top 40"};
+    // #47 also pinned four glosses for ADR 0011's bands - 170 ≈Top 40, 150
+    // ≈Top 300, 140 ≈Top 600, 100 halfway. The chart no longer needs them
+    // (2026-08-02): it draws the ladder itself as the boundaries between shaded
+    // zones, so a gloss would only approximate, beside the exact line, what the
+    // exact line already says. The measurement stands and is recorded on #47.
 
     public record Tick(double index, String label) {
     }

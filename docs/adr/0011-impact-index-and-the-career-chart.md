@@ -88,7 +88,15 @@ Re-centring per season would force every season's average to 100 by
 construction, hiding any real change in the level of football and — fatally for
 a career chart — measuring a career with a ruler whose length keeps changing.
 
-**Bands are drawn at 100 / 140 / 150 / 170.**
+**Bands are drawn at 100 / 140 / 150 / 170.** *Amended 2026-08-02 (#22): the
+chart draws **#47's seven rank steps** as its bands instead — 177.2, 169.3,
+161.9, 154.7, 143.2, 133.5, 123.5 — each zone between them shaded a step of one
+ordered ramp, plus a line at **100**, which stays because the population average
+is the number the index is defined against and the one landmark a rank cannot
+express. 140, 150 and 170 are no longer drawn: they were unlabelled round
+numbers, and the rank steps sit within a few points of them saying something a
+reader can act on. The bands were always a reading aid, never part of the scale,
+so this changes no number the model produces.*
 
 **A world rank is drawn beside the index, which does not make the index one.**
 The viewer's right edge carries seven pinned rank ticks and the four bands carry

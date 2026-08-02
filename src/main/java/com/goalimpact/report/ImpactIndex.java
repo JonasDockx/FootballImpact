@@ -28,10 +28,12 @@ public final class ImpactIndex {
     // exactly this population (#22, option 1).
     public static final int ELIGIBLE_MINUTES = 1000;
 
-    // ADR 0011's four quality bands. Flat by decision (#40): they carry no age
-    // term, so the 11.4% of drawable careers with no date of birth are judged
-    // against the same four lines as everyone else.
-    public static final double[] BANDS = {100, 140, 150, 170};
+    // ADR 0011 drew four quality bands at 100/140/150/170. Since 2026-08-02 the
+    // chart draws #47's seven rank steps instead, shaded, plus CENTRE as the one
+    // landmark a rank cannot express - so the only band constant left is CENTRE
+    // above. Flat either way by decision (#40): no age term, so the careers with
+    // no date of birth are judged against exactly the same lines as everyone
+    // else. ADR 0011 carries the amendment.
 
     private ImpactIndex() {
     }

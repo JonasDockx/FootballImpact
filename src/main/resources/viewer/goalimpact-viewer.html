@@ -10,7 +10,7 @@
   occurrence, so a placeholder written out in this comment would be filled too,
   and the page would carry the whole population twice.
     DATA              the eligible population, careers sampled monthly
-    CONSTANTS         ADR 0011's scale and bands, #47's rank ladder
+    CONSTANTS         ADR 0011's scale and centre, #47's rank ladder
     RUN_ID            the run the numbers came from
     LAST_MATCH_DATE   the last match in that run - NOT a build clock (#46)
     PLAYER_COUNT      how many players are drawn
@@ -150,6 +150,27 @@ const scaleX = G => m => G.L + (m - G.m0) / Math.max(1, G.m1 - G.m0) * (G.W - G.
 const scaleY = G => v => G.T
   + (G.hi - Math.max(G.lo, Math.min(G.hi, v))) / (G.hi - G.lo) * (G.H - G.T - G.B);
 
+// The zones the chart shades, low to high: from the population average up
+// through #47's seven rank steps. Nine regions in all - the ninth, below the
+// average, is left bare, so a career in it is read against the surface itself.
+const zoneEdges = hi => [P.CENTRE, ...[...P.TICKS].reverse().map(t => t.index), hi];
+
+// One hue, lightness climbing with the zone (OKLCH h=172, L 0.202 to 0.300),
+// so the shading is an ORDERED ramp and not eight unrelated colours - the
+// regions are ranked, and a rainbow would deny it. Deliberately far below the
+// contrast a data mark would need: these sit BEHIND the line, and a zone's
+// name is written beside it, so the tint never carries identity alone.
+//
+// The ramp is concave (L climbs as t^0.62) for a reason that only showed up on
+// screen. A straight ramp put its biggest steps at the top, where the zones are
+// widest and emptiest - above Top 20 is 38 index points of almost nobody - so
+// the chart read as a green wall with the careers crowded into the dim half.
+// Curving it spends the contrast low down, where careers actually live, and
+// leaves the top two zones nearly equal, which costs nothing since one of them
+// is empty.
+const ZONE_FILL = ['#141716', '#16201c', '#172420', '#172823',
+                   '#172b25', '#182e27', '#18312a', '#18342c'];
+
 function chart(p, h = 340) {
   const geom = geometry(p, h);
   const { W, H, L, R, T, B, m0, m1, lo, hi } = geom;
@@ -158,15 +179,27 @@ function chart(p, h = 340) {
   const x = scaleX(geom), y = scaleY(geom);
 
   let g = '';
-  // The four quality bands (ADR 0011), flat by decision (#40) - no age term, so
-  // the players with no date of birth are judged against the same four lines as
-  // everybody else. The gloss beside each is #47's rank reading, pinned.
-  P.BANDS.forEach((b, i) => {
-    if (b < lo || b > hi) return;
-    g += `<line x1="${L}" x2="${W - R}" y1="${y(b)}" y2="${y(b)}" stroke="#2b3140"/>`
-       + `<text x="${L - 6}" y="${y(b) + 4}" fill="#6d768c" font-size="11" text-anchor="end">${b}</text>`
-       + `<text x="${L + 6}" y="${y(b) - 4}" fill="#4a5265" font-size="10">${P.BAND_GLOSSES[i]}</text>`;
-  });
+  // The bands, shaded. The zones are the rank ladder's own steps, so the
+  // shading and the labels down the right edge say the same thing twice -
+  // which is the point: the tint is never the only thing carrying a zone's
+  // identity. Everything below the average is left bare.
+  const edges = zoneEdges(hi);
+  for (let i = 0; i < ZONE_FILL.length; i++) {
+    const top = Math.min(hi, edges[i + 1]), bottom = Math.max(lo, edges[i]);
+    if (top <= bottom) continue;
+    g += `<rect x="${L}" y="${y(top)}" width="${W - L - R}"`
+       + ` height="${(y(bottom) - y(top)).toFixed(1)}" fill="${ZONE_FILL[i]}"/>`;
+  }
+
+  // The population average - the one number the whole index is defined
+  // against (ADR 0011), and the one thing a rank cannot say. Drawn brighter
+  // than a zone edge because it is a landmark rather than a step.
+  if (P.CENTRE >= lo && P.CENTRE <= hi) {
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(P.CENTRE)}" y2="${y(P.CENTRE)}" stroke="#3c4456"/>`
+       + `<text x="${L - 6}" y="${y(P.CENTRE) + 4}" fill="#6d768c" font-size="11"`
+       + ` text-anchor="end">${P.CENTRE}</text>`
+       + `<text x="${L + 6}" y="${y(P.CENTRE) - 4}" fill="#4a5265" font-size="10">average</text>`;
+  }
   if (lo < 70) {
     for (let v = Math.ceil(lo / 20) * 20; v < 100; v += 20) {
       if (v < lo) continue;
@@ -175,13 +208,22 @@ function chart(p, h = 340) {
     }
   }
 
-  // #47's reading aid down the right-hand edge: where an index stands in the
-  // active pool. Pinned constants measured once, never recomputed at build
-  // time - a mid-season rebuild would otherwise rank against half a season.
-  // The ladder stops at Top 2000 and the edge below it is blank.
+  // #47's ladder, now drawn all the way across as the boundary between two
+  // shaded zones rather than as a tick on the edge. Pinned constants measured
+  // once, never recomputed at build time - a mid-season rebuild would rank
+  // against half a season. The ladder stops at Top 2000, and below it both the
+  // shading and the right-hand edge are blank.
+  // A career that drops far below the floor stretches the axis until the rungs
+  // are pixels apart, so a rung keeps its line and loses its labels rather than
+  // stacking them into a smear. The line is the fact; the label is the reading.
+  let lastLabel = -Infinity;
   for (const t of P.TICKS) {
     if (t.index < lo || t.index > hi) continue;
-    g += `<line x1="${W - R}" x2="${W - R + 5}" y1="${y(t.index)}" y2="${y(t.index)}" stroke="#39404f"/>`
+    g += `<line x1="${L}" x2="${W - R + 5}" y1="${y(t.index)}" y2="${y(t.index)}" stroke="#39404f"/>`;
+    if (y(t.index) - lastLabel < 12) continue;
+    lastLabel = y(t.index);
+    g += `<text x="${L - 6}" y="${y(t.index) + 4}" fill="#6d768c" font-size="11"`
+       + ` text-anchor="end">${t.index.toFixed(1)}</text>`
        + `<text x="${W - R + 9}" y="${y(t.index) + 4}" fill="#6d768c" font-size="11">${t.label}</text>`;
   }
   g += `<text x="${W - R + 9}" y="${T - 4}" fill="#4a5265" font-size="10">rank</text>`;
@@ -226,8 +268,8 @@ function chart(p, h = 340) {
        ${ALL.length.toLocaleString()} eligible players (${share(BELOW_FLOOR)}) go below 70
        at some point, and nothing is drawn flat against the floor.</div>` : '')
   + (hasAge ? '' : `<div class="notebar">No date of birth in the snapshot — no age axis.
-       The quality bands are flat, so this career is judged against exactly the same
-       four lines as everybody else.${PEAK_LINE ? ` The estimated peak uses the
+       The shaded bands are flat, so this career is judged against exactly the same
+       zones as everybody else.${PEAK_LINE ? ` The estimated peak uses the
        population-average ageing penalty here, so the two lines run a fixed distance
        apart for the whole career and the gap between them carries no information.` : ''}</div>`);
 }

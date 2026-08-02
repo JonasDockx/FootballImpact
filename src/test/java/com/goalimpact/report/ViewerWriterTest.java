@@ -148,7 +148,7 @@ class ViewerWriterTest {
         assertTrue(html.contains("177.2"), "the Top 20 tick");
         assertTrue(html.contains("Top 2000"), "the ladder's last rung");
         assertTrue(html.contains(String.valueOf(RankLadder.POOL)), "the pool the ladder read");
-        assertTrue(html.contains("\"BANDS\":[100,140,150,170]"), "ADR 0011's four bands");
+        assertTrue(html.contains("\"CENTRE\":100"), "the population average the chart marks");
         assertFalse(html.contains("{{"), "every placeholder filled");
         // Substitution replaces every occurrence, so a placeholder mentioned
         // anywhere else in the template - a comment documenting it, say - would
