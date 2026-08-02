@@ -11,7 +11,8 @@ import java.nio.file.Path;
 // All three sit in one directory on purpose: a single DuckDB connection can
 // attach all three at once (ADR 0009). None is versioned source - two are
 // rebuilt at will and one is precious hand-made state - so all three live
-// outside the repo.
+// outside the repo. The viewer page below is generated from two of them and
+// lives beside them for the same reason.
 public final class DataFiles {
 
     // The vendor snapshot: read-only, 88,958 games, the rating spine.
@@ -28,6 +29,13 @@ public final class DataFiles {
     // designated run. Holds the worklist the repair tool reads.
     public static final Path RESULTS = Path.of(
         "C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-results.duckdb");
+
+    // The viewer page (#22), fourth file of ADR 0009's generated lifecycle and
+    // the only one that is not a database. Built from the two files above by a
+    // step of its own, so rebuilding it after a band or constant change costs
+    // seconds rather than a replay. Disposable like the results DB.
+    public static final Path VIEWER = Path.of(
+        "C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-viewer.html");
 
     private DataFiles() {
     }

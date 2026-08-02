@@ -90,6 +90,13 @@ a career chart — measuring a career with a ruler whose length keeps changing.
 
 **Bands are drawn at 100 / 140 / 150 / 170.**
 
+**A world rank is drawn beside the index, which does not make the index one.**
+The viewer's right edge carries seven pinned rank ticks and the four bands carry
+rank glosses (#47), measured once over a stated active pool and dated like every
+other calibration constant. That is a reading aid laid alongside the scale — the
+index itself is still a linear rescale of Value and still not a rank, which is
+what the rejected option below was about.
+
 **A line starts at 1,000 career minutes.** Goalimpact's creators use this
 threshold for relevance. It also very nearly closes the date-of-birth gap on
 its own: 69,975 of 114,893 players in lineups have no row in `players` at all,

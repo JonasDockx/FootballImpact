@@ -210,6 +210,11 @@ must live, which is the one thing that never changes:
 | vendor snapshot | Transfermarkt facts | read-only, replaced wholesale on refresh |
 | sidecar | repairs, manual matches, curated home-side facts, issue log | precious, never auto-wiped |
 | results | `rating_history`, run parameters, diagnostics | disposable, rebuilt at will |
+| viewer page | the career charts, one HTML file (#22) | disposable, rebuilt from the two above |
+
+The viewer page is a later fourth (#22, 2026-08-02) and is not a database: it is
+*generated from* the first three by a step of its own, so it inherits the
+results file's lifecycle without changing the three above.
 
 DuckDB attaches all three in one connection and joins across them, so this
 costs no ETL and no second database engine. Keeping repairs beside vendor rows

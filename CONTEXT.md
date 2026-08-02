@@ -251,6 +251,17 @@ new champion.
 _Avoid_: incremental run — nothing is incremental, the whole spine is replayed
 every time; only the grid is skipped
 
+**Viewer**:
+The generated HTML page carrying every eligible player's career chart, built
+from the results file and the vendor snapshot by a step that replays nothing.
+Its *template* is repo source and hand-written; only the filled copy is
+generated, and the copy is disposable like the results file it reads. It states
+the run it was built from and that run's last match date, and deliberately not
+the time it was built — a build clock would read "today" over a months-old
+history, which is the one staleness a separate build step risks.
+_Avoid_: the chart, the site — the viewer is one file, and the chart is what it
+draws
+
 **Value**:
 A player's current GoalImpact rating — an accumulated point total, not a
 per-match or per-90 average. Population totals are not conserved (per-player

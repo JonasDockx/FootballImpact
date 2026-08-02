@@ -1,0 +1,374 @@
+<!doctype html>
+<!--
+  The GoalImpact career-chart viewer (#22). THIS FILE IS SOURCE: it is
+  hand-written and version-controlled, and ViewerWriter reads it and writes the
+  filled copy to FootballData/goalimpact-viewer.html (#46). Only the copy is
+  generated - never edit the copy.
+
+  Five placeholders, all substituted by ViewerWriter. Named without their
+  braces here on purpose - substitution is a plain textual replace of every
+  occurrence, so a placeholder written out in this comment would be filled too,
+  and the page would carry the whole population twice.
+    DATA              the eligible population, careers sampled monthly
+    CONSTANTS         ADR 0011's scale and bands, #47's rank ladder
+    RUN_ID            the run the numbers came from
+    LAST_MATCH_DATE   the last match in that run - NOT a build clock (#46)
+    PLAYER_COUNT      how many players are drawn
+
+  Descended from the prototype at docs/prototypes/player-search (variant B),
+  which is throwaway and is not this.
+-->
+<meta charset="utf-8">
+<title>GoalImpact — career charts</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --ink: #e6e9ef;
+    --dim: #8b93a7; --accent: #4ea1ff; --peak: #ffb454; --warn: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  input, button, select { font: inherit; color: inherit; }
+  input, select { background: var(--panel); border: 1px solid var(--line);
+                  border-radius: 6px; padding: 8px 10px; }
+  .dim { color: var(--dim); }
+  code { font-size: 12px; color: var(--dim); }
+  .chip { display: inline-block; background: #202634; border: 1px solid var(--line);
+          border-radius: 99px; padding: 1px 8px; font-size: 12px; color: var(--dim);
+          margin-right: 5px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+
+  .grid { display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
+  .rail { border-right: 1px solid var(--line); display: flex; flex-direction: column;
+          min-height: 0; }
+  .filters { padding: 12px; border-bottom: 1px solid var(--line);
+             display: grid; gap: 8px; }
+  .filters .row > * { flex: 1; min-width: 0; }
+  .list { overflow: auto; flex: 1; }
+  .item { padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer;
+          display: grid; grid-template-columns: 40px 1fr auto; gap: 10px;
+          align-items: baseline; }
+  .item:hover, .item.sel { background: var(--panel); }
+  .item .rk { color: var(--dim); font-size: 12px; text-align: right; }
+  .item .pk { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .main { padding: 20px 24px 24px; overflow: auto; }
+
+  .idcard { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
+  .idcard h2 { margin: 0; font-size: 24px; font-weight: 600; }
+  .big { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .figure { margin-right: 28px; }
+  .notebar { background: #1b2330; border: 1px solid #2c3a4d; color: #a9c0da;
+             border-radius: 6px; padding: 7px 11px; font-size: 13px; margin-top: 10px; }
+  .foot { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 10px;
+          font-size: 12px; color: var(--dim); }
+
+  .chartwrap { position: relative; }
+  .chartwrap svg { cursor: crosshair; }
+  .tip { position: absolute; display: none; transform: translateX(-50%);
+         background: #0b0d12; border: 1px solid var(--line); border-radius: 6px;
+         padding: 5px 10px; font-size: 13px; white-space: nowrap;
+         pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+  .tip b { font-size: 15px; font-variant-numeric: tabular-nums; margin-right: 4px; }
+  .tip .sep { display: inline-block; width: 1px; height: 11px; background: var(--line);
+              margin: 0 8px; vertical-align: -1px; }
+</style>
+
+<div id="app"></div>
+
+<script>window.DATA={{DATA}};/*end-data*/</script>
+<script>window.PINNED={{CONSTANTS}};/*end-constants*/</script>
+<script>
+// ---------------------------------------------------------------- the run
+// The page states the run it was built from and the last match in it, and
+// deliberately not the time it was built (#46): a build clock would read
+// "today" over a March rating_history, which is exactly the staleness a
+// separate build step risks.
+const RUN = { id: "{{RUN_ID}}", lastMatch: "{{LAST_MATCH_DATE}}", players: "{{PLAYER_COUNT}}" };
+
+// ---------------------------------------------------------------- data prep
+// rows: {id,name,club,pos,mins,apps,y0,y1,peak,latest,ms,vs,dobm}
+// ms = absolute month indices (year*12 + month-1); vs = the Impact index at the
+// end of that month. dobm is the date of birth on the same axis, or null.
+const ALL = window.DATA;
+const P = window.PINNED;
+// 12.5% of distinct names carry accents (#35), so both sides are folded:
+// typing "Nicolo Barella" must find "Nicolò Barella".
+const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+ALL.forEach(p => { p.f = fold(p.name); p.low = Math.min(...p.vs); });
+
+// Counted from the data rather than quoted from the issue that measured it:
+// this share moves with every run, and a number written into the page would go
+// quietly stale the first time the model changed.
+const BELOW_FLOOR = ALL.filter(p => p.low < 70).length;
+const share = n => (100 * n / ALL.length).toFixed(1) + '%';
+
+// 890 of the eligible players share a name with somebody (#35, worst: nine
+// Paulinhos), so a hit says which one it is rather than leaving it to be
+// guessed. Club and era do that work on every line; this only flags it.
+const seen = new Map();
+ALL.forEach(p => seen.set(p.f, (seen.get(p.f) || 0) + 1));
+ALL.forEach(p => p.dupe = seen.get(p.f) > 1);
+
+const monthLabel = m => Math.floor(m / 12) + '-' + String(m % 12 + 1).padStart(2, '0');
+const yearOf = m => Math.floor(m / 12);
+
+// Peak Impact (#41) is not built. The engine does not store the estimated peak
+// P yet, so there is no second series to draw and none is invented here - the
+// prototype's dashed line was an admitted stand-in over an invented ageing
+// curve, and a stand-in is not something this page ships. When #41 lands it
+// arrives as a second array beside vs, and this flag turns the line, the
+// "estimated now" figure and #40's no-date-of-birth clause on together.
+const PEAK_LINE = false;
+
+// ---------------------------------------------------------------- the chart
+// The chart's geometry, worked out once and used by both the drawing and the
+// crosshair. They must agree exactly - a crosshair on its own copy of these
+// scales drifts off the line the moment a margin or a band changes - so the
+// geometry is computed here, serialised onto the wrapper, and read back by the
+// hover handler rather than recomputed there.
+//
+// y-axis: ADR 0011's 70..215, except that the FLOOR DROPS when a career goes
+// under it (#22), because drawing a career flat against a floor says nothing.
+// The ceiling stays: nobody in the population exceeds it.
+function geometry(p, h) {
+  const hasAge = p.dobm != null;
+  const W = 980, H = h, L = 46, R = 92, T = hasAge ? 32 : 16, B = 26;
+  const m0 = p.ms[0], m1 = p.ms[p.ms.length - 1];
+  const hi = 215;
+  let lo = 70;
+  if (p.low < lo) {
+    // Rounded down to the next ten below the career's lowest point, but not
+    // past 0 unless the career itself goes there: an axis running to -10 for a
+    // career that bottoms at 0.3 is dead space, not information.
+    lo = Math.floor((p.low - 6) / 10) * 10;
+    if (p.low >= 0) lo = Math.max(0, lo);
+  }
+  return { W, H, L, R, T, B, m0, m1, lo, hi, dobm: p.dobm, ms: p.ms, vs: p.vs };
+}
+
+const scaleX = G => m => G.L + (m - G.m0) / Math.max(1, G.m1 - G.m0) * (G.W - G.L - G.R);
+const scaleY = G => v => G.T
+  + (G.hi - Math.max(G.lo, Math.min(G.hi, v))) / (G.hi - G.lo) * (G.H - G.T - G.B);
+
+function chart(p, h = 340) {
+  const geom = geometry(p, h);
+  const { W, H, L, R, T, B, m0, m1, lo, hi } = geom;
+  const hasAge = p.dobm != null;
+  const dropped = lo < 70;
+  const x = scaleX(geom), y = scaleY(geom);
+
+  let g = '';
+  // The four quality bands (ADR 0011), flat by decision (#40) - no age term, so
+  // the players with no date of birth are judged against the same four lines as
+  // everybody else. The gloss beside each is #47's rank reading, pinned.
+  P.BANDS.forEach((b, i) => {
+    if (b < lo || b > hi) return;
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(b)}" y2="${y(b)}" stroke="#2b3140"/>`
+       + `<text x="${L - 6}" y="${y(b) + 4}" fill="#6d768c" font-size="11" text-anchor="end">${b}</text>`
+       + `<text x="${L + 6}" y="${y(b) - 4}" fill="#4a5265" font-size="10">${P.BAND_GLOSSES[i]}</text>`;
+  });
+  if (lo < 70) {
+    for (let v = Math.ceil(lo / 20) * 20; v < 100; v += 20) {
+      if (v < lo) continue;
+      g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#232935"/>`
+         + `<text x="${L - 6}" y="${y(v) + 4}" fill="#6d768c" font-size="11" text-anchor="end">${v}</text>`;
+    }
+  }
+
+  // #47's reading aid down the right-hand edge: where an index stands in the
+  // active pool. Pinned constants measured once, never recomputed at build
+  // time - a mid-season rebuild would otherwise rank against half a season.
+  // The ladder stops at Top 2000 and the edge below it is blank.
+  for (const t of P.TICKS) {
+    if (t.index < lo || t.index > hi) continue;
+    g += `<line x1="${W - R}" x2="${W - R + 5}" y1="${y(t.index)}" y2="${y(t.index)}" stroke="#39404f"/>`
+       + `<text x="${W - R + 9}" y="${y(t.index) + 4}" fill="#6d768c" font-size="11">${t.label}</text>`;
+  }
+  g += `<text x="${W - R + 9}" y="${T - 4}" fill="#4a5265" font-size="10">rank</text>`;
+
+  for (let yr = yearOf(m0); yr <= yearOf(m1) + 1; yr++) {
+    const m = yr * 12;
+    if (m < m0 || m > m1) continue;
+    g += `<line x1="${x(m)}" x2="${x(m)}" y1="${T}" y2="${H - B}" stroke="#1c212c"/>`
+       + `<text x="${x(m)}" y="${H - 8}" fill="#6d768c" font-size="11" text-anchor="middle">${yr}</text>`;
+  }
+
+  // Age along the top, calendar years along the bottom (#37): the same line
+  // read two ways, a birthday tick and a new-year tick.
+  if (hasAge) {
+    const a0 = (m0 - p.dobm) / 12, a1 = (m1 - p.dobm) / 12;
+    const step = (a1 - a0) > 14 ? 2 : 1;
+    for (let a = Math.ceil(a0 / step) * step; a <= a1; a += step) {
+      const m = p.dobm + a * 12;
+      g += `<line x1="${x(m)}" x2="${x(m)}" y1="${T}" y2="${T + 4}" stroke="#39404f"/>`
+         + `<text x="${x(m)}" y="${T - 8}" fill="#6d768c" font-size="11" text-anchor="middle">${a}</text>`;
+    }
+    g += `<text x="${L - 6}" y="${T - 8}" fill="#525b70" font-size="10" text-anchor="end">age</text>`;
+  }
+
+  const d = p.ms.map((m, i) =>
+    (i ? 'L' : 'M') + x(m).toFixed(1) + ' ' + y(p.vs[i]).toFixed(1)).join(' ');
+
+  return `<div class="chartwrap" data-geom='${JSON.stringify(geom)}'>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+      <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="#12151c"/>
+      ${g}
+      <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+      <g class="cursor" style="display:none">
+        <line class="cx" y1="${T}" y2="${H - B}" stroke="#6d768c" stroke-dasharray="3 3"/>
+        <circle class="cdot" r="4.5" fill="var(--accent)" stroke="#0f1115" stroke-width="2"/>
+      </g>
+    </svg>
+    <div class="tip"></div>
+  </div>`
+  + (dropped ? `<div class="notebar">Floor dropped from 70 to <b>${lo}</b> — this career
+       reaches <b>${p.low.toFixed(1)}</b>. ${BELOW_FLOOR.toLocaleString()} of
+       ${ALL.length.toLocaleString()} eligible players (${share(BELOW_FLOOR)}) go below 70
+       at some point, and nothing is drawn flat against the floor.</div>` : '')
+  + (hasAge ? '' : `<div class="notebar">No date of birth in the snapshot — no age axis.
+       The quality bands are flat, so this career is judged against exactly the same
+       four lines as everybody else.${PEAK_LINE ? ` The estimated peak uses the
+       population-average ageing penalty here, so the two lines run a fixed distance
+       apart for the whole career and the gap between them carries no information.` : ''}</div>`);
+}
+
+// The crosshair snaps to the nearest sampled month rather than interpolating:
+// the model only forms an opinion after a match, so a value invented between
+// two months would be a picture of nothing.
+function wireHover(root) {
+  const wrap = root.querySelector('.chartwrap[data-geom]');
+  if (!wrap) return;
+  const G = JSON.parse(wrap.dataset.geom);
+  const svg = wrap.querySelector('svg'), cur = wrap.querySelector('.cursor');
+  const cx = wrap.querySelector('.cx'), dot = wrap.querySelector('.cdot');
+  const tip = wrap.querySelector('.tip');
+  const px = scaleX(G), py = scaleY(G);
+
+  svg.onmousemove = e => {
+    const r = svg.getBoundingClientRect();
+    const vx = (e.clientX - r.left) / r.width * G.W;
+    const m = G.m0 + (vx - G.L) / (G.W - G.L - G.R) * (G.m1 - G.m0);
+    let best = 0;
+    for (let i = 1; i < G.ms.length; i++) {
+      if (Math.abs(G.ms[i] - m) < Math.abs(G.ms[best] - m)) best = i;
+    }
+    const mm = G.ms[best], v = G.vs[best];
+    cur.style.display = '';
+    cx.setAttribute('x1', px(mm)); cx.setAttribute('x2', px(mm));
+    dot.setAttribute('cx', px(mm)); dot.setAttribute('cy', py(v));
+    const age = G.dobm == null ? null : (mm - G.dobm) / 12;
+    tip.innerHTML = `<b>${v.toFixed(1)}</b><span class="dim">Impact</span>
+      <span class="sep"></span>${monthLabel(mm)}
+      ${age == null ? '<span class="sep"></span><span class="dim">age unknown</span>'
+                    : `<span class="sep"></span>age ${age.toFixed(1)}`}`;
+    tip.style.display = 'block';
+    tip.style.left = Math.min(Math.max(px(mm) / G.W * r.width, 60), r.width - 60) + 'px';
+    tip.style.top = (py(v) / G.H * r.height - 44) + 'px';
+  };
+  svg.onmouseleave = () => { cur.style.display = 'none'; tip.style.display = 'none'; };
+}
+
+function idcard(p) {
+  return `<div class="idcard">
+    <h2>${p.name}</h2>
+    <span class="chip">${p.club || 'club unknown'}</span>
+    <span class="chip">${p.pos || 'position unknown'}</span>
+    <span class="chip">${p.y0}–${p.y1}</span>
+    <span class="chip">${p.mins.toLocaleString()} min · ${p.apps} matches</span>
+    ${p.dupe ? '<span class="chip" style="color:#ffb454">shares this name</span>' : ''}
+  </div>`;
+}
+
+// ---------------------------------------------------------------- the page
+// A browse rail, not a search box (#35): the population is the page and the
+// name filter is one control among several. Sorted by peak Impact, because the
+// player being looked for is nearly always the better one.
+const app = document.getElementById('app');
+app.innerHTML = `<div class="grid">
+  <div class="rail">
+    <div class="filters">
+      <input id="q" placeholder="Filter by name" autofocus>
+      <div class="row">
+        <select id="pos"><option value="">Any position</option><option>Goalkeeper</option>
+          <option>Defender</option><option>Midfield</option><option>Attack</option></select>
+        <select id="min"><option value="1000">1,000+ min</option>
+          <option value="9000">9,000+ min</option><option value="20000">20,000+ min</option></select>
+      </div>
+      <div class="row"><select id="sort"><option value="peak">Sort: peak Impact</option>
+        <option value="mins">Sort: minutes</option><option value="name">Sort: name</option>
+        <option value="recent">Sort: most recent</option></select></div>
+      <div class="dim" id="count"></div>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+  <div class="main" id="main"></div>
+</div>`;
+
+const $ = s => document.querySelector(s);
+const SHOWN = 400;
+let rows = [], cur = null;
+
+// #35's ranking, and the order of the three terms is the decision: an exact
+// name first, then a prefix, and peak Impact only as the tiebreak between
+// equals - "the player you meant is nearly always the better one" is a
+// tiebreak, not a ranking, or Messi would outrank an exact match on a lesser
+// name. Only the default sort ranks this way; the other three are the reader
+// asking for a different order outright.
+const matchTier = (p, q) => (p.f === q ? 2 : p.f.startsWith(q) ? 1 : 0);
+
+function apply() {
+  const q = fold($('#q').value.trim()), pos = $('#pos').value;
+  const min = +$('#min').value, s = $('#sort').value;
+  rows = ALL.filter(p => p.mins >= min && (!pos || p.pos === pos) && (!q || p.f.includes(q)));
+  rows.sort(s === 'peak'
+      ? (a, b) => (q ? matchTier(b, q) - matchTier(a, q) : 0) || b.peak - a.peak
+    : s === 'mins' ? (a, b) => b.mins - a.mins
+    : s === 'name' ? (a, b) => a.f.localeCompare(b.f)
+    : (a, b) => b.y1 - a.y1 || b.peak - a.peak);
+  $('#count').textContent = rows.length.toLocaleString() + ' of ' + RUN.players + ' players';
+  $('#list').innerHTML = rows.slice(0, SHOWN).map((p, i) =>
+    `<div class="item ${p === cur ? 'sel' : ''}" data-i="${i}">
+      <div class="rk">${i + 1}</div>
+      <div>${p.name}<div class="dim" style="font-size:12px">${p.club || '—'} · ${p.y0}–${p.y1}</div></div>
+      <div class="pk">${p.peak ?? '—'}</div></div>`).join('')
+    + (rows.length > SHOWN
+        ? `<div class="dim" style="padding:12px">…${(rows.length - SHOWN).toLocaleString()}
+             more; keep filtering</div>` : '');
+  if (!cur && rows[0]) show(rows[0]);
+}
+
+// Three numbers that a single "peak" used to conflate. Two of them exist:
+// where the line ends, and the highest it ever reached. The third - the peak
+// the model estimates NOW - is #41's, and is unbuilt rather than approximated.
+function show(p) {
+  cur = p;
+  $('#main').innerHTML = idcard(p)
+    + `<div class="row" style="margin:14px 0 6px">
+         <div class="figure"><div class="dim">Impact now</div>
+           <div class="big">${p.latest.toFixed(1)}</div></div>
+         <div class="figure"><div class="dim">Highest Impact reached</div>
+           <div class="big" style="font-size:24px">${p.peak.toFixed(1)}</div></div>
+         <div class="figure"><div class="dim">Peak Impact <span style="font-size:11px">estimated now</span></div>
+           <div class="big" style="font-size:24px;color:var(--dim)">—</div></div>
+       </div>`
+    + chart(p)
+    + `<p class="dim" style="font-size:12px">Peak Impact — the projected peak the
+         model re-estimates at every update — is not built yet (#41), so no second
+         line is drawn. Nothing here is a stand-in for it.</p>`
+    + `<div class="foot">Run <code>${RUN.id}</code> · matches through
+         <b>${RUN.lastMatch}</b> · Impact index: 100 is the population average,
+         20 points is one standard deviation (ADR 0011), measured over players past
+         ${P.ELIGIBLE_MINUTES.toLocaleString()} career minutes. Rank ticks measured
+         ${P.RANK_MEASURED} over matches through ${P.RANK_MATCHES_THROUGH}, active
+         pool ${P.RANK_POOL.toLocaleString()}; they are a pinned reading aid, not a
+         live ranking.</div>`;
+  wireHover($('#main'));
+}
+
+$('#list').onclick = e => {
+  const el = e.target.closest('.item');
+  if (el) { show(rows[+el.dataset.i]); apply(); }
+};
+['#q', '#pos', '#min', '#sort'].forEach(s => $(s).oninput = apply);
+apply();
+</script>
