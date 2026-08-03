@@ -221,6 +221,25 @@ is *which source* a run draws from; width is *how much of it*.
 _Avoid_: coverage — that names how complete a competition-season is, not which
 ones are in
 
+**Burn-in**:
+The opening stretch of a run, where every rating is still near its seed and the
+population has not yet spread out. The mean is 100 by construction throughout, so
+what is short is the *spread*: on the designated run the active pool's standard
+deviation reads 17.9 in 2014 against 20.5 by 2026. Everyone therefore sits nearer
+100 than they should, and a career read here against a pinned ruler looks
+mid-table when it was not.
+
+**One phenomenon, two tolerances, cut at two different dates on purpose.** The
+scoring window stops at two years ([ADR 0010](docs/adr/0010-scoring-window.md))
+because it protects a *number* from being tuned on the model discovering its own
+population, and two seasons suffices for that. The career chart fades its lines
+for about four years (item 48) because it protects a *person* from misreading a
+career against a fixed ruler, and a person keeps being misled long after the
+log-loss has stopped caring. Neither date is a bug in the other.
+_Avoid_: warm-up — [ADR 0009](docs/adr/0009-transfermarkt-as-the-rating-spine.md)
+rejected a warm-up *pass*, which is a different thing: burn-in is a property the
+replay has, not a stage it runs
+
 **Scoring window**:
 The stretch of a run over which predictions are *graded*, which need not be the
 stretch that is *replayed*. Everything is always replayed, in date order, every
