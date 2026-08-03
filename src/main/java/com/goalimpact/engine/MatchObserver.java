@@ -16,13 +16,12 @@ public interface MatchObserver {
     // that only counts does not care which match it is.
     default void startMatch(long matchId, LocalDate date) { }
 
-    // minutesBefore and ratingBefore are the FROZEN pre-match values (the
-    // rating period of ADR 0005), so ratingBefore plus this match's update is
-    // exactly ratingAfter.
-    void playerMatch(long playerId, double minutesBefore, double ratingBefore,
-        double residual, double minutesPlayed, double ratingAfter);
+    // Everything the history records, in one record (#24): what he brought in,
+    // what he did, what the model expected of it, and what he left with. See
+    // PlayerMatch for why it is a record and not a row of doubles.
+    void playerMatch(PlayerMatch m);
 
     // The default for every caller that does not want a history - which is
-    // every caller until stage 2.
-    MatchObserver NONE = (id, minutesBefore, ratingBefore, residual, played, after) -> { };
+    // every caller but the designated run's writer.
+    MatchObserver NONE = m -> { };
 }

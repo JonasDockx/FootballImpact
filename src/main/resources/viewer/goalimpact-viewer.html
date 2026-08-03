@@ -15,6 +15,12 @@
     LAST_MATCH_DATE   the last match in that run - NOT a build clock (#46)
     PLAYER_COUNT      how many players are drawn
 
+  Since #24 the viewer is a PAGE PLUS A FOLDER: the match log ships as
+  ledger/000.js … 255.js beside the generated copy, loaded a shard at a time.
+  Still no server - script tags work on file:// where fetch() does not - so
+  "double-click it and it works" still holds. Copying the page without the
+  folder is a supported state: the chart draws and the log says what is missing.
+
   Descended from the prototype at docs/prototypes/player-search (variant B),
   which is throwaway and is not this.
 -->
@@ -71,6 +77,35 @@
   .tip b { font-size: 15px; font-variant-numeric: tabular-nums; margin-right: 4px; }
   .tip .sep { display: inline-block; width: 1px; height: 11px; background: var(--line);
               margin: 0 8px; vertical-align: -1px; }
+
+  /* The match log (#24). A drill-down from the chart, so it sits under it and
+     shares its width; the chart stays the thing that is looked at first. */
+  .log { margin-top: 20px; }
+  .log h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+  .logscroll { max-height: 460px; overflow: auto; border: 1px solid var(--line);
+               border-radius: 6px; }
+  table.log { width: 100%; border-collapse: collapse; margin: 0; }
+  table.log th { position: sticky; top: 0; background: var(--panel); text-align: left;
+                 font-weight: 500; font-size: 12px; color: var(--dim);
+                 padding: 6px 10px; border-bottom: 1px solid var(--line); z-index: 1; }
+  table.log td { padding: 5px 10px; border-bottom: 1px solid #1d222c; font-size: 13px;
+                 white-space: nowrap; }
+  table.log tr.r { cursor: pointer; }
+  table.log tr.r:hover td { background: #1a1f29; }
+  table.log tr.marked td { background: #1c2534; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .up { color: #6fce9a; } .down { color: var(--warn); }
+  /* Before the chart starts. Greyed and flagged rather than blanked: these
+     rows moved the rating hardest and the first drawn point is made of them,
+     so withholding the number would leave the log unable to explain its own
+     first point. Dimmed to about half the contrast of a drawn row. */
+  table.log tr.pre td { color: #6a7285; }
+  table.log tr.pre td.lvl { color: #7a8296; }
+  .flag { font-size: 11px; color: #7a8296; border: 1px solid #2c3340; border-radius: 99px;
+          padding: 0 6px; margin-left: 6px; }
+  .unfold td { background: #12161e; white-space: normal; color: #a9b3c6;
+               font-size: 12.5px; line-height: 1.6; }
+  .unfold b { color: var(--ink); font-variant-numeric: tabular-nums; }
 </style>
 
 <div id="app"></div>
@@ -287,6 +322,27 @@ function chart(p, h = 340) {
        apart for the whole career and the gap between them carries no information.` : ''}</div>`);
 }
 
+// The chart and the log point at each other, across a mismatch of grain: a
+// chart point is a MONTH and a log row is a MATCH, so one point covers 1–6
+// rows. Held in one object because both directions need the same two
+// translations - a month to a set of rows, and a month to a pixel - and two
+// copies of that would drift the moment a margin changed.
+const LINK = {
+  byMonth: null, scroller: null,
+  markChart: () => {},       // replaced by wireHover once a chart exists
+  markRows(month) {
+    if (!this.byMonth) return;
+    document.querySelectorAll('tr.marked').forEach(tr => tr.classList.remove('marked'));
+    const block = this.byMonth.get(month);
+    if (!block) return;
+    block.forEach(tr => tr.classList.add('marked'));
+    // Scrolled into the middle rather than to the top edge: the block's
+    // neighbours are the context that says what a jump in the line came after.
+    const s = this.scroller, t = block[0];
+    s.scrollTop = t.offsetTop - s.clientHeight / 2 + t.offsetHeight / 2;
+  }
+};
+
 // The crosshair snaps to the nearest sampled month rather than interpolating:
 // the model only forms an opinion after a match, so a value invented between
 // two months would be a picture of nothing.
@@ -298,6 +354,29 @@ function wireHover(root) {
   const cx = wrap.querySelector('.cx'), dot = wrap.querySelector('.cdot');
   const tip = wrap.querySelector('.tip');
   const px = scaleX(G), py = scaleY(G);
+
+  // The log's half of the link: put the crosshair on the point covering a
+  // month, without the pointer being anywhere near the chart.
+  LINK.markChart = month => {
+    const at = month == null ? -1 : G.ms.indexOf(month);
+    if (at < 0) { cur.style.display = 'none'; return; }
+    cur.style.display = '';
+    cx.setAttribute('x1', px(G.ms[at])); cx.setAttribute('x2', px(G.ms[at]));
+    dot.setAttribute('cx', px(G.ms[at])); dot.setAttribute('cy', py(G.vs[at]));
+  };
+
+  // Clicking a point jumps the log to the month it samples. The chart's
+  // geometry is already date-based, so this costs nothing new.
+  svg.onclick = e => {
+    const r = svg.getBoundingClientRect();
+    const vx = (e.clientX - r.left) / r.width * G.W;
+    const m = G.m0 + (vx - G.L) / (G.W - G.L - G.R) * (G.m1 - G.m0);
+    let best = 0;
+    for (let i = 1; i < G.ms.length; i++) {
+      if (Math.abs(G.ms[i] - m) < Math.abs(G.ms[best] - m)) best = i;
+    }
+    LINK.markRows(G.ms[best]);
+  };
 
   svg.onmousemove = e => {
     const r = svg.getBoundingClientRect();
@@ -321,6 +400,246 @@ function wireHover(root) {
     tip.style.top = (py(v) / G.H * r.height - 44) + 'px';
   };
   svg.onmouseleave = () => { cur.style.display = 'none'; tip.style.display = 'none'; };
+}
+
+// ------------------------------------------------------------- the match log
+// #24. The chart is 607,016 monthly points for the whole population and fits in
+// the page; the log is 2,185,765 matches and does not - ~210 MB against 12 MB.
+// So it ships as ledger/000.js … 255.js beside this file, sharded player_id %
+// 256, and one shard is fetched when a player is opened. <script> rather than
+// fetch(), because fetch() is blocked on file:// and script tags are not: the
+// viewer is still a page you double-click.
+//
+// A shard calls this back with its own name, which is how a file that loaded
+// but is not what it claims can be told from one that never loaded at all.
+// Keyed by that name and never by load order: two shards can be in flight at
+// once if the reader clicks twice, and "the last payload that arrived" is then
+// the wrong answer to "did MY file load".
+const LOADED = {};
+window.GI_LEDGER = (name, payload) => { LOADED[name] = payload; };
+
+// Both from the constants block, so the page never carries its own copy of a
+// decision LedgerWriter made: it picks a shard with exactly the arithmetic that
+// wrote them, and asks for it by the folder's own name.
+const shardName = id => String(id % P.LEDGER_SHARDS).padStart(3, '0');
+
+// Guards, and they are deliberately WEAKER than the chart's (#24). The page
+// refuses to draw at all over a results file with no career tags, because a
+// missing Goalkeeper flag silently changed a drawn line. A missing or wrong-run
+// ledger changes nothing drawn - so the chart is drawn regardless and the log
+// panel says, in words, why it is empty. Holding a correct chart hostage to a
+// log would be the wrong trade.
+//
+// Three failures, each named separately, because "no log" is not a diagnosis:
+// no folder at all, a folder missing this shard (half-copied), and a folder
+// from another run. Only the last is a refusal of something that IS there, and
+// it is absolute: a wrong-run log is never shown, because every number in it
+// would look exactly like a right one.
+function withLedger(id, done) {
+  const name = shardName(id);
+  const file = `${P.LEDGER_FOLDER}/${name}.js`;
+  if (LOADED[name]) return done(check(LOADED[name]));
+  const el = document.createElement('script');
+  el.src = file;
+  // A file that loads without calling back is one that is not a shard at all -
+  // truncated, or something else entirely under the right name.
+  el.onload = () => done(LOADED[name] === undefined
+    ? { error: `${file} loaded but is not a match-log shard.` }
+    : check(LOADED[name]));
+  el.onerror = () => done({ error: `No ${file} beside this page. The match log ships as a
+      folder of ${P.LEDGER_SHARDS} files next to the viewer; if you copied the page on its
+      own, copy the ${P.LEDGER_FOLDER} folder too. The chart above is unaffected.` });
+  document.head.appendChild(el);
+}
+
+function check(shard) {
+  if (!shard) return { error: 'That shard is missing from the ledger folder.' };
+  if (shard.run !== RUN.id) {
+    return { error: `The ledger folder was written by run ${shard.run}, and this page by
+      ${RUN.id}. A log from another run is not shown: every number in it would look
+      exactly like a right one. Rebuild the viewer to refresh both together.` };
+  }
+  return { shard };
+}
+
+// One career, unpacked from the shard's columnar arrays into the two things a
+// row needs that are not stored: the rating it came IN at, and the exposure it
+// left with.
+//
+// Neither is stored because neither has to be. after(i) == before(i+1) - a
+// rating is frozen for a whole match and moves once, at the whistle (the
+// glossary's Rating period) - so one rating per row plus the career's opening
+// value is the whole chain. Exposure is the running sum of the minutes each row
+// already carries.
+function career(shard, id) {
+  const c = shard.players[String(id)];
+  if (!c) return null;
+  const rows = [];
+  let before = c.p0, mins = c.b0;
+  for (let i = 0; i < c.d.length; i++) {
+    const after = c.v[i];
+    mins += c.m[i];
+    rows.push({
+      i, date: new Date(c.d[i] * 86400000), matchId: c.g[i],
+      club: c.c[i] == null ? null : shard.clubs[c.c[i]],
+      opp: c.o[i] == null ? null : shard.clubs[c.o[i]],
+      comp: c.k[i] == null ? null : shard.comps[c.k[i]],
+      gf: c.gf[i], ga: c.ga[i], mins: c.m[i],
+      goals: c.gv[i], drained: c.xd[i], residual: c.r[i],
+      before, after, level: c.l[i], exposure: mins,
+      // The chart starts at ADR 0011's threshold, so everything under it is a
+      // real rating period the line never drew.
+      drawn: mins >= P.ELIGIBLE_MINUTES
+    });
+    before = after;
+  }
+  for (const r of rows) {
+    r.month = r.date.getUTCFullYear() * 12 + r.date.getUTCMonth();
+    // How far this match moved him ON THE INDEX, which is the column the chart
+    // draws - not the Value move, which the unfolded row gives instead. Null on
+    // the first match rather than zero: he came in at p0, but the level p0 sits
+    // at needs the ageing curve on that day, and the shard ships the curve's
+    // answer per ROW. A dash is the honest reading of "there is nothing before
+    // this"; a 0.0 would claim he arrived exactly where he left.
+    r.move = r.i === 0 ? null : rows[r.i - 1].level != null ? r.level - rows[r.i - 1].level : null;
+  }
+  return rows;
+}
+
+const iso = d => d.toISOString().slice(0, 10);
+const signed = (n, dp = 2) => (n >= 0 ? '+' : '−') + Math.abs(n).toFixed(dp);
+
+// The result, from HIS side of it, always. No home/away marker: the vendor's
+// home label is administrative and names nobody at a neutral host (the
+// glossary's Home side), so a marker read off it would assert a venue fact the
+// data does not carry.
+function resultCell(r) {
+  if (r.gf == null || r.ga == null) return '<span class="dim">—</span>';
+  const w = r.gf > r.ga ? 'W' : r.gf < r.ga ? 'L' : 'D';
+  const cls = w === 'W' ? 'up' : w === 'L' ? 'down' : 'dim';
+  return `<span class="${cls}">${w}</span> ${r.gf}–${r.ga}`;
+}
+
+// The row's arithmetic, spelled out. This is the half of the log #24 was for:
+// "this match charged you +0.62" is a report, and "you were on for +3.00 where
+// the model expected +2.38 from those lineups" is an explanation. The two
+// halves come from the run itself - they are not re-derived here, and they are
+// not derived from each other either, because the residual is summed in event
+// order and re-adding its halves would re-associate a floating-point sum.
+function unfold(r) {
+  const move = r.after - r.before;
+  return `<tr class="unfold"><td colspan="${PEAK_LINE ? 9 : 8}">
+    On the pitch his side's goal difference moved <b>${signed(r.goals)}</b> goals, and the
+    model expected <b>${signed(-r.drained)}</b> from those lineups over his
+    <b>${r.mins.toFixed(0)}</b> minutes — so the match charged him a residual of
+    <b>${signed(r.residual)}</b> goals.
+    His rating went <b>${r.before.toFixed(3)}</b> → <b>${r.after.toFixed(3)}</b>
+    (${signed(move, 3)} Value), which is <b>${r.level.toFixed(1)}</b> on the Impact index.
+    Career exposure after this match: <b>${Math.round(r.exposure).toLocaleString()}</b> minutes.
+    ${r.drawn ? '' : `<span class="dim">Under ${P.ELIGIBLE_MINUTES.toLocaleString()} minutes,
+      so the chart does not draw this match — but it is a real rating period, and the update
+      factor is largest exactly here, when the model knows least.</span>`}
+  </td></tr>`;
+}
+
+// The Impact index rescale, for the one number a row needs that the shard does
+// not ship: index(P), the PEAK line. The level - index(P - D(age that day)) -
+// is shipped instead of derived, because deriving it would need the ageing
+// curve here (see LedgerWriter); this one needs no curve at all, only ADR
+// 0011's four pinned constants, which the page already carries.
+const impact = v => P.CENTRE + P.POINTS_PER_SD * (v - P.VALUE_MEAN) / P.VALUE_SD;
+
+// #24 asks a row to speak BOTH lines - level and peak. It shows one, for the
+// same reason the chart draws one line and not two: with the ageing curve
+// pinned flat, D is zero, so index(P) IS the level and a peak column would
+// repeat the column beside it to the decimal. PEAK_LINE is the single flag that
+// turns the second line on across this page, and it turns this column on with
+// it rather than leaving the log to be remembered separately (#41, ADR 0016).
+function logRows(rows) {
+  return rows.map(r => `<tr class="r ${r.drawn ? '' : 'pre'}" data-i="${r.i}"
+      data-month="${r.month}" data-drawn="${r.drawn ? 1 : 0}">
+    <td>${iso(r.date)}</td>
+    <td class="dim">${r.comp || '—'}</td>
+    <td>${r.club || '<span class="dim">club unknown</span>'}</td>
+    <td class="dim">v ${r.opp || '—'}</td>
+    <td>${resultCell(r)}</td>
+    <td class="num">${r.mins.toFixed(0)}'</td>
+    <td class="num ${r.residual > 0 ? 'up' : r.residual < 0 ? 'down' : ''}">${signed(r.residual)}</td>
+    <td class="num lvl">${r.level.toFixed(1)}
+      <span class="${r.move > 0 ? 'up' : r.move < 0 ? 'down' : 'dim'}"
+            style="font-size:11px">${r.move == null ? '—' : signed(r.move, 1)}</span>
+      ${r.drawn ? '' : '<span class="flag">pre-chart</span>'}</td>
+    ${PEAK_LINE ? `<td class="num lvl">${impact(r.after).toFixed(1)}</td>` : ''}
+  </tr>`).join('');
+}
+
+// The panel, and the two-way link with the chart across a mismatch of grain: a
+// chart point is a MONTH and a log row is a MATCH, so one point covers 1–6 rows.
+// Clicking a point scrolls to that month and marks the whole block; hovering a
+// row marks the point that contains it. Pre-threshold rows mark nothing, which
+// is the same statement their flag makes.
+function renderLog(p, root) {
+  const panel = root.querySelector('#logpanel');
+  withLedger(p.id, res => {
+    // A shard load is asynchronous and a reader can click the next name while
+    // it is in flight. Everything below writes into LINK and into the panel,
+    // both of which now belong to somebody else - so a callback that lands
+    // after its player stopped being the current one does nothing at all.
+    // Clearing LINK in show() cannot cover this: the stale callback arrives
+    // AFTER that clear, which is exactly what makes it stale.
+    if (cur !== p) return;
+    if (res.error) {
+      panel.innerHTML = `<h3>Match log</h3><div class="notebar">${res.error}</div>`;
+      return;
+    }
+    const rows = career(res.shard, p.id);
+    if (!rows) {
+      panel.innerHTML = `<h3>Match log</h3><div class="notebar">This run logged no matches
+        for him, which should not happen for a charted player.</div>`;
+      return;
+    }
+    const pre = rows.filter(r => !r.drawn).length;
+    panel.innerHTML = `<h3>Match log <span class="dim" style="font-weight:400;font-size:13px">
+        — ${rows.length.toLocaleString()} matches that counted${pre ? `, of which
+        ${pre.toLocaleString()} before the chart starts` : ''}</span></h3>
+      <div class="logscroll"><table class="log">
+        <thead><tr><th>Date</th><th>Competition</th><th>Club</th><th>Opponent</th>
+          <th>Result</th><th class="num">Min</th><th class="num">Residual</th>
+          <th class="num">Impact</th>${PEAK_LINE ? '<th class="num">Peak</th>' : ''}
+          </tr></thead>
+        <tbody>${logRows(rows)}</tbody></table></div>
+      <p class="dim" style="font-size:12px">Every match the model rated him in, including the
+        ${P.ELIGIBLE_MINUTES.toLocaleString()} minutes the chart will not draw. Residuals are in
+        goals — actual less expected — and Impact is the same index the chart draws. Matches
+        that were skipped or missing entirely are a different question (#25) and are not here.
+        Click a row for the arithmetic; click a point on the chart to jump to its month.</p>`;
+
+    const body = panel.querySelector('tbody');
+    const byMonth = new Map();
+    panel.querySelectorAll('tr.r').forEach(tr => {
+      const m = +tr.dataset.month;
+      if (!byMonth.has(m)) byMonth.set(m, []);
+      byMonth.get(m).push(tr);
+    });
+    LINK.byMonth = byMonth;
+    LINK.scroller = panel.querySelector('.logscroll');
+
+    body.onclick = e => {
+      const tr = e.target.closest('tr.r');
+      if (!tr) return;
+      const open = tr.nextElementSibling;
+      if (open && open.classList.contains('unfold')) { open.remove(); return; }
+      body.querySelectorAll('tr.unfold').forEach(x => x.remove());
+      tr.insertAdjacentHTML('afterend', unfold(rows[+tr.dataset.i]));
+    };
+    // Hovering a row marks the chart point that covers it. A pre-threshold row
+    // marks nothing, because there is no point covering it to mark.
+    body.onmouseover = e => {
+      const tr = e.target.closest('tr.r');
+      if (tr) LINK.markChart(tr.dataset.drawn === '1' ? +tr.dataset.month : null);
+    };
+    body.onmouseleave = () => LINK.markChart(null);
+  });
 }
 
 // What a player is, said once. The run's own tag answers the Goalkeeper
@@ -413,6 +732,11 @@ function apply() {
 // the model estimates NOW - is #41's, and is unbuilt rather than approximated.
 function show(p) {
   cur = p;
+  // Cleared before the panel is rebuilt: the log loads asynchronously, so a
+  // stale byMonth left over from the last player would let his chart scroll
+  // this one's log.
+  LINK.byMonth = LINK.scroller = null;
+  LINK.markChart = () => {};
   $('#main').innerHTML = idcard(p)
     + `<div class="row" style="margin:14px 0 6px">
          <div class="figure"><div class="dim">Impact now</div>
@@ -426,6 +750,8 @@ function show(p) {
     + `<p class="dim" style="font-size:12px">Peak Impact — the projected peak the
          model re-estimates at every update — is not built yet (#41), so no second
          line is drawn. Nothing here is a stand-in for it.</p>`
+    + `<div class="log" id="logpanel"><h3>Match log</h3>
+         <div class="dim">Loading his matches…</div></div>`
     + `<div class="foot">Run <code>${RUN.id}</code> · matches through
          <b>${RUN.lastMatch}</b> · Impact index: 100 is the population average,
          20 points is one standard deviation (ADR 0011), measured over players past
@@ -434,6 +760,7 @@ function show(p) {
          pool ${P.RANK_POOL.toLocaleString()}; they are a pinned reading aid, not a
          live ranking.</div>`;
   wireHover($('#main'));
+  renderLog(p, $('#main'));
 }
 
 $('#list').onclick = e => {

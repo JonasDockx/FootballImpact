@@ -1,6 +1,7 @@
 package com.goalimpact.report;
 
 import com.goalimpact.engine.MatchObserver;
+import com.goalimpact.engine.PlayerMatch;
 
 import org.duckdb.DuckDBAppender;
 import org.duckdb.DuckDBConnection;
@@ -45,6 +46,8 @@ public final class RatingHistoryWriter implements MatchObserver, AutoCloseable {
                     match_date      DATE,
                     minutes_before  DOUBLE,
                     rating_before   DOUBLE,
+                    goal_value      DOUBLE,
+                    expectation_drained DOUBLE,
                     residual        DOUBLE,
                     minutes_played  DOUBLE,
                     rating_after    DOUBLE
@@ -64,20 +67,20 @@ public final class RatingHistoryWriter implements MatchObserver, AutoCloseable {
     // (ADR 0004). A failed write is still fatal - a history that is quietly
     // short is worse than no history, because it still draws a chart.
     @Override
-    public void playerMatch(long playerId, double minutesBefore, double ratingBefore,
-        double residual, double minutesPlayed, double ratingAfter) {
-
+    public void playerMatch(PlayerMatch m) {
         try {
             appender.beginRow();
             appender.append(runId);
-            appender.append(playerId);
+            appender.append(m.playerId());
             appender.append(matchId);
             appender.append(matchDate);
-            appender.append(minutesBefore);
-            appender.append(ratingBefore);
-            appender.append(residual);
-            appender.append(minutesPlayed);
-            appender.append(ratingAfter);
+            appender.append(m.minutesBefore());
+            appender.append(m.ratingBefore());
+            appender.append(m.goalValue());
+            appender.append(m.expectationDrained());
+            appender.append(m.residual());
+            appender.append(m.minutesPlayed());
+            appender.append(m.ratingAfter());
             appender.endRow();
             rows++;
         } catch (SQLException e) {

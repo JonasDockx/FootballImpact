@@ -286,9 +286,31 @@ is a *Goalkeeper*, with both the curve and the tag coming from the run instead
 of being re-derived in the query. One gap remains and is named in the code — it
 reads dates of birth from the vendor snapshot alone, where the replay lets the
 sidecar register overrule them — and it changes no drawn point while the curve
-is pinned flat.
-_Avoid_: the chart, the site — the viewer is one file, and the chart is what it
-draws
+is pinned flat. Since the *Match log* it is a page **plus a folder of shards
+beside it**, built by the same step and travelling with it; the page alone still
+opens and draws, and says what is missing.
+_Avoid_: the chart, the site — the chart is what the viewer draws, and the
+viewer is no longer one file
+
+**Match log**:
+The per-match record under a career chart: for every match the run rated a
+player in, what happened, what the model expected, what it charged him, and
+where his rating went. A drill-down from the *Viewer*'s chart rather than a
+second surface — a chart point is a month and a log row is a match, so one point
+covers several rows and the two point at each other. It lists **matches that
+counted**, so a *Held* match or one absent entirely is not in it and is a
+different question. Rows speak in the *Impact index*, the same number the chart
+draws, while the *Residual* stays in goals. It starts at the player's first
+rated match rather than where the chart starts, and the stretch below the
+eligibility threshold is greyed and flagged rather than withheld: those matches
+moved the rating hardest, and the first drawn point is made of them. It ships as
+a folder of shards beside the page because the population's log is ~222 MB and
+one player's is 50 rows (see
+[ADR 0011](docs/adr/0011-impact-index-and-the-career-chart.md)).
+_Avoid_: match history — that names `rating_history`, the table it is read from,
+not the thing a reader sees. *Ledger* names the **folder** the shards live in
+(`ledger/`, `LedgerWriter`) and nothing else: the thing a reader opens is a match
+log, and the thing on disk is a ledger.
 
 **Value**:
 A player's current GoalImpact rating — the one number the engine stores and
