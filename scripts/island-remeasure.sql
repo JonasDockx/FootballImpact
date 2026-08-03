@@ -25,6 +25,19 @@
 -- That is ADR 0014 rule 2's same-run baseline used as a MEASUREMENT rather than
 -- as a gate. Nothing here gates anything.
 --
+-- THE `pre` FILE IS NOT ONE OF ADR 0009'S, and this file is the only thing that
+-- makes it look permanent. ADR 0009 calls the results file disposable and
+-- rebuilt at will; the backup above is a hand-kept copy of it from before the
+-- seed landed, so a machine without it cannot run this script. It is
+-- REGENERABLE rather than precious: item 16's mechanism has a pinned off-arm
+-- (a34015f made the run-id's seed-off branch real), so
+--
+--     mvn compile exec:java   with the seed cell at 0.00
+--
+-- reproduces it, and the run id it writes - ...-h2.00, no -s suffix - is what
+-- the guard below checks for. Say so rather than leave a reader to discover
+-- that a diagnostic depends on a file nothing documents.
+--
 -- THE SNAPSHOT MUST BE THE ONE BOTH RUNS WERE RUN AGAINST - it is joined to for
 -- fixtures and lineups, so a mismatch silently drops matches rather than
 -- failing. That is DataFiles.SNAPSHOT, which item 30 stage 3 deliberately has
@@ -43,13 +56,26 @@ ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-dataset
 ATTACH 'C:/Users/dockx/Documents/Programmeren/FootballData/transfermarkt-sidecar.duckdb'                 AS sc   (READ_ONLY);
 
 -- Guard: the two runs must be the same spine, or every before/after below is a
--- comparison of populations wearing the labels of a comparison of models.
+-- comparison of populations wearing the labels of a comparison of models. Equal
+-- COUNTS are not enough - two files can hold 85,050 matches each and not the
+-- same 85,050 - so the match_id sets are compared, and each run states its date
+-- range because ADR 0014 rule 3 requires every quoted number to.
 .print === guard: the two runs, which must differ only in the seed ===
-SELECT 'pre'  AS run, (SELECT DISTINCT run_id FROM pre.rating_history)  AS run_id,
-       (SELECT count(DISTINCT match_id) FROM pre.rating_history)        AS matches
+SELECT 'pre' AS run, run_id, count(DISTINCT match_id) AS matches,
+       min(match_date) AS first_match, max(match_date) AS last_match
+FROM pre.rating_history GROUP BY 2
 UNION ALL
-SELECT 'post', (SELECT DISTINCT run_id FROM post.rating_history),
-       (SELECT count(DISTINCT match_id) FROM post.rating_history);
+SELECT 'post', run_id, count(DISTINCT match_id), min(match_date), max(match_date)
+FROM post.rating_history GROUP BY 2;
+
+-- Zero on both counts, or nothing below is a before/after. Grouping by run_id
+-- above rather than selecting it as a scalar subquery is deliberate: a file
+-- holding two runs would print two rows here instead of silently passing.
+.print === guard: matches in one run and not the other, which must be 0 and 0 ===
+SELECT (SELECT count(*) FROM (SELECT DISTINCT match_id FROM pre.rating_history
+        EXCEPT SELECT DISTINCT match_id FROM post.rating_history)) AS only_in_pre,
+       (SELECT count(*) FROM (SELECT DISTINCT match_id FROM post.rating_history
+        EXCEPT SELECT DISTINCT match_id FROM pre.rating_history))  AS only_in_post;
 
 CREATE TEMP TABLE replayed AS SELECT DISTINCT match_id FROM post.rating_history;
 
@@ -62,6 +88,13 @@ SELECT r.match_id,
 FROM replayed r
 LEFT JOIN tm.games   g ON CAST(g.game_id AS BIGINT) = r.match_id
 LEFT JOIN sc.matches s ON s.game_id = r.match_id;
+
+-- ...and the join the header warns about, which fails by dropping rather than
+-- by erroring. A fixture with no club ids is a replayed match the snapshot does
+-- not carry, which means the wrong snapshot is attached.
+.print === guard: replayed matches the snapshot cannot place, which must be 0 ===
+SELECT count(*) AS fixtures_without_clubs FROM fixture
+WHERE home_club_id IS NULL OR away_club_id IS NULL;
 
 CREATE TEMP TABLE lineup AS
 SELECT match_id, player_id, any_value(club_id) AS club_id FROM (
@@ -125,7 +158,7 @@ LEFT JOIN club_leagues a ON a.club = f.away_club_id;
 -- the same rows rather than being written twice.
 CREATE TEMP TABLE walk AS
 SELECT * FROM (
-  SELECT '1 unseeded' AS run, h.player_id, h.match_id, f.competition_id, f.competition_type,
+  SELECT '1 unseeded' AS run, h.player_id, h.match_id, f.competition_id,
          l.club_id AS own_club, b.is_bridge,
          h.rating_before, h.residual, h.minutes_played,
          h.rating_after - h.rating_before AS value_gained
@@ -134,7 +167,7 @@ SELECT * FROM (
   JOIN match_bridge b ON b.match_id = h.match_id
   LEFT JOIN lineup l  ON l.match_id = h.match_id AND l.player_id = h.player_id
   UNION ALL
-  SELECT '2 seeded', h.player_id, h.match_id, f.competition_id, f.competition_type,
+  SELECT '2 seeded', h.player_id, h.match_id, f.competition_id,
          l.club_id, b.is_bridge,
          h.rating_before, h.residual, h.minutes_played,
          h.rating_after - h.rating_before
@@ -145,7 +178,7 @@ SELECT * FROM (
 WHERE own_club IS NOT NULL;
 
 CREATE TEMP TABLE club_strength AS
-SELECT run, match_id, own_club AS club_id, avg(rating_before) AS mean_rating
+SELECT run, match_id, own_club AS club_id, avg(rating_before) AS mean_peak
 FROM walk GROUP BY 1, 2, 3;
 
 -- WHAT THE OPPOSITION WAS, in the only three kinds that matter here. "Bridge"
@@ -189,6 +222,21 @@ FROM (SELECT w.*, CASE WHEN w.own_club = f.home_club_id THEN f.away_club_id
 -- this file reads - the ruler must not change length, so it stays put.
 CREATE TEMP MACRO idx(v) AS 100 + 20 * (v - 1.8374) / 7.1729;
 
+-- The same ruler applied to a DIFFERENCE rather than to a level: an amount of
+-- rating gained is a gap on the scale, so the offset drops out and only the
+-- gain survives. Named rather than inlined so ADR 0011's constants live in one
+-- place here, the way ImpactIndex holds them for the viewer.
+CREATE TEMP MACRO idx_delta(v) AS 20 * v / 7.1729;
+
+-- WHAT `rating_before` IS, and why nothing below calls it an Impact index.
+-- Since ADR 0016 the stored number is PEAK IMPACT - the player's estimated
+-- best - and CONTEXT's Impact index is that less the Ageing curve's penalty.
+-- On both runs this file reads, item 21 stage 1's curve is pinned FLAT, so the
+-- two coincide to the digit and every figure below would be unchanged either
+-- way. They are named `peak` regardless, because a column that is only
+-- accidentally right is a trap for whoever reads this after stage 2 turns the
+-- curve on.
+
 
 -- ===========================================================================
 -- 1. HOW MUCH BRIDGE THERE IS AT ALL.
@@ -212,36 +260,31 @@ FROM match_bridge;
 -- unearned mass, so leagues that ate the most should fall furthest), or did it
 -- leave the ordering intact and simply shift everyone?
 -- ===========================================================================
-.print === 2. mean club index per league, unseeded vs seeded ===
-WITH per_league AS (
-  SELECT cs.run, f.competition_id AS league,
-         count(DISTINCT f.match_id) AS matches,
-         idx(avg(cs.mean_rating))   AS mean_club_index
-  FROM fixture f
-  JOIN club_strength cs ON cs.match_id = f.match_id
-  WHERE is_league(f.competition_type, f.competition_id)
-  GROUP BY 1, 2 HAVING count(DISTINCT f.match_id) > 500)
+CREATE TEMP TABLE league_float AS
+SELECT cs.run, f.competition_id AS league,
+       count(DISTINCT f.match_id) AS matches,
+       idx(avg(cs.mean_peak))     AS mean_peak_index
+FROM fixture f
+JOIN club_strength cs ON cs.match_id = f.match_id
+WHERE is_league(f.competition_type, f.competition_id)
+GROUP BY 1, 2 HAVING count(DISTINCT f.match_id) > 500;
+
+.print === 2. mean club peak index per league, unseeded vs seeded ===
 SELECT p.league, p.matches,
-       round(u.mean_club_index, 1)                     AS unseeded,
-       round(p.mean_club_index, 1)                     AS seeded,
-       round(p.mean_club_index - u.mean_club_index, 1) AS moved
-FROM per_league p JOIN per_league u ON u.league = p.league AND u.run = '1 unseeded'
+       round(u.mean_peak_index, 1)                     AS unseeded,
+       round(p.mean_peak_index, 1)                     AS seeded,
+       round(p.mean_peak_index - u.mean_peak_index, 1) AS moved
+FROM league_float p JOIN league_float u ON u.league = p.league AND u.run = '1 unseeded'
 WHERE p.run = '2 seeded'
 ORDER BY 4 DESC;
 
 .print === 2b. the band itself, which is the island stated as one number ===
-WITH per_league AS (
-  SELECT cs.run, f.competition_id AS league, idx(avg(cs.mean_rating)) AS mean_club_index
-  FROM fixture f
-  JOIN club_strength cs ON cs.match_id = f.match_id
-  WHERE is_league(f.competition_type, f.competition_id)
-  GROUP BY 1, 2 HAVING count(DISTINCT f.match_id) > 500)
 SELECT run, count(*) AS leagues,
-       round(min(mean_club_index), 1)               AS lowest,
-       round(max(mean_club_index), 1)               AS highest,
-       round(max(mean_club_index) - min(mean_club_index), 1) AS band,
-       round(stddev_samp(mean_club_index), 2)       AS sd
-FROM per_league GROUP BY 1 ORDER BY 1;
+       round(min(mean_peak_index), 1)               AS lowest,
+       round(max(mean_peak_index), 1)               AS highest,
+       round(max(mean_peak_index) - min(mean_peak_index), 1) AS band,
+       round(stddev_samp(mean_peak_index), 2)       AS sd
+FROM league_float GROUP BY 1 ORDER BY 1;
 
 
 -- ===========================================================================
@@ -287,38 +330,31 @@ WHERE w.run = '2 seeded' AND w.minutes_played > 0
 GROUP BY 1 HAVING sum(w.minutes_played) > 300000
 ORDER BY 4;
 
+-- 3b restricted to the island column and computed for BOTH runs, so 3c and 3d
+-- read the one table rather than each carrying its own copy of the expression.
+CREATE TEMP TABLE league_deficit AS
+SELECT w.run, cl.league,
+       90 * sum(CASE WHEN o.opp_class = '2 other league' THEN w.residual ELSE 0 END)
+         / nullif(sum(CASE WHEN o.opp_class = '2 other league' THEN w.minutes_played ELSE 0 END), 0)
+           AS resid90
+FROM walk w
+JOIN opposition o   ON o.run = w.run AND o.match_id = w.match_id AND o.player_id = w.player_id
+JOIN club_league cl ON cl.club = w.own_club
+WHERE w.minutes_played > 0
+GROUP BY 1, 2 HAVING sum(w.minutes_played) > 300000;
+
 .print === 3c. the island test, unseeded vs seeded: how much of it item 16 took away ===
-WITH d AS (
-  SELECT w.run, cl.league,
-         90 * sum(CASE WHEN o.opp_class = '2 other league' THEN w.residual ELSE 0 END)
-           / nullif(sum(CASE WHEN o.opp_class = '2 other league' THEN w.minutes_played ELSE 0 END), 0)
-             AS resid90
-  FROM walk w
-  JOIN opposition o  ON o.run = w.run AND o.match_id = w.match_id AND o.player_id = w.player_id
-  JOIN club_league cl ON cl.club = w.own_club
-  WHERE w.minutes_played > 0
-  GROUP BY 1, 2 HAVING sum(w.minutes_played) > 300000)
 SELECT s.league, round(u.resid90, 3) AS unseeded, round(s.resid90, 3) AS seeded,
        round(s.resid90 - u.resid90, 3) AS moved
-FROM d s JOIN d u ON u.league = s.league AND u.run = '1 unseeded'
+FROM league_deficit s JOIN league_deficit u ON u.league = s.league AND u.run = '1 unseeded'
 WHERE s.run = '2 seeded' ORDER BY 3;
 
 .print === 3d. the island stated as one number: the spread of 3b, both runs ===
-WITH d AS (
-  SELECT w.run, cl.league,
-         90 * sum(CASE WHEN o.opp_class = '2 other league' THEN w.residual ELSE 0 END)
-           / nullif(sum(CASE WHEN o.opp_class = '2 other league' THEN w.minutes_played ELSE 0 END), 0)
-             AS resid90
-  FROM walk w
-  JOIN opposition o  ON o.run = w.run AND o.match_id = w.match_id AND o.player_id = w.player_id
-  JOIN club_league cl ON cl.club = w.own_club
-  WHERE w.minutes_played > 0
-  GROUP BY 1, 2 HAVING sum(w.minutes_played) > 300000)
 SELECT run, count(*) AS leagues,
        round(min(resid90), 3) AS worst, round(max(resid90), 3) AS best,
        round(max(resid90) - min(resid90), 3) AS spread,
        round(stddev_samp(resid90), 4) AS sd
-FROM d GROUP BY 1 ORDER BY 1;
+FROM league_deficit GROUP BY 1 ORDER BY 1;
 
 
 -- ===========================================================================
@@ -338,13 +374,12 @@ FROM d GROUP BY 1 ORDER BY 1;
 -- league gained that did not come off opposition with no league football.
 CREATE TEMP TABLE mass AS
 SELECT w.run, cl.league,
-       20 * sum(w.value_gained) / 7.1729 AS idx_pts_total,
-       20 * sum(CASE WHEN (CASE WHEN w.own_club = f.home_club_id THEN f.away_club_id
-                                ELSE f.home_club_id END) IN (SELECT club FROM unpriced)
-                     THEN w.value_gained ELSE 0 END) / 7.1729 AS idx_pts_from_unpriced,
+       idx_delta(sum(w.value_gained)) AS idx_pts_total,
+       idx_delta(sum(CASE WHEN o.opp_class = '3 unpriced'
+                          THEN w.value_gained ELSE 0 END)) AS idx_pts_from_unpriced,
        sum(w.minutes_played) AS minutes
 FROM walk w
-JOIN fixture f     ON f.match_id = w.match_id
+JOIN opposition o   ON o.run = w.run AND o.match_id = w.match_id AND o.player_id = w.player_id
 JOIN club_league cl ON cl.club = w.own_club
 GROUP BY 1, 2 HAVING sum(w.minutes_played) > 300000;
 
@@ -362,19 +397,38 @@ FROM mass m ORDER BY m.league, m.run;
 -- 20 clubs, 200 matches, all against each other, and the vendor files the
 -- competition with no type at all. #16 classified it as league football so its
 -- clubs stopped reading as cup minnows; nothing has yet placed its LEVEL. If
--- the bridge count here is near zero then nothing in this run ever can, and
--- that is a finding about pass 2 rather than about Colombia.
+-- the count here is near zero then nothing in this run ever can, and that is a
+-- finding about pass 2 rather than about Colombia.
+--
+-- TWO THINGS THIS QUERY GOT WRONG AT FIRST, both recorded because they are the
+-- easy mistakes to make twice.
+--
+--   It counted raw BRIDGES, which is the coarse measure section 3 exists to
+--   reject - cup ties against unpriced clubs are bridges, and they place
+--   nobody's level. Counting them read Scotland at 17.5% bridged and therefore
+--   well connected, when its connection to priced football is 4.5%.
+--
+--   It required 500 matches, which excluded COL1 - the league the section is
+--   named for, and at ~200 matches a season exactly the size that cannot clear
+--   a bar set in matches. The floor is minutes now, matching sections 3 and 4,
+--   and a league too small even for that is a finding rather than a row to hide.
 -- ===========================================================================
-.print === 5. the least-bridged leagues: who cannot be placed at all ===
+.print === 5. the least-connected leagues: who cannot be placed at all ===
 SELECT cl.league,
-       count(DISTINCT w.match_id)                                        AS matches,
-       count(DISTINCT CASE WHEN w.is_bridge THEN w.match_id END)         AS bridge_matches,
-       round(100.0 * count(DISTINCT CASE WHEN w.is_bridge THEN w.match_id END)
-             / count(DISTINCT w.match_id), 1)                            AS pct,
-       round(idx(avg(w.rating_before)), 1)                               AS mean_player_index
-FROM walk w JOIN club_league cl ON cl.club = w.own_club
+       count(DISTINCT w.match_id)                                    AS matches,
+       count(DISTINCT CASE WHEN o.opp_class = '2 other league'
+                           THEN w.match_id END)                      AS vs_other_leagues,
+       round(100.0 * count(DISTINCT CASE WHEN o.opp_class = '2 other league'
+                                         THEN w.match_id END)
+-- Counted in MATCHES here and in minutes in 3b, so the two disagree on any one
+-- league (Scotland 8.2% of matches, 4.5% of minutes) and neither is wrong.
+             / count(DISTINCT w.match_id), 1)                        AS pct_of_matches,
+       round(idx(avg(w.rating_before)), 1)                           AS mean_peak_index
+FROM walk w
+JOIN opposition o   ON o.run = w.run AND o.match_id = w.match_id AND o.player_id = w.player_id
+JOIN club_league cl ON cl.club = w.own_club
 WHERE w.run = '2 seeded'
-GROUP BY 1 HAVING count(DISTINCT w.match_id) > 500
+GROUP BY 1 HAVING sum(w.minutes_played) > 300000
 ORDER BY 4 ASC;
 
 
@@ -406,7 +460,7 @@ SELECT w.run, p.name,
             ELSE '2 everywhere else' END                 AS where_earned,
        count(DISTINCT w.match_id)                        AS matches,
        round(sum(w.minutes_played), 0)                   AS minutes,
-       round(20 * sum(w.value_gained) / 7.1729, 1)       AS idx_pts_gained
+       round(idx_delta(sum(w.value_gained)), 1)          AS idx_pts_gained
 FROM walk w
 JOIN club_league cl        ON cl.club = w.own_club
 JOIN tm.players p          ON p.player_id = w.player_id
