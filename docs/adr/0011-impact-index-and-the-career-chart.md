@@ -118,6 +118,17 @@ a constant or a band costs a query rather than a replay. Every row is
 self-sufficient: `rating_after` is already the running Value at that match, so
 the line needs no window function and no ordering to be correct.
 
+*(Amended 2026-08-03. Still a query rather than a replay, and still no window
+function — but a row is no longer self-sufficient.
+[ADR 0016](0016-peak-impact-and-the-ageing-curve.md) made `rating_after` the
+stored peak `P`, so the drawn line is `P - D(age that day)` and the query needs
+the player's date of birth and the ageing curve as well as his row. The curve
+reaches it from `AgeingCurve`, and who is charged which curve from the run's own
+`player_careers` table; neither is rewritten in SQL, for the reason
+`ImpactIndex` exists. While stage 1's curve is pinned flat the drawn line is
+`rating_after` exactly, and the change moved no point of the 607,016 on the
+page.)*
+
 ## What this needs, and what it deliberately does not build
 
 It needs the **results file** ADR 0009 designed and left unbuilt: the third

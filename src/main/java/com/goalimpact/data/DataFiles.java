@@ -57,7 +57,10 @@ public final class DataFiles {
     // the only one that is not a database. Built from the two files above by a
     // step of its own, so rebuilding it after a band or constant change costs
     // seconds rather than a replay. Disposable like the results DB.
-    public static final Path VIEWER = Path.of(
+    // Overridable for the same reason `results` is: a build from a diagnostic
+    // results file must be able to say so rather than quietly republishing
+    // itself as the page the project stands behind.
+    public static final Path VIEWER = pinned("goalimpact.viewer",
         "C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-viewer.html");
 
     private DataFiles() {

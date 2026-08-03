@@ -28,6 +28,7 @@ import com.goalimpact.report.HeldAppearanceWriter;
 import com.goalimpact.report.HeldMatchWriter;
 import com.goalimpact.report.Leaderboard;
 import com.goalimpact.report.MissingMatchWriter;
+import com.goalimpact.report.PlayerCareerWriter;
 import com.goalimpact.report.RatingHistoryWriter;
 
 import java.io.PrintStream;
@@ -524,6 +525,16 @@ public class Main {
             System.out.printf(Locale.US, "%nRating history: %,d rows -> %s (run %s)%n",
                 history.rows(), DataFiles.RESULTS.toAbsolutePath(), runId);
         }
+
+        // The career-level half of the same run (#22, ADR 0016): one row per
+        // rated player carrying the tag the replay stamped. Written after the
+        // history block for the reason every other writer here is - one writer
+        // at a time on the results file - and from the tallies, which are the
+        // only thing that knows a career rather than a match.
+        long careerRows = PlayerCareerWriter.write(DataFiles.RESULTS, runId, tallies.values());
+        long keepers = tallies.values().stream().filter(PlayerTally::isGoalkeeper).count();
+        System.out.printf(Locale.US, "Player careers: %,d rows, %,d Goalkeepers -> %s%n",
+            careerRows, keepers, DataFiles.RESULTS.toAbsolutePath());
 
         // The worklist is Transfermarkt's (its gate produced it). Written after
         // the history block so the two never hold the results file at once.

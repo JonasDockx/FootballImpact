@@ -86,9 +86,18 @@
 const RUN = { id: "{{RUN_ID}}", lastMatch: "{{LAST_MATCH_DATE}}", players: "{{PLAYER_COUNT}}" };
 
 // ---------------------------------------------------------------- data prep
-// rows: {id,name,club,pos,mins,apps,y0,y1,peak,latest,ms,vs,dobm}
+// rows: {id,name,club,pos,goalkeeper,mins,apps,y0,y1,peak,latest,ms,vs,dobm}
 // ms = absolute month indices (year*12 + month-1); vs = the Impact index at the
-// end of that month. dobm is the date of birth on the same axis, or null.
+// end of that month, which is P - D(age that day) rescaled (ADR 0016). dobm is
+// the date of birth on the same axis, or null.
+//
+// pos and goalkeeper answer different questions and the page never merges
+// them. pos is the VENDOR's position and is the only source for the outfield
+// categories; goalkeeper is the RUN's career tag - stamped the first time a man
+// starts in goal - and it is the one the model rated him under, so it is what
+// the filter and the chip read. Where they disagree both are shown: a man the
+// vendor lists in goal who never started there in a usable match was rated as a
+// field player, and that is a fact about the run rather than a blemish.
 const ALL = window.DATA;
 const P = window.PINNED;
 // 12.5% of distinct names carry accents (#35), so both sides are folded:
@@ -113,9 +122,10 @@ const monthLabel = m => Math.floor(m / 12) + '-' + String(m % 12 + 1).padStart(2
 const yearOf = m => Math.floor(m / 12);
 
 // Peak Impact (#41) is not drawn. ADR 0016 stage 1 landed the mechanism, so the
-// engine DOES store the estimated peak P now - but with the ageing curve pinned
-// flat at zero, P is the Impact index exactly and the second line would sit on
-// top of the first. There is still nothing to draw, and none is invented here:
+// engine DOES store the estimated peak P now, and the thick line below is the
+// query's P - D(age that day) rather than P itself - but with the curve pinned
+// flat at zero, D is zero, so P is the Impact index exactly and the second line
+// would sit on top of the first. There is nothing to draw, and none is invented:
 // the prototype's dashed line was an admitted stand-in over an invented ageing
 // curve, and a stand-in is not something this page ships. When ADR 0016 stage 2
 // fits the curve on the wide spine, the second series arrives beside vs and this
@@ -313,11 +323,22 @@ function wireHover(root) {
   svg.onmouseleave = () => { cur.style.display = 'none'; tip.style.display = 'none'; };
 }
 
+// What a player is, said once. The run's own tag answers the Goalkeeper
+// question - it is the definition he was rated under - and the vendor's position
+// covers the rest, including the men the run never saw start in goal.
+function positionChip(p) {
+  if (p.goalkeeper) {
+    return p.pos && p.pos !== 'Goalkeeper' ? 'Goalkeeper · listed ' + p.pos : 'Goalkeeper';
+  }
+  if (p.pos === 'Goalkeeper') return 'listed Goalkeeper · never started in goal';
+  return p.pos || 'position unknown';
+}
+
 function idcard(p) {
   return `<div class="idcard">
     <h2>${p.name}</h2>
     <span class="chip">${p.club || 'club unknown'}</span>
-    <span class="chip">${p.pos || 'position unknown'}</span>
+    <span class="chip">${positionChip(p)}</span>
     <span class="chip">${p.y0}–${p.y1}</span>
     <span class="chip">${p.mins.toLocaleString()} min · ${p.apps} matches</span>
     ${p.dupe ? '<span class="chip" style="color:#ffb454">shares this name</span>' : ''}
@@ -364,7 +385,12 @@ const matchTier = (p, q) => (p.f === q ? 2 : p.f.startsWith(q) ? 1 : 0);
 function apply() {
   const q = fold($('#q').value.trim()), pos = $('#pos').value;
   const min = +$('#min').value, s = $('#sort').value;
-  rows = ALL.filter(p => p.mins >= min && (!pos || p.pos === pos) && (!q || p.f.includes(q)));
+  // Goalkeeper is the run's own tag, so the filter finds the men the model
+  // rated as one - including those the vendor's players table never names, which
+  // is more than half the rated population. The other three come from the
+  // vendor, which is the only thing that records them.
+  const isPos = p => pos === 'Goalkeeper' ? p.goalkeeper : p.pos === pos;
+  rows = ALL.filter(p => p.mins >= min && (!pos || isPos(p)) && (!q || p.f.includes(q)));
   rows.sort(s === 'peak'
       ? (a, b) => (q ? matchTier(b, q) - matchTier(a, q) : 0) || b.peak - a.peak
     : s === 'mins' ? (a, b) => b.mins - a.mins

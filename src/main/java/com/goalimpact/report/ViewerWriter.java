@@ -1,5 +1,7 @@
 package com.goalimpact.report;
 
+import com.goalimpact.engine.AgeingCurve;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -14,6 +16,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDate;
 import java.util.Locale;
+import java.util.Map;
 import java.util.StringJoiner;
 
 // The career-chart viewer (#22): one HTML page carrying every player past the
@@ -84,6 +87,8 @@ public final class ViewerWriter {
                 lastMatch = rs.getDate("last_match").toLocalDate();
             }
 
+            requireCareerTags(s, runId);
+
             build(s);
 
             try (ResultSet rs = s.executeQuery(
@@ -108,20 +113,102 @@ public final class ViewerWriter {
         return new Result(players, points, runId, lastMatch, bytes.length);
     }
 
+    // The career tags the run stamped (ADR 0016, #44), demanded rather than
+    // worked around. A results file that does not carry them is one this page
+    // cannot honestly draw: it would have to decide for itself who is a
+    // Goalkeeper, which is the thing the flag exists to stop. So it says so and
+    // stops - a page that quietly drew every Goalkeeper as a field player would
+    // look exactly like a correct one.
+    //
+    // Three ways it can be wrong, and all three are checked, because the
+    // failure mode is silence in every one of them: no table, a table from
+    // another run, and a table that is merely SHORT. The last is the reason
+    // this is not one existence check: eligible LEFT JOINs the tags, so a
+    // player with no row there is drawn as a field player by default.
+    private static void requireCareerTags(Statement s, String runId) throws SQLException {
+        try (ResultSet rs = s.executeQuery(
+            "SELECT count(*) AS present FROM duckdb_tables()"
+            + " WHERE database_name = 'r' AND table_name = 'player_careers'")) {
+            rs.next();
+            if (rs.getInt("present") == 0) {
+                throw new IllegalStateException(
+                    "the results file carries no player_careers table, so nothing in it says"
+                    + " who is a Goalkeeper (#22, ADR 0016)."
+                    + " Re-run the designated replay to write it.");
+            }
+        }
+        try (ResultSet rs = s.executeQuery(
+            "SELECT count(DISTINCT run_id) AS runs, any_value(run_id) AS run_id,"
+            + " (SELECT count(*) FROM (SELECT player_id FROM r.rating_history"
+            + "  EXCEPT SELECT player_id FROM r.player_careers)) AS untagged"
+            + " FROM r.player_careers")) {
+            rs.next();
+            int runs = rs.getInt("runs");
+            if (runs != 1) {
+                throw new IllegalStateException(
+                    "player_careers holds " + runs + " run ids; expected exactly one");
+            }
+            String tagged = rs.getString("run_id");
+            if (!runId.equals(tagged)) {
+                // Two runs' halves in one file: the ratings would be drawn
+                // against another run's Goalkeepers, which is worse than either
+                // half alone.
+                throw new IllegalStateException("player_careers was written by run " + tagged
+                    + " but rating_history by " + runId);
+            }
+            long untagged = rs.getLong("untagged");
+            if (untagged > 0) {
+                throw new IllegalStateException("player_careers is short: " + untagged
+                    + " rated players carry no career tag");
+            }
+        }
+    }
+
     // The query the prototype's idx.sql and build.sql worked out (#35), moved
     // into Java so the two things it shares with RatingHistoryWriter - the
     // column names and the Impact index rescale - are held by one test.
     private static void build(Statement s) throws SQLException {
-        // rating_after is already the running Value at that match, so a career
-        // needs no window function to be correct (ADR 0011). The one window
-        // here is the running exposure, which decides where a line may start.
+        // The dates of birth the age term is read at. TRY_CAST, matching
+        // TransfermarktLoader.birthDates(), so a malformed vendor date is an
+        // unknown date of birth here exactly as it is in the replay.
+        //
+        // One seam is open and worth naming: the replay lets ADR 0012's sidecar
+        // register overrule the vendor for a hand-typed player, and this step
+        // attaches only the snapshot. It cannot bite while stage 1's curve is
+        // flat - every penalty is zero, so no date of birth changes a drawn
+        // point - and it closes with the sidecar when stage 2 fits the curve.
+        s.execute("""
+            CREATE OR REPLACE TEMP TABLE born AS
+              SELECT player_id, TRY_CAST(date_of_birth AS DATE) AS dob FROM tm.players""");
+
+        // rating_after is the stored P, the estimated PEAK (ADR 0016), so the
+        // drawn line is P - D(age that day) - not the stored number itself. The
+        // curve comes from AgeingCurve, which is the whole point: a second copy
+        // of the knot table written in SQL is the drift ImpactIndex exists to
+        // prevent, and the chart would then draw a curve the model never
+        // charged. Stage 1's table is flat, so this is the identity today.
+        //
+        // Every man is charged the field curve, Goalkeepers included, because
+        // that is what the replay charges; the tag the page carries is read
+        // from player_careers below and selects a curve of its own the day
+        // #44's stage 2 fit lands.
+        //
+        // A career needs no window function to be correct (ADR 0011). The one
+        // window here is the running exposure, which decides where a line may
+        // start.
+        // No dates of birth handed over: the page reads its own in SQL, off the
+        // born table above, so the curve is wanted here for its knots alone.
+        String idx = ImpactIndex.sql("(h.rating_after - (%s))".formatted(
+            AgeingCurve.pinned(Map.of())
+                .penaltySql(AgeingCurve.ageSql("b.dob", "h.match_date"))));
         s.execute("""
             CREATE OR REPLACE TEMP TABLE career AS
-              SELECT player_id, match_id, match_date,
+              SELECT h.player_id, h.match_id, h.match_date,
                      %s AS idx,
-                     sum(minutes_played) OVER (
-                         PARTITION BY player_id ORDER BY match_date, match_id) AS cum_min
-              FROM r.rating_history""".formatted(ImpactIndex.sql("rating_after")));
+                     sum(h.minutes_played) OVER (
+                         PARTITION BY h.player_id ORDER BY h.match_date, h.match_id) AS cum_min
+              FROM r.rating_history h LEFT JOIN born b ON b.player_id = h.player_id"""
+            .formatted(idx));
 
         s.execute("""
             CREATE OR REPLACE TEMP TABLE total AS
@@ -150,7 +237,8 @@ public final class ViewerWriter {
         s.execute("""
             CREATE OR REPLACE TEMP TABLE eligible AS
             SELECT t.player_id AS id, n.name AS name,
-                   lc.club, p.position, p.date_of_birth::date AS dob,
+                   lc.club, p.position, b.dob,
+                   coalesce(pc.goalkeeper, false) AS goalkeeper,
                    t.mins::int AS mins, t.apps,
                    year(t.first_d) AS y0, year(t.last_d) AS y1,
                    round((SELECT max(idx) FROM career c
@@ -160,6 +248,8 @@ public final class ViewerWriter {
             FROM total t JOIN named n USING (player_id)
                  LEFT JOIN last_club lc ON lc.player_id = t.player_id
                  LEFT JOIN tm.players p ON p.player_id = t.player_id
+                 LEFT JOIN born b ON b.player_id = t.player_id
+                 LEFT JOIN r.player_careers pc ON pc.player_id = t.player_id
             WHERE t.mins >= %d""".formatted(
                 ImpactIndex.ELIGIBLE_MINUTES, ImpactIndex.ELIGIBLE_MINUTES));
 
@@ -180,10 +270,20 @@ public final class ViewerWriter {
         // dobm is the date of birth on the same absolute month axis, so the age
         // axis is (m - dobm)/12. NULL for the 11.4% with no players row: they
         // get a line and no age axis rather than a wrong one (#36, #40).
+        // goalkeeper is the RUN's career tag and pos is the VENDOR's position,
+        // and they are two fields rather than one on purpose. The tag is the
+        // model rated him under - the glossary's career tag, sticky from his
+        // first start in goal - and it covers the men the vendor's players table
+        // has never heard of, who are more than half the rated population (#35).
+        // pos is the only source for the three outfield categories, which the
+        // run does not record. Where the two disagree the page shows both rather
+        // than picking a winner: a man the vendor lists in goal who never
+        // started in goal in a usable match was rated as a field player, and
+        // that is a fact about the run worth seeing.
         s.execute("""
             CREATE OR REPLACE TEMP TABLE page AS
               SELECT e.id, e.name, coalesce(e.club, '') AS club,
-                     coalesce(e.position, '') AS pos,
+                     coalesce(e.position, '') AS pos, e.goalkeeper,
                      e.mins, e.apps, e.y0, e.y1, e.peak, e.latest, s.ms, s.vs,
                      CASE WHEN e.dob IS NOT NULL
                           THEN year(e.dob)*12 + month(e.dob) - 1 END AS dobm

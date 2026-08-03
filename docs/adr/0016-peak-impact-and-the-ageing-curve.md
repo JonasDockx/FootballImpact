@@ -296,6 +296,17 @@ a bad table is a typo in them, not an input.
   `ImpactIndex` and `RankLadder` already hold their constants for the query, the
   page and the test to share. A second copy of the curve written in SQL is
   exactly the drift `ImpactIndex` exists to prevent.
+
+  **Done, 2026-08-03 (#22).** `AgeingCurve.ageSql` and `penaltySql` render the
+  pinned table as SQL from the same knots `penaltyAt` reads, and `ViewerWriter`
+  draws `ImpactIndex.of(rating_after - D)`. The two are held against each other
+  over the *steep* test curve, where an interpolation error is visible, and over
+  exact ages including leap-year births — over the flat pinned table alone every
+  mistake reads as zero. Gate met at full width: over the designated run's
+  **25,970 careers and 607,016 monthly points, not one drawn value moved**.
+  One seam stays open and is harmless while `D` is zero — the replay lets ADR
+  0012's register overrule the vendor's date of birth and the build step attaches
+  only the snapshot; it closes with the sidecar when the curve is fitted.
 - **#40 is discharged and ADR 0011's bands are untouched** — by the keeper split
   as well. #40's cancellation holds for whichever curve a player is charged, and
   keepers sit on the same part of the scale: past 1,000 minutes on the stage 3
@@ -305,9 +316,30 @@ a bad table is a typo in them, not an input.
   keeper too.
 - **The results file records who is a keeper**, and `ViewerWriter` reads the
   flag. With two curves the page needs to know which one a player is drawn
-  against, and the replay is the thing that knows it authoritatively. Where the
-  flag lands in the file is #22's call; it holds `rating_history` and a small
-  `appeared_players` table and records position nowhere today.
+  against, and the replay is the thing that knows it authoritatively.
+
+  **#22's call, taken 2026-08-03: its own table, `player_careers`** — `run_id`,
+  `player_id`, `goalkeeper` — one row per rated player, written by
+  `PlayerCareerWriter` from the tallies at the end of the designated run and
+  dropped-and-rewritten like everything else in the disposable file. Not a column
+  on `rating_history`, which would repeat a career-level fact across two million
+  player-match rows; not one on `appeared_players`, which is a worklist tier over
+  a different population. The table is *career-level facts the run knows*, so a
+  second such fact needs a column rather than a table.
+
+  `ViewerWriter` **demands** it, in all three of the ways it can be silently
+  wrong: no table, tags from a different run than the history beside them, and a
+  table that is merely *short* — the join defaults a missing row to a field
+  player, so a partial table draws the same wrong page a missing one would. Each
+  is refused by name rather than drawn, since that page would look exactly like a
+  correct one. The cost is that a results file written before 2026-08-03 cannot
+  build a viewer until the replay is re-run.
+
+  The page carries the tag as `goalkeeper`, beside — never merged into — the
+  vendor's `position`. The tag is the definition the model rated him under and
+  covers the men the vendor's `players` table never names; `position` is the only
+  source for the three outfield categories. Where they disagree the page shows
+  both, and the rail's Goalkeeper filter follows the run.
 - **ADR 0004 is not threatened by any of this.** The keeper tag lives on the
   tally, never on `Player` — `Lineup` already carries `Set<Player> goalkeepers`
   — so record equality and on-pitch set removal are untouched, and none of the

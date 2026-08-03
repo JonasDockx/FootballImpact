@@ -166,6 +166,80 @@ public final class AgeingCurve {
         return knotPenalties[i - 1] + along * (knotPenalties[i] - knotPenalties[i - 1]);
     }
 
+    // ---------------------------------------------------------------- in SQL
+    //
+    // The same curve as an expression over two columns, because the chart is
+    // drawn in SQL and must draw what the replay charged. rating_history stores
+    // P, the estimated peak (ADR 0016), so the viewer's thick line is
+    // P - D(age that day) - and the only way that line cannot disagree with the
+    // model is for the knot table to reach the query from here rather than
+    // being written out a second time in it. ImpactIndex.sql exists for exactly
+    // this reason and #46 named the drift it prevents.
+    //
+    // Rendered from the pinned constants rather than written out, so a stage 2
+    // fit reaches the page with no second edit. While the table is flat these
+    // expressions evaluate to zero everywhere and the drawn line is the stored
+    // rating exactly, which is what makes stage 1 byte-identical on the page too.
+
+    // Exact age in years at a date, matching ageOn below term for term: whole
+    // years since birth, plus the fraction of the way through the current one,
+    // measured birthday to birthday. NULL when the date of birth is - the
+    // 11.4% of drawable careers with no players row (#36) - which penaltySql
+    // then charges the unknown-date constant.
+    public static String ageSql(String dob, String day) {
+        // Year boundaries crossed, less one if this year's birthday has not
+        // come round yet: date_diff('year', ...) counts boundaries, not
+        // birthdays, so 2000-12-31 to 2001-01-01 is one to it and zero to us.
+        String years = "(date_diff('year', " + dob + ", " + day + ") - CASE WHEN "
+            + dob + " + to_years(date_diff('year', " + dob + ", " + day + ")::INTEGER) > " + day
+            + " THEN 1 ELSE 0 END)";
+        String lastBirthday = "(" + dob + " + to_years(" + years + "::INTEGER))";
+        String nextBirthday = "(" + dob + " + to_years((" + years + " + 1)::INTEGER))";
+        return "CASE WHEN " + dob + " IS NULL THEN NULL"
+            + " WHEN " + day + " < " + dob + " THEN 0.0"
+            + " ELSE " + years + " + date_diff('day', " + lastBirthday + ", " + day + ")::DOUBLE"
+            + " / date_diff('day', " + lastBirthday + ", " + nextBirthday + ") END";
+    }
+
+    // Rating points below peak for a player of this age, over the pinned table.
+    //
+    // Every man is charged the FIELD curve, Goalkeepers included, because that
+    // is what the replay charges them: ADR 0016 stage 1 does not honour the
+    // Goalkeeper split, and a chart drawn against a curve the model never used would be a
+    // picture of nothing. The results file records who is a Goalkeeper (#22) and
+    // the page carries the tag, so when #44's stage 2 fit lands, that table
+    // and the branch that selects it land together - here and in freeze, not in
+    // the query.
+    public String penaltySql(String age) {
+        StringBuilder sql = new StringBuilder("CASE");
+        sql.append(" WHEN ").append(age).append(" IS NULL THEN ")
+            .append(number(unknownBirthDatePenalty));
+        // Outside the fitted range the end values hold, exactly as penaltyAt
+        // does: the curve says nothing about ages it was not measured over.
+        sql.append(" WHEN ").append(age).append(" <= ").append(number(knotAges[0]))
+            .append(" THEN ").append(number(knotPenalties[0]));
+        int last = knotAges.length - 1;
+        sql.append(" WHEN ").append(age).append(" >= ").append(number(knotAges[last]))
+            .append(" THEN ").append(number(knotPenalties[last]));
+        for (int i = 1; i <= last; i++) {
+            double span = knotAges[i] - knotAges[i - 1];
+            double rise = knotPenalties[i] - knotPenalties[i - 1];
+            sql.append(" WHEN ").append(age).append(" <= ").append(number(knotAges[i]))
+                .append(" THEN ").append(number(knotPenalties[i - 1]))
+                .append(" + (").append(age).append(" - ").append(number(knotAges[i - 1]))
+                .append(") * ").append(number(rise / span));
+        }
+        return sql.append(" END").toString();
+    }
+
+    // Enough digits that a knot reads as the number it was pinned as, and no
+    // exponent: DuckDB parses 1.0E-4 but a reader comparing the query to the
+    // ADR should not have to.
+    private static String number(double d) {
+        return new java.math.BigDecimal(d).setScale(10, java.math.RoundingMode.HALF_UP)
+            .stripTrailingZeros().toPlainString();
+    }
+
     // Exact age in years: whole years since birth, plus the fraction of the
     // way through the current one. Measured birthday to birthday rather than
     // in days over 365.2425, so a man is exactly 26.0 on his 26th birthday

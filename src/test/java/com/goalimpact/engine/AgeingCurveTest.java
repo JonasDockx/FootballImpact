@@ -2,6 +2,11 @@ package com.goalimpact.engine;
 
 import org.junit.jupiter.api.Test;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.LocalDate;
 import java.util.Map;
 
@@ -118,5 +123,66 @@ class AgeingCurveTest {
         assertThrows(IllegalArgumentException.class, () ->
             new AgeingCurve(AGES, PENALTIES, -1.0, Map.of()),
             "and the unknown-age constant is an age penalty like any other");
+    }
+
+    // ------------------------------------------------------------- in SQL
+    //
+    // The contract ADR 0016 put on #22: the viewer draws P - D(age that day),
+    // so the curve reaches the chart's query from HERE. These tests are the
+    // reason that is safe - the SQL and the Java are checked against each other
+    // over the steep test curve, where an interpolation error is visible, and
+    // not only over the flat pinned one, where every mistake reads as zero.
+
+    @Test
+    void theSqlCurveAgreesWithTheJavaOneAtEveryAge() throws Exception {
+        AgeingCurve curve = curve(Map.of());
+
+        for (double age = 12.0; age <= 46.0; age += 0.25) {
+            assertEquals(curve.penaltyAt(age),
+                evaluate(curve.penaltySql(String.valueOf(age))), 1e-9, "at age " + age);
+        }
+    }
+
+    @Test
+    void theSqlCurveChargesTheUnknownConstantWithNoDateOfBirth() throws Exception {
+        AgeingCurve curve = curve(Map.of());
+
+        assertEquals(3.0, evaluate(curve.penaltySql("NULL")), 1e-12);
+        assertEquals(3.0, evaluate(curve.penaltySql(
+            AgeingCurve.ageSql("CAST(NULL AS DATE)", "DATE '2018-06-15'"))), 1e-12);
+    }
+
+    // Exact age, computed the same way on both sides - the fraction of the way
+    // from one birthday to the next, so a leap-year baby is the age LocalDate
+    // says he is and not a day either side of it.
+    @Test
+    void theSqlAgeAgreesWithTheJavaOne() throws Exception {
+        LocalDate[] births = {
+            LocalDate.of(2000, 6, 15), LocalDate.of(2000, 2, 29),
+            LocalDate.of(1999, 12, 31), LocalDate.of(1996, 1, 1)};
+        LocalDate[] days = {
+            LocalDate.of(2018, 6, 14), LocalDate.of(2018, 6, 15), LocalDate.of(2018, 6, 16),
+            LocalDate.of(2021, 2, 28), LocalDate.of(2024, 2, 29), LocalDate.of(2022, 12, 15)};
+
+        for (LocalDate born : births) {
+            AgeingCurve curve = curve(Map.of(7L, born));
+            for (LocalDate day : days) {
+                // forPlayer reads the Java age through the very same table, so
+                // agreeing here is agreeing on the age and on the curve at once.
+                assertEquals(curve.at(day).forPlayer(7),
+                    evaluate(curve.penaltySql(
+                        AgeingCurve.ageSql("DATE '" + born + "'", "DATE '" + day + "'"))),
+                    1e-9, born + " on " + day);
+            }
+        }
+    }
+
+    private static double evaluate(String expression) throws SQLException {
+        try (Connection c = DriverManager.getConnection("jdbc:duckdb:");
+             Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery("SELECT " + expression)) {
+            rs.next();
+            return rs.getDouble(1);
+        }
     }
 }

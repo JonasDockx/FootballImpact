@@ -1,5 +1,9 @@
 package com.goalimpact.report;
 
+import com.goalimpact.engine.AgeingCurve;
+import com.goalimpact.engine.PlayerTally;
+import com.goalimpact.model.Player;
+import com.goalimpact.model.Team;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -18,10 +22,12 @@ import java.sql.Statement;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 // The one contract #46 asked to be held in a test, and the reason the viewer is
@@ -52,6 +58,7 @@ class ViewerWriterTest {
         snapshot = dir.resolve("snapshot.duckdb");
         page = dir.resolve("viewer.html");
         writeHistory(results);
+        writeCareers(results, true);
         writeSnapshot(snapshot);
     }
 
@@ -67,16 +74,84 @@ class ViewerWriterTest {
         assertEquals(1L, data.get(0).getAsJsonObject().get("id").getAsLong());
     }
 
+    // ADR 0016: rating_history stores P, the estimated peak, so the drawn line
+    // is P - D(age that day) rescaled - and D comes from AgeingCurve, never from
+    // a second knot table written into the query. Player 1 has no date of birth,
+    // so he is charged the unknown-date constant, exactly as the replay charges
+    // him. Both sides are zero while stage 1's table is flat, which is what
+    // makes the page byte-identical across the change; the assertion is written
+    // through the curve so that stops being true the day the curve is fitted.
     @Test
-    void rescalesWithTheSameConstantsAsJava() throws Exception {
+    void rescalesWithTheSameConstantsAsJavaAndSubtractsTheSameCurve() throws Exception {
         ViewerWriter.write(results, snapshot, page);
 
+        double penalty = AgeingCurve.pinned(Map.of())
+            .at(LocalDate.of(2024, 5, 1)).forPlayer(1);
+        double drawn = ImpactIndex.of(VALUE_AT_END - penalty);
         JsonObject player = data(page).get(0).getAsJsonObject();
         JsonArray series = player.getAsJsonArray("vs");
         double last = series.get(series.size() - 1).getAsDouble();
         // The page rounds to one decimal, which is all a chart can show.
-        assertEquals(round1(ImpactIndex.of(VALUE_AT_END)), last, 1e-9);
-        assertEquals(round1(ImpactIndex.of(VALUE_AT_END)), player.get("latest").getAsDouble(), 1e-9);
+        assertEquals(round1(drawn), last, 1e-9);
+        assertEquals(round1(drawn), player.get("latest").getAsDouble(), 1e-9);
+    }
+
+    // #22, ADR 0016: with two ageing curves the page has to know which one a
+    // player is drawn against, and the run is the only thing that knows it
+    // authoritatively - a man the run never saw start in goal is a field player
+    // to the model that rated him, whatever the vendor's lineups say.
+    @Test
+    void carriesTheRunsCareerTagRatherThanTheVendorsPosition() throws Exception {
+        ViewerWriter.write(results, snapshot, page);
+
+        assertTrue(data(page).get(0).getAsJsonObject().get("goalkeeper").getAsBoolean());
+
+        writeCareers(results, false);
+        ViewerWriter.write(results, snapshot, page);
+
+        assertFalse(data(page).get(0).getAsJsonObject().get("goalkeeper").getAsBoolean());
+    }
+
+    // A results file with no tags cannot be drawn honestly, so it is not drawn:
+    // a page that quietly made everyone a field player would look exactly like a
+    // correct one.
+    @Test
+    void refusesAResultsFileThatDoesNotSayWhoIsAGoalkeeper() throws Exception {
+        try (Connection c = DriverManager.getConnection("jdbc:duckdb:" + results);
+             Statement s = c.createStatement()) {
+            s.execute("DROP TABLE player_careers");
+        }
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+            () -> ViewerWriter.write(results, snapshot, page));
+        assertTrue(e.getMessage().contains("player_careers"), e.getMessage());
+    }
+
+    // A table that is merely SHORT is the same silence with a table present:
+    // the join defaults a missing row to a field player.
+    @Test
+    void refusesAResultsFileThatTagsOnlySomeOfThePopulation() throws Exception {
+        try (Connection c = DriverManager.getConnection("jdbc:duckdb:" + results);
+             Statement s = c.createStatement()) {
+            s.execute("DELETE FROM player_careers WHERE player_id = 1");
+        }
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+            () -> ViewerWriter.write(results, snapshot, page));
+        assertTrue(e.getMessage().contains("short"), e.getMessage());
+    }
+
+    // And half of one run beside half of another is worse than either alone.
+    @Test
+    void refusesTagsFromADifferentRun() throws Exception {
+        try (Connection c = DriverManager.getConnection("jdbc:duckdb:" + results);
+             Statement s = c.createStatement()) {
+            s.execute("UPDATE player_careers SET run_id = 'ANOTHER-RUN'");
+        }
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+            () -> ViewerWriter.write(results, snapshot, page));
+        assertTrue(e.getMessage().contains("ANOTHER-RUN"), e.getMessage());
     }
 
     // #35: names come from game_lineups, never from players - 94,902 of 95,521
@@ -201,6 +276,21 @@ class ViewerWriterTest {
                 history.playerMatch(3, before, 1.0, 0.0, 90.0, 1.1);
             }
         }
+    }
+
+    // The career tags of the same run: written by the writer the replay uses,
+    // so the table the page reads is agreed by construction rather than by copy
+    // - the same argument that has the history above written by its own writer.
+    private static void writeCareers(Path results, boolean oneKeptGoal) throws SQLException {
+        List<PlayerTally> careers = new ArrayList<>();
+        for (long id = 1; id <= 3; id++) {
+            PlayerTally tally = new PlayerTally(new Player(id, "Player " + id), new Team(7, "Cagliari"));
+            if (id == 1 && oneKeptGoal) {
+                tally.startedInGoal();
+            }
+            careers.add(tally);
+        }
+        PlayerCareerWriter.write(results, "TEST-RUN-k1.00", careers);
     }
 
     private static void writeSnapshot(Path snapshot) throws SQLException {

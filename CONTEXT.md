@@ -279,7 +279,14 @@ Its *template* is repo source and hand-written; only the filled copy is
 generated, and the copy is disposable like the results file it reads. It states
 the run it was built from and that run's last match date, and deliberately not
 the time it was built — a build clock would read "today" over a months-old
-history, which is the one staleness a separate build step risks.
+history, which is the one staleness a separate build step risks. It draws what
+the replay charged rather than a second opinion about it: the stored *Peak
+Impact* less the *Ageing curve* at each date, over the run's own record of who
+is a *Goalkeeper*, with both the curve and the tag coming from the run instead
+of being re-derived in the query. One gap remains and is named in the code — it
+reads dates of birth from the vendor snapshot alone, where the replay lets the
+sidecar register overrule them — and it changes no drawn point while the curve
+is pinned flat.
 _Avoid_: the chart, the site — the viewer is one file, and the chart is what it
 draws
 
