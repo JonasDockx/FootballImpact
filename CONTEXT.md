@@ -287,14 +287,34 @@ the past, not a forecast of one still to come
 How far below his own peak a player of a given age is, in rating points —
 `D(age)`, zero at the peak age, and never negative. Piecewise linear in **exact**
 age between fixed knots, so no season and no birthday is a boundary. Fitted once
-outside the engine over the whole population, then pinned and dated like the
-base scoring rate and `h`; a missing date of birth is charged the
-population-average penalty. Subtracted **inside the replay**, before a goal is
-judged, which is what makes ageing something the model expects rather than
-something it discovers afterwards. Deliberately not drawn as a chart background:
-with two lines on the chart the envelope is already there.
+outside the engine, then pinned and dated like the base scoring rate and `h`; a
+missing date of birth is charged the population-average penalty. Subtracted
+**inside the replay**, before a goal is judged, which is what makes ageing
+something the model expects rather than something it discovers afterwards.
+Deliberately not drawn as a chart background: with two lines on the chart the
+envelope is already there. There are **two** of them — see *Field ageing curve*
+and *Keeper ageing curve* — so the bare term names the pair or the mechanism,
+never one of them.
 _Avoid_: decline curve, age adjustment — it covers the climb as well as the fall,
 and it is part of the expectation, not a correction applied to a result
+
+**Field ageing curve**:
+The *Ageing curve* charged to a player who is not a *Goalkeeper*, and the only
+one that existed before #44. Fitted on field-player exposure **only** — never on
+the whole population, because keepers are 7.4% of starts at 25 and 54.8% at 41,
+so including them makes the old end of the curve a keeper curve under another
+name. Knots at 16, 19, 22, 25, 27, 30, 33, 36, 40.
+_Avoid_: the ageing curve, the outfield curve
+
+**Keeper ageing curve**:
+The *Ageing curve* charged to a *Goalkeeper*, fitted on keeper exposure only,
+with its own knots at 19, 23, 26, 29, 32, 35, 38, 42 and its own
+unknown-date-of-birth constant. Its knots differ because keeper careers sit
+elsewhere: barely 1% of keeper starts happen before 20, and keepers are still
+starting at 42. Provisional — #44 built it as one of three arms and it ships only
+if it beats the field curve on matches where the two keepers are eight or more
+years apart (see [ADR 0016](docs/adr/0016-peak-impact-and-the-ageing-curve.md)).
+_Avoid_: goalkeeper curve (in code and docs), GK curve
 
 **Impact index**:
 What a player is worth *at a given moment* — his Peak Impact less the *Ageing

@@ -70,13 +70,45 @@ career in the data, so a curve fitted now would be survivorship at both ends.
 The fit joins the single re-measure ADR 0013 schedules for the end of item 30's
 third pass — which is what makes this a two-stage change rather than one.
 
-**Field players only.** Goalkeepers age differently and are #44. Stage 1 does
-**not** honour this — `MatchProcessor` ages every man it freezes, keepers
-included — because the flat curve makes it inert and because what a keeper
-should be charged instead is exactly #44's open question, which stage 1 must not
-answer by default. **Stage 2 does not ship until #44 answers it**, and the carve-
-out lands at `freeze`, which already knows who is a keeper (item 11's career
-tag).
+**Two curves, and the field one is fitted on field players only.** #44 answered
+this on 2026-08-03. Stage 1 does **not** honour the split — `MatchProcessor` ages
+every man it freezes, keepers included — because the flat curve makes it inert.
+Stage 2 fits a **second curve on keepers only**, and the field curve is fitted on
+field players only *in every arm*, including the one that then charges keepers
+that same curve. Keeper exposure is concentrated exactly where the field curve
+is thinnest — keepers are 7.4% of starts at 25, 34.9% at 38 and 54.8% at 41 —
+so one pile gives a field curve whose old end is largely a keeper curve wearing
+an outfielder's name, and a baseline that is already a blend.
+
+**The keeper curve has its own knots: 19, 23, 26, 29, 32, 35, 38, 42.** It starts
+at 19 because only 1.0% of keeper starts happen before 20 — nineteen starts at
+age 16, by five players — and a knot there would be noise that then leaks down
+the straight line into ages 17–19, where 2,277 starts do exist. A 16-year-old
+keeper is not left out: the curve holds its first knot's value below it, so he is
+charged the age-19 penalty, the youngest one measured. It ends at 42 because 282
+keeper starts happen there and the field curve has run out. Measured on the
+stage 3 snapshot (135,166 matches, 2006-06-09 to 2026-07-06): **219,886 keeper
+starts carry a date of birth**, across 3,754 keepers, with 843 distinct keepers
+starting at 33 and 212 at 38. Exposure was never the constraint.
+
+**A keeper with no date of birth is charged the keeper average**, its own pinned
+constant — the minutes-weighted mean penalty over keepers who do have one. Same
+reasoning as the field constant below, applied to the population the curve
+describes. On the stage 3 snapshot keeper coverage is **82.7%** against field
+players' **80.9%**: keepers are slightly better covered, not worse.
+
+**The carve-out lands at `freeze`, and the career tag is stamped there.** ADR
+0016 as first written said `freeze` "already knows who is a keeper (item 11's
+career tag)". It did not: the freeze pass walks the events before the main loop,
+and `startedInGoal` is stamped inside it, so a keeper making his **first career
+start in goal** was frozen — and aged — as a field player. Order 8,679 matches,
+one per keeper. The stamping moves into the freeze pass, which already walks the
+same Starting XI events. It is byte-identical today, because the tag is read only
+through `Lineup.goalkeepers()` and only matters when `fieldPlayersOnly` is true,
+which is pinned false — so it lands with stage 1 rather than waiting for stage 2.
+The glossary's **career** tag stays the single definition of Goalkeeper; reading
+`s.goalkeeper()` off the event instead would need no code to move but would put a
+second meaning beside it and charge a substitute keeper the field curve.
 
 **A missing date of birth gets the population-average penalty.** The age term
 then says nothing about him, which is exactly true. This is a real constant with
@@ -120,6 +152,34 @@ same-run curve-off baseline** — not against the pinned champion, which was
 measured on a population ADR 0013 deletes (ADR 0014, rules 3 and 4). Reported
 alongside but not gated on: log-loss over matches involving under-21s and
 over-33s, and ADR 0011's eyeball check.
+
+**Stage 2 runs three arms, and the keeper arms carry their own aimed gate.**
+The arms are **A**, every man charged the field curve — this ADR as first
+written, and the arm to beat; **B**, keepers charged their own fitted curve; and
+**C**, keepers charged nothing while field players are charged theirs. C is in
+the comparison because the record has never said whether the original leaves
+keepers out of the *curve* or out of *ageing* — Seidel 2013 and Wittmütz 2017
+only say keepers are treated differently — and a fitted keeper curve that comes
+out flat is not the same finding as no penalty at all. If both B and C clear the
+gate the better takes it; if neither does, **A stands** and the losers are pinned
+off in the code the way `FIELD_PLAYERS_ONLY = {false}` is. Both curves are fitted
+with the **same estimator**, whichever the deferred choice below lands on, so the
+comparison between arms is not confounded by it (ADR 0014, rule 4).
+
+B and C are judged in **ADR 0014's shape, not on the whole population**:
+primary, log-loss over matches where the two **starting keepers are eight or
+more years apart in age**, strictly better at four decimals; guard,
+whole-population log-loss not worse at four decimals; both read from a same-run
+baseline. A keeper is one man in eleven, so ~9% of a side's strength, and the
+prediction reads only the *gap* — item 16 touched 13.4% of matches with a far
+larger per-match effect and still moved whole-population log-loss by 0.0022, so
+the plain gate would discard a correct keeper curve as a tie. The slice is the
+same order as item 16's bridges: both keepers' birthdays are known in 97,992
+matches (72.5%), the mean gap is 5.08 years, and 21.3% of those matches are eight
+or more years apart — **15.4% of all matches**. This is not the circular option
+ADR 0014 rejected: the curve is fitted on keeper careers at every age, and the
+eight-year slice is a property of the fixture list, exactly as a bridge is a
+property of the run's coverage.
 
 ## Decisions
 
@@ -186,6 +246,34 @@ a bad table is a typo in them, not an input.
   taken with the wide spine in hand; the plain per-age averages are printed
   beside whatever is chosen, because the gap between the two lines *is* the
   selection effect.
+- **One curve for everyone, keepers included in the fit (rejected).** The
+  simplest thing, and the reason it fails is the exposure table: at 41 more than
+  half the men starting are keepers, so the old end of a single curve describes
+  keepers while claiming to describe everyone. It also destroys the baseline —
+  arm A only means something if the curve it charges keepers was fitted without
+  them.
+- **A separate keeper curve, committed to in advance (rejected).** Every
+  first-party and academic source says the keeper trajectory differs, and the
+  exposure table says so too. But none of them agree on how — 27, 31 and 33 are
+  all published peaks — and CLAUDE.md's rule is that model quality is a measured
+  number. What #44 settles is the experiment, not the result.
+- **The keeper curve sharing the field knots (rejected).** Directly comparable
+  knot for knot, and easy to chart side by side. Rejected on both ends: the knot
+  at 16 would rest on five players, and the curve would go flat from 40 onward,
+  discarding the one age range where keepers are the interesting case.
+- **Judging the keeper arms on whole-population log-loss (rejected).** One rule
+  for the whole curve, no new column. It would reject a correct keeper curve
+  before it was ever measured, which is the failure ADR 0014 exists to prevent.
+- **Aiming the gate at matches with a keeper under 24 or over 33 (rejected).**
+  Where the curve is steepest, so a natural choice, but one-sided: two
+  38-year-old keepers land in the slice while both arms price the match almost
+  identically, which dilutes exactly the signal being measured.
+- **The viewer re-deriving the keeper tag in SQL (rejected).** Nothing to change
+  in the results file. But it is a second copy of a definition, and it can
+  genuinely disagree — the SQL sees matches the run dropped as unusable, so a man
+  who only ever kept goal in a discarded match would be a keeper to the chart and
+  a field player to the model that rated him. The run records the flag instead,
+  the same argument that keeps the knot table out of SQL.
 - **A zero penalty for an unknown date of birth (rejected as the answer, and
   what stage 1 ships anyway).** Charging nothing prices an unknown player as one
   at his peak, which is a claim rather than an absence, so the constant is the
@@ -208,7 +296,22 @@ a bad table is a typo in them, not an input.
   `ImpactIndex` and `RankLadder` already hold their constants for the query, the
   page and the test to share. A second copy of the curve written in SQL is
   exactly the drift `ImpactIndex` exists to prevent.
-- **#40 is discharged and ADR 0011's bands are untouched.**
+- **#40 is discharged and ADR 0011's bands are untouched** — by the keeper split
+  as well. #40's cancellation holds for whichever curve a player is charged, and
+  keepers sit on the same part of the scale: past 1,000 minutes on the stage 3
+  results file, field players are n=33,519, mean 0.780, sd 7.218 and keepers are
+  n=3,064, mean 0.583, sd 7.249 — **0.55 index points apart** at 20 points per
+  sd, with an identical spread. #47's rank ladder means the same thing for a
+  keeper too.
+- **The results file records who is a keeper**, and `ViewerWriter` reads the
+  flag. With two curves the page needs to know which one a player is drawn
+  against, and the replay is the thing that knows it authoritatively. Where the
+  flag lands in the file is #22's call; it holds `rating_history` and a small
+  `appeared_players` table and records position nowhere today.
+- **ADR 0004 is not threatened by any of this.** The keeper tag lives on the
+  tally, never on `Player` — `Lineup` already carries `Set<Player> goalkeepers`
+  — so record equality and on-pitch set removal are untouched, and none of the
+  date-of-birth trap #42 flags applies.
 - **ADR 0011's deferral of "Goalimpact's second line" is discharged in design.**
   The object is specified and built; the numbers wait on the wide spine.
 - **Glossary updated:** *Peak Impact* and *Ageing curve* added, *Impact index*,
