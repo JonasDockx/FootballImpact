@@ -95,6 +95,17 @@ public class MatchProcessor {
         Map<Long, Double> matchResiduals = new HashMap<>(); // playerId -> summed residuals
         Map<Long, Integer> playedSeconds = new HashMap<>(); // playerId -> on-pitch seconds THIS match
 
+        // #24: the same residuals again, kept apart this time - goal values
+        // here, drained expectation there. Two extra maps rather than a
+        // subtraction at the whistle, because matchResiduals is summed in event
+        // order and that order is the rating: deriving either half from it, or
+        // it from the halves, would re-associate a floating-point sum that has
+        // to stay bit-for-bit what it was. Nothing reads these but the observer,
+        // so a run without one pays two map writes per goal and segment and
+        // changes not one rating.
+        Map<Long, Double> goalValues = new HashMap<>();  // playerId -> summed +-1 goal values
+        Map<Long, Double> drained = new HashMap<>();     // playerId -> summed expectation drain
+
 
         int lastTime = 0;
         int segStart = 0;   // when the current lineup-constant segment began
@@ -118,7 +129,8 @@ public class MatchProcessor {
                     }
                 }
                 case MatchEvent.Substitution sub -> {
-                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, drained,
+                        segStart, t);
                     segStart = t;
                     onPitch.get(sub.team().id()).remove(sub.playerOff());
                     leavePitch(tallies, enterTime, playedSeconds, sub.playerOff(), sub.team(), t);
@@ -129,7 +141,8 @@ public class MatchProcessor {
                     tallyFor(sub.playerOn(), sub.team(), tallies).playsFor(sub.team());
                 }
                 case MatchEvent.RedCard rc -> {
-                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, drained,
+                        segStart, t);
                     segStart = t;
                     onPitch.get(rc.team().id()).remove(rc.player());
                     leavePitch(tallies, enterTime, playedSeconds, rc.player(), rc.team(), t);
@@ -152,12 +165,14 @@ public class MatchProcessor {
                         new Lineup(concedingOnPitch, concedingHome, goalkeepers(concedingOnPitch, tallies)), preMatch);
                     for (Map.Entry<Player, Double> d : deltas.entrySet()) {
                         matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
+                        goalValues.merge(d.getKey().id(), d.getValue(), Double::sum);
                     }
                 }
                 case MatchEvent.MatchEnd end -> {
                     // The whistle closes the final segment; its timestamp already
                     // became lastTime, which closes every open stint.
-                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, segStart, t);
+                    closeSegment(onPitch, homeTeamId, preMatch, tallies, matchResiduals, drained,
+                        segStart, t);
                 }
             }
         }
@@ -179,12 +194,14 @@ public class MatchProcessor {
         // both record here.
         for (Map.Entry<Long, Integer> entry : playedSeconds.entrySet()) {
             long id = entry.getKey();
-            observer.playerMatch(id,
+            observer.playerMatch(new PlayerMatch(id,
                 frozenMinutes.getOrDefault(id, 0.0),
                 frozen.getOrDefault(id, 0.0),
+                goalValues.getOrDefault(id, 0.0),
+                drained.getOrDefault(id, 0.0),
                 matchResiduals.getOrDefault(id, 0.0),
                 entry.getValue() / 60.0,
-                tallies.get(id).rating());
+                tallies.get(id).rating()));
         }
     }
 
@@ -241,7 +258,8 @@ public class MatchProcessor {
 
 
     private void closeSegment(Map<Long, Set<Player>> onPitch, long homeTeamId, RatingLookup ratings,
-        Map<Long, PlayerTally> tallies, Map<Long, Double> matchResiduals, int from, int to) {
+        Map<Long, PlayerTally> tallies, Map<Long, Double> matchResiduals,
+        Map<Long, Double> drained, int from, int to) {
             if (to <= from || onPitch.size() != 2) {
                 return; // zero-length segment, or lineups not both known yet
             }
@@ -254,6 +272,7 @@ public class MatchProcessor {
                 to - from, ratings);
             for (Map.Entry<Player, Double> d : deltas.entrySet()) {
                 matchResiduals.merge(d.getKey().id(), d.getValue(), Double::sum);
+                drained.merge(d.getKey().id(), d.getValue(), Double::sum);
             }
         }
 

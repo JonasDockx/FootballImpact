@@ -472,23 +472,23 @@ class MatchProcessorTest {
     // the pitch and nobody else, with minutes that match the tallies and the
     // FROZEN pre-match rating - the last of which is what makes a career chart
     // causal rather than a chart drawn with hindsight.
-    private record Heard(long id, double minutesBefore, double ratingBefore,
-        double residual, double minutesPlayed, double ratingAfter) {
-    }
+    // #24 replaced this test's own mirror of the six arguments with the record
+    // the seam now carries, which is the point of the record: there is one
+    // definition of what a match told about a player.
 
     @Test
     void theObserverHearsEveryPlayerWhoWasOnThePitch() {
         MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
-        Map<Long, Heard> heard = new HashMap<>();
+        Map<Long, PlayerMatch> heard = new HashMap<>();
 
         processor.process(List.of(
             xi(TEAM_A, 1, 2),
             xi(TEAM_B, 12, 13),
             sub(10, TEAM_A, 2, 3),
             goal(90, TEAM_A)
-        ), tallies, (id, mb, rb, res, mp, ra) -> assertNull(
-            heard.put(id, new Heard(id, mb, rb, res, mp, ra)), "player " + id + " heard twice"));
+        ), tallies, m -> assertNull(
+            heard.put(m.playerId(), m), "player " + m.playerId() + " heard twice"));
 
         assertEquals(Set.of(1L, 2L, 3L, 12L, 13L), heard.keySet());
 
@@ -512,14 +512,71 @@ class MatchProcessorTest {
         assertEquals(rating(tallies, 12), heard.get(12L).ratingAfter(), 1e-12);
     }
 
+    // #24: the residual's two halves reach the observer told apart, and they
+    // are the halves they claim to be - goal values from the goal seam, drained
+    // expectation from the segment seam, and nothing crossing over. The source
+    // hands back values no real rule would produce, so a half fed from the
+    // wrong seam cannot coincidentally look right.
+    @Test
+    void theObserverHearsTheResidualsTwoHalvesApart() {
+        ResidualSource sevensAndHalves = new ResidualSource() {
+            @Override
+            public Map<Player, Double> goal(Lineup scoring, Lineup conceding, RatingLookup ratings) {
+                Map<Player, Double> deltas = new HashMap<>();
+                scoring.players().forEach(p -> deltas.put(p, 7.0));
+                conceding.players().forEach(p -> deltas.put(p, -7.0));
+                return deltas;
+            }
+            @Override
+            public Map<Player, Double> segment(Lineup teamA, Lineup teamB, double seconds,
+                RatingLookup ratings) {
+                // The same value to every man on the pitch, so the assertion
+                // does not depend on which side arrives as teamA.
+                Map<Player, Double> deltas = new HashMap<>();
+                teamA.players().forEach(p -> deltas.put(p, -0.5));
+                teamB.players().forEach(p -> deltas.put(p, -0.5));
+                return deltas;
+            }
+        };
+        MatchProcessor processor = new MatchProcessor(sevensAndHalves, m -> 1.0);
+        Map<Long, PlayerTally> tallies = new HashMap<>();
+        Map<Long, PlayerMatch> heard = new HashMap<>();
+
+        processor.process(List.of(
+            xi(TEAM_A, 1, 2),
+            xi(TEAM_B, 12, 13),
+            goal(30, TEAM_A),
+            new MatchEvent.MatchEnd(1, 90, 0)
+        ), tallies, m -> heard.put(m.playerId(), m));
+
+        // One goal and one segment, so a scorer's side carries +7 of goal value
+        // and -0.5 of drain, and the conceding side -7 and the same -0.5.
+        assertEquals(7.0, heard.get(1L).goalValue(), 1e-12);
+        assertEquals(-0.5, heard.get(1L).expectationDrained(), 1e-12);
+        assertEquals(6.5, heard.get(1L).residual(), 1e-12);
+
+        assertEquals(-7.0, heard.get(12L).goalValue(), 1e-12);
+        assertEquals(-0.5, heard.get(12L).expectationDrained(), 1e-12);
+        assertEquals(-7.5, heard.get(12L).residual(), 1e-12);
+
+        // And the sum is still the number that moved the rating: at K = 1 the
+        // update is the residual exactly, which is what stops the two halves
+        // from being a decorative pair beside a number derived some other way.
+        assertEquals(6.5, rating(tallies, 1), 1e-12);
+        assertEquals(-7.5, rating(tallies, 12), 1e-12);
+        for (PlayerMatch m : heard.values()) {
+            assertEquals(m.residual(), m.goalValue() + m.expectationDrained(), 1e-9);
+        }
+    }
+
     @Test
     void whatTheObserverHearsBeforeIsWhatItHeardAfterLastTime() {
         MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
-        List<Heard> heard = new ArrayList<>();
-        MatchObserver observer = (id, mb, rb, res, mp, ra) -> {
-            if (id == 1L) {
-                heard.add(new Heard(id, mb, rb, res, mp, ra));
+        List<PlayerMatch> heard = new ArrayList<>();
+        MatchObserver observer = m -> {
+            if (m.playerId() == 1L) {
+                heard.add(m);
             }
         };
 
@@ -570,17 +627,17 @@ class MatchProcessorTest {
         MatchProcessor processor =
             new MatchProcessor(new FlatCreditRule(), m -> 1.0, TEAM_B_IS_UNPRICED);
         Map<Long, PlayerTally> tallies = new HashMap<>();
-        List<Heard> heard = new ArrayList<>();
-        MatchObserver observer = (id, mb, rb, res, mp, ra) -> heard.add(new Heard(id, mb, rb, res, mp, ra));
+        List<PlayerMatch> heard = new ArrayList<>();
+        MatchObserver observer = heard::add;
 
         processor.process(List.of(
             xi(TEAM_A, 1, 2),
             xi(TEAM_B, 12, 13),
             goal(90, TEAM_A)), tallies, observer);
 
-        assertEquals(0.0, heard.stream().filter(h -> h.id() == 1L).findFirst().orElseThrow()
+        assertEquals(0.0, heard.stream().filter(h -> h.playerId() == 1L).findFirst().orElseThrow()
             .ratingBefore(), 1e-9);
-        assertEquals(-3.0, heard.stream().filter(h -> h.id() == 12L).findFirst().orElseThrow()
+        assertEquals(-3.0, heard.stream().filter(h -> h.playerId() == 12L).findFirst().orElseThrow()
             .ratingBefore(), 1e-9);
     }
 
@@ -682,9 +739,8 @@ class MatchProcessorTest {
         // history has to carry P. Recording P - D here would collapse them.
         MatchProcessor processor = new MatchProcessor(new FlatCreditRule(), m -> 1.0);
         Map<Long, PlayerTally> tallies = new HashMap<>();
-        List<Heard> heard = new ArrayList<>();
-        MatchObserver observer = (id, mb, rb, res, mp, ra) ->
-            heard.add(new Heard(id, mb, rb, res, mp, ra));
+        List<PlayerMatch> heard = new ArrayList<>();
+        MatchObserver observer = heard::add;
 
         List<MatchEvent> match = List.of(
             xi(TEAM_A, 1, 2),
@@ -696,7 +752,7 @@ class MatchProcessorTest {
         // Match 2 opens on exactly what match 1 closed at - the continuity the
         // career chart rests on - and neither number carries the 5-point age
         // term the strength lookup saw.
-        Heard second = heard.stream().filter(h -> h.id() == 12L).toList().get(1);
+        PlayerMatch second = heard.stream().filter(h -> h.playerId() == 12L).toList().get(1);
         assertEquals(-1.0, second.ratingBefore(), 1e-12);
         assertEquals(-2.0, second.ratingAfter(), 1e-12);
     }

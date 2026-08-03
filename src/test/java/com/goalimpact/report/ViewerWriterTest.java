@@ -1,6 +1,7 @@
 package com.goalimpact.report;
 
 import com.goalimpact.engine.AgeingCurve;
+import com.goalimpact.engine.PlayerMatch;
 import com.goalimpact.engine.PlayerTally;
 import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
@@ -269,11 +270,14 @@ class ViewerWriterTest {
                 history.startMatch(100 + i, date);
                 double before = i * 90.0;
                 double rating = VALUE_AT_END * (i + 1) / dates.size();
-                history.playerMatch(1, before, rating - 0.5, 0.1, 90.0, rating);
+                // #24: the residual arrives as its two halves and its sum. The
+                // halves are given values that really add up, so a fixture that
+                // drifts from the arithmetic the page checks fails here first.
+                history.playerMatch(new PlayerMatch(1, before, rating - 0.5, 1.0, -0.9, 0.1, 90.0, rating));
                 if (i < 5) {
-                    history.playerMatch(2, before, 0.2, 0.0, 90.0, 0.3);
+                    history.playerMatch(new PlayerMatch(2, before, 0.2, 1.0, -1.0, 0.0, 90.0, 0.3));
                 }
-                history.playerMatch(3, before, 1.0, 0.0, 90.0, 1.1);
+                history.playerMatch(new PlayerMatch(3, before, 1.0, 0.0, 0.0, 0.0, 90.0, 1.1));
             }
         }
     }
