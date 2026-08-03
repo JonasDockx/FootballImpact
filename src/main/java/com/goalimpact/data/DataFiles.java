@@ -63,6 +63,20 @@ public final class DataFiles {
     public static final Path VIEWER = pinned("goalimpact.viewer",
         "C:/Users/dockx/Documents/Programmeren/FootballData/goalimpact-viewer.html");
 
+    // The match log's shards (#24), one per player_id % 256, loaded by the page
+    // on demand. Fifth entry of ADR 0009's generated lifecycle and the first
+    // that is a FOLDER: the population's log measures 222 MB against the page's
+    // 12 MB, so it could not live in the page, and one player's is 50 rows, so
+    // it does not have to. Disposable exactly like the page it sits beside.
+    //
+    // Defaulted BESIDE the viewer rather than pinned to an absolute path of its
+    // own, because the page loads its shards by the relative path ledger/NNN.js
+    // - so a diagnostic page built somewhere else must take its ledger with it
+    // or it would read the designated run's rows under a diagnostic run's
+    // chart. Overridable all the same, for the reason every path here is.
+    public static final Path LEDGER = pinned("goalimpact.ledger",
+        VIEWER.toAbsolutePath().resolveSibling("ledger").toString());
+
     private DataFiles() {
     }
 }

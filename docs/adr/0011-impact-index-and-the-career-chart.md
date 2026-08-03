@@ -166,6 +166,70 @@ the only form in which a rating may be quoted absolutely, and the quality bands
 stay **flat** — bending them by the curve would cancel the age term exactly
 (#40).
 
+## The match log, and what the single-file property bought (#24, 2026-08-03)
+
+The chart is a *monthly sample* of a career, and the question it always
+provokes is which matches made a month move. The **match log** answers it: one
+row per match the run rated a player in, reached by opening a player — a
+drill-down from the chart, not a second surface.
+
+**It cannot live in the page, and both sides of that are measured.** The
+eligible population's log is **2,185,765 rows** against the chart's **607,016**
+monthly points, and at **102 bytes a row** it is **222 MB** where the page is
+**12 MB** — and [ADR 0013](0013-spine-width.md)'s widening multiplies it ~4×.
+[#35](https://github.com/JonasDockx/FootballImpact/issues/35) embedded the whole
+population in one file at 7.1 MB on a measured number and said the decision was
+re-openable only on another one. This is that number. The asymmetry is the whole
+design: the population's log is impossible and **one player's is 50 rows**
+(median; p90 201, max 686).
+
+So the viewer becomes **a page plus a folder**: `ledger/000.js … 255.js`,
+sharded `player_id % 256`, loaded a shard at a time by `<script>` tag rather
+than `fetch()`, which is blocked on `file://`. Still no server.
+
+**The single-file property was traded for the log and for nothing else.** The
+page still carries every drawn career whole; what moved out is the one thing
+that could not fit and was never in it. `ledger/` is **disposable exactly like
+the page** — same lifecycle, same build step, rebuilt from the same two files in
+the same reading ([ADR 0009](0009-transfermarkt-as-the-rating-spine.md)'s table
+now lists it) — and it must travel with the page it was built beside.
+
+**The log starts before the chart does.** It runs from the player's first rated
+match, and the pre-threshold stretch — **394,821 rows, 18.1%** — is listed and
+flagged *not drawn on the chart*. Those matches are real rating periods and they
+moved the rating hardest, because the update factor is largest when exposure is
+lowest; the line's first drawn value is made entirely of them. Their numbers are
+**printed and greyed, never withheld**: this ADR's position is that a
+sub-1,000-minute rating has no signal to *draw*, and item 48's is that
+truncation misleads a reader worse than fading does. A log that cannot account
+for its own first point is not one.
+
+**A row reads the same number as the point above it**, and that is enforced
+rather than intended. The level a row shows is `index(P − D(age that day))`
+rounded to one decimal, computed by the *same* `ImpactIndex.sql` and
+`AgeingCurve.penaltySql` expression that draws the chart point, and shipped in
+the shard. The design note asked for `P` alone, with the level derived on the
+page — which would have been a **JavaScript copy of the ageing curve**, the
+second knot table `ImpactIndex.sql` exists to prevent, in the one language
+`mvn test` cannot reach. It would also have been undetectable today, because the
+curve is pinned flat. Six bytes a row is the price of not having it. The
+residual stays in **goals**, its own natural unit, and `P` ships too, because the
+arithmetic a row unfolds is in Value units.
+
+**Guards are deliberately weaker than the chart's.** A missing `player_careers`
+table makes this page refuse to draw at all, because a missing Goalkeeper flag
+silently changed a drawn line. A missing, short, or wrong-run `ledger/` changes
+nothing drawn — so the chart is drawn and the log panel states the reason in
+words. What is never done is showing another run's rows: every shard carries the
+run id, empty ones included, and a mismatch is refused outright.
+
+**Gate, checked over all rows rather than eyeballed:**
+`abs(goal_value + expectation_drained − residual) < 1e-9` on every row (worst in
+the file **3.55e-15**); `after(i) == before(i+1)` for every player (2,159,653
+links, **0 broken**, exact); every drawn chart point equal to its row's level to
+1 dp (**607,016 points, 0 mismatched**); row count equal to `rating_history`'s
+for the eligible population (**2,185,765**).
+
 ## Considered options
 
 - **Value divided by exposure, per 90 (rejected — designed, built, and killed

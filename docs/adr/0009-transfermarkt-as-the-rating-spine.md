@@ -211,10 +211,20 @@ must live, which is the one thing that never changes:
 | sidecar | repairs, manual matches, curated home-side facts, issue log | precious, never auto-wiped |
 | results | `rating_history`, run parameters, diagnostics | disposable, rebuilt at will |
 | viewer page | the career charts, one HTML file (#22) | disposable, rebuilt from the two above |
+| `ledger/` | the match log, 256 `.js` shards beside the page (#24) | disposable, rebuilt with the page |
 
 The viewer page is a later fourth (#22, 2026-08-02) and is not a database: it is
 *generated from* the first three by a step of its own, so it inherits the
 results file's lifecycle without changing the three above.
+
+`ledger/` is a fifth (#24, 2026-08-03) and the first that is a **folder**. It is
+the same lifecycle as the page and is built by the same step, in the same
+reading of the same two files — the split is one of size and nothing else: the
+population's match log is ~222 MB against the page's 12 MB, so it could not be
+embedded, and one player's is 50 rows, so it does not have to be. It is loaded a
+shard at a time by the page beside it, which is why it must **travel with that
+page**: a folder from another run is refused rather than shown, and a page whose
+folder is missing draws its chart and says so.
 
 DuckDB attaches all three in one connection and joins across them, so this
 costs no ETL and no second database engine. Keeping repairs beside vendor rows
