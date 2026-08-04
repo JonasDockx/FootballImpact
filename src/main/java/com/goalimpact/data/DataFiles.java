@@ -77,6 +77,22 @@ public final class DataFiles {
     public static final Path LEDGER = pinned("goalimpact.ledger",
         VIEWER.toAbsolutePath().resolveSibling("ledger").toString());
 
+    // Attaching one of the three files beside another, read-only. It is here
+    // because the trap it dodges is a property of these paths: DuckDB keeps ONE
+    // database instance per file per JVM and every connection to that file
+    // shares it, so an ATTACH is global rather than per-connection. The repair
+    // tool opens two readers over the same results file, and the second one's
+    // plain ATTACH ... AS vendor failed with "database with name vendor already
+    // exists" - IF NOT EXISTS is what makes the two readers independent of the
+    // order they happen to be built in.
+    //
+    // The alias resolves to the same file whichever reader wins the race,
+    // because every caller is handed its paths from the constants above.
+    public static String attachReadOnly(Path db, String alias) {
+        return "ATTACH IF NOT EXISTS '" + db.toString().replace('\\', '/')
+            + "' AS " + alias + " (READ_ONLY)";
+    }
+
     private DataFiles() {
     }
 }

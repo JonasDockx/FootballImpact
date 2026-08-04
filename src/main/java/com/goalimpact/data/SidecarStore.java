@@ -691,6 +691,136 @@ public final class SidecarStore {
         }
     }
 
+    // --- A typed date of birth (ADR 0012, amendment of 2026-08-04) ------------
+    //
+    // The second write path in this class, and the first that is not a match.
+    // ADR 0009 made corrections match-level replacements, but a date of birth is
+    // one fact about one person, true across every match he ever played - so
+    // routing it through a match save would mean materialising a match you had
+    // no reason to touch, which kills the point of the worklist (#45).
+    //
+    // Three ways it differs from insertManualPlayers above, all decided in the
+    // amendment's decision 8:
+    //
+    //   - It touches the DATE COLUMN ALONE. A man already named by a repair
+    //     keeps that name; a man not in the register yet gets a row with
+    //     player_name NULL, so the vendor's name still wins every COALESCE and a
+    //     typed birthday can never freeze a name the vendor may later correct.
+    //   - It MAY OVERWRITE, date and note together. A mistyped date has to be
+    //     re-typeable, where a register row written with a match is left alone
+    //     on a re-save. The note goes with it rather than being merged: the date
+    //     and its source are typed into two cells of one row (#52 decision 5),
+    //     so what is saved is what is on the row - and a note left over from a
+    //     date that has just been corrected would be a source for a fact it was
+    //     never a source for.
+    //   - It stands alone, in its own transaction, with no match behind it. That
+    //     is decision 3's invariant narrowing to minted ids: an orphan MINTED id
+    //     splits one man's career in two, which is what ADR 0012 exists to
+    //     prevent, while a vendor-id row splits nothing - the vendor supplied
+    //     the id and the career is already whole.
+    //
+    // Written by nothing in stage 1 (#53) and turned on in stage 2 (#54).
+    public void setBirthDate(long playerId, LocalDate dateOfBirth, String note)
+        throws SQLException {
+
+        try (Connection c = openWritable(sidecar)) {
+            ensureSchema(c);
+            c.setAutoCommit(false);
+            try {
+                if (updateBirthDate(c, playerId, dateOfBirth, note) == 0) {
+                    insertBirthDate(c, playerId, dateOfBirth, note);
+                }
+                c.commit();
+            } catch (SQLException failed) {
+                c.rollback();
+                throw failed;
+            }
+        }
+    }
+
+    private int updateBirthDate(Connection c, long playerId, LocalDate dateOfBirth, String note)
+        throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement(
+            "UPDATE manual_players SET date_of_birth = ?, note = ? WHERE player_id = ?")) {
+            ps.setDate(1, Date.valueOf(dateOfBirth));
+            ps.setString(2, note);
+            ps.setLong(3, playerId);
+            return ps.executeUpdate();
+        }
+    }
+
+    private void insertBirthDate(Connection c, long playerId, LocalDate dateOfBirth, String note)
+        throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("""
+            INSERT INTO manual_players (player_id, player_name, date_of_birth, created_on, note)
+            VALUES (?, NULL, ?, ?, ?)
+            """)) {
+            ps.setLong(1, playerId);
+            ps.setDate(2, Date.valueOf(dateOfBirth));
+            ps.setTimestamp(3, Timestamp.valueOf(LocalDateTime.now()));
+            ps.setString(4, note);
+            ps.executeUpdate();
+        }
+    }
+
+    // What has been typed, by player id, for the worklist to grey out the rows
+    // already done (#52 decision 6). Rows with no date are skipped: a name-only
+    // register row asserts nothing about a birthday, and reporting the 2,969
+    // merely-named ids as done would hide real work.
+    //
+    // Read here rather than joined into BirthdayReader's ranked query because
+    // the two answers have different lifetimes - the ranking changes only when a
+    // designated run does, and this changes while you sit at the screen. Same
+    // shape as sidecarStatuses above, for the same reason.
+    public Map<Long, TypedBirthDate> typedBirthDates() throws SQLException {
+        Map<Long, TypedBirthDate> out = new HashMap<>();
+        if (!Files.exists(sidecar)) {
+            return out;
+        }
+        try (Connection c = openReadOnly(sidecar);
+            Statement s = c.createStatement();
+            ResultSet rs = s.executeQuery(
+                "SELECT player_id, CAST(date_of_birth AS DATE) AS dob, note"
+                + " FROM manual_players WHERE date_of_birth IS NOT NULL")) {
+            while (rs.next()) {
+                out.put(rs.getLong("player_id"),
+                    new TypedBirthDate(rs.getDate("dob").toLocalDate(), rs.getString("note")));
+            }
+        } catch (SQLException noSuchTable) {
+            // A sidecar written before ADR 0012 has no register at all.
+        }
+        return out;
+    }
+
+    // The names the register holds, by player id. Same short-lived open as
+    // typedBirthDates and for the same reason: a screen that wants what the
+    // sidecar knows must ask in milliseconds rather than hold the file, because
+    // DuckDB refuses to open a file already attached elsewhere in the JVM and a
+    // long-lived attach would block every write in the program.
+    //
+    // The register's name beats the vendor's and the lineup's alike (ADR 0012
+    // decision 7), so a man named by hand in one repair is named on every
+    // screen. A birthday-only row has none (amendment decision 8) and is skipped
+    // here, which is what lets the vendor's name keep winning for him.
+    public Map<Long, String> registeredNames() throws SQLException {
+        Map<Long, String> out = new HashMap<>();
+        if (!Files.exists(sidecar)) {
+            return out;
+        }
+        try (Connection c = openReadOnly(sidecar);
+            Statement s = c.createStatement();
+            ResultSet rs = s.executeQuery(
+                "SELECT player_id, player_name FROM manual_players"
+                + " WHERE player_name IS NOT NULL")) {
+            while (rs.next()) {
+                out.put(rs.getLong("player_id"), rs.getString("player_name"));
+            }
+        } catch (SQLException noSuchTable) {
+            // A sidecar written before ADR 0012 has no register at all.
+        }
+        return out;
+    }
+
     // --- The picker's candidates (item 17, slice 1, decision 10) --------------
     //
     // SQL selects and Java ranks: these queries gather evidence about who might be

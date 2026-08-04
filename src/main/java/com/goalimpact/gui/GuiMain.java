@@ -1,5 +1,6 @@
 package com.goalimpact.gui;
 
+import com.goalimpact.data.BirthdayReader;
 import com.goalimpact.data.DataFiles;
 import com.goalimpact.data.SidecarStore;
 import com.goalimpact.data.WorklistReader;
@@ -27,6 +28,7 @@ import java.time.ZoneId;
 public class GuiMain extends Application {
 
     private WorklistReader reader;
+    private BirthdayReader birthdays;
 
     @Override
     public void start(Stage stage) {
@@ -47,7 +49,9 @@ public class GuiMain extends Application {
                 + Files.getLastModifiedTime(DataFiles.RESULTS).toInstant()
                     .atZone(ZoneId.systemDefault()).toLocalDateTime().withNano(0);
             SidecarStore store = new SidecarStore(DataFiles.SIDECAR, DataFiles.SNAPSHOT);
-            return tabs(new WorklistPane(reader, store, stamp), new ClubPane(reader, store));
+            birthdays = new BirthdayReader(DataFiles.RESULTS, DataFiles.SNAPSHOT);
+            return tabs(new WorklistPane(reader, store, stamp), new ClubPane(reader, store),
+                new BirthdayPane(birthdays, store));
         } catch (Exception e) {
             return message("Could not open the worklist: " + e.getMessage()
                 + "\nRun 'mvn compile exec:java' to build it.");
@@ -59,8 +63,14 @@ public class GuiMain extends Application {
     // player pane needs three sections because a row's meaning changes per
     // Worklist tier; the club pane needs one, because every row there is a Held
     // match and means the same thing.
-    private static Parent tabs(Parent byPlayer, Parent byClub) {
-        TabPane tabs = new TabPane(new Tab("By player", byPlayer), new Tab("By club", byClub));
+    //
+    // The third tab is not a door into that worklist at all (#45, #52): it lists
+    // PLAYERS with a fact missing, where the other two list MATCHES. They share
+    // no rows and no key - a man can top this list and appear in the worklist
+    // nowhere, because he is missing from no match.
+    private static Parent tabs(Parent byPlayer, Parent byClub, Parent byBirthday) {
+        TabPane tabs = new TabPane(new Tab("By player", byPlayer), new Tab("By club", byClub),
+            new Tab("By birthday", byBirthday));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         return tabs;
     }
@@ -77,6 +87,9 @@ public class GuiMain extends Application {
     public void stop() throws Exception {
         if (reader != null) {
             reader.close();
+        }
+        if (birthdays != null) {
+            birthdays.close();
         }
     }
 

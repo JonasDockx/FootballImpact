@@ -132,8 +132,11 @@ public class WorklistReader implements AutoCloseable {
         readOnly.setProperty("duckdb.read_only", "true");
         this.connection = DriverManager.getConnection("jdbc:duckdb:" + results, readOnly);
         try (Statement statement = connection.createStatement()) {
-            statement.execute("ATTACH '"
-                + snapshot.toString().replace('\\', '/') + "' AS vendor (READ_ONLY)");
+            // Shared with BirthdayReader, which opens the same results file:
+            // an ATTACH is per-FILE rather than per-connection, so whichever
+            // reader is built second must tolerate the alias already being
+            // there. See DataFiles.attachReadOnly.
+            statement.execute(DataFiles.attachReadOnly(snapshot, "vendor"));
         }
     }
 

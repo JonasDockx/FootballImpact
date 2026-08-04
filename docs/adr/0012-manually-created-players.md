@@ -100,6 +100,54 @@ seriously.
    the invariant of decision 3 is unchanged, since a vendor id is registered
    inside the same `save` transaction as the match that first names him.
 
+## Amendment (2026-08-04, #45): the register also holds a typed date of birth
+
+Until #41 a missing date of birth cost nothing at replay time. It moved the
+ageing effect *inside* the replay, so lineup strength is now `P − D(age)` and
+every player on the pitch needs an age; 55,185 rated men have none and are all
+charged ADR 0016's population-average penalty. #45 asks for those birthdays to
+be typed in, ranked by career minutes.
+
+A date of birth is **one fact about one person**, true across every match he ever
+played — so it is not the match-level replacement ADR 0009 governs. It is the
+same shape as decision 6's typed *name*, one column over, and decisions 8 and 9
+follow from saying so.
+
+8. **A typed date of birth is a `manual_players` row under the player's own id,
+   with `player_name` NULL**, written by a **standalone write** that may
+   overwrite. NULL rather than a copy of the vendor's name because decision 7
+   makes that column authoritative: a copy would freeze a name the vendor may
+   later correct, re-creating the "two places able to disagree about who a
+   player is" defect the 2026-07-28 amendment existed to remove. Every name
+   reader splices `mp.player_name` as the first arm of a `COALESCE`, so a NULL
+   falls through to the vendor's name and naming is untouched.
+   **Decision 3's invariant narrows to minted ids**: "every row in
+   `manual_players` is a player who appears in at least one sidecar match" now
+   holds for ids ≥ `FIRST_ID` only. That is where it was ever load-bearing —
+   decision 3's stated fear was orphan *minted* ids from abandoned repairs
+   splitting one man's career in two. A vendor-id row with no sidecar match
+   behind it splits nothing: the vendor supplied the id and the career is
+   already whole.
+
+9. **Precedence is unchanged and uniform — the register always wins** — and
+   provenance reuses the existing `note` and `created_on` columns, so the
+   **net schema change is none**. `TransfermarktLoader.birthDates()` already
+   reads the register second, for created and vendor players alike; nothing in
+   the loader moves. The "only players with no date of birth" limit lives in the
+   worklist query, not in the precedence rule, which leaves a *wrong* vendor date
+   fixable later by typing over it with no data-layer change. Safe by
+   construction: `readBirthDatesInto` skips null dates, so a name-only register
+   row can never erase a vendor date — only a real typed date overwrites. The
+   existence of the register row is itself the flag that a date was typed, so no
+   `source` column is needed; that is decision 1's preference for a test over a
+   flag, applied again.
+
+Consequence, accepted deliberately: a later Transfermarkt snapshot that fills in
+a date contradicting a typed one is **shadowed forever**. #56 settled that the
+register keeps winning and the disagreement is *reported, never applied*, by a
+birthday section in `scripts/reconcile-sidecar.py` — the same stance that script
+already takes on team sheets.
+
 ## Considered options
 
 - **Derive the manual population from sidecar lineup rows (rejected).** No new
@@ -125,6 +173,20 @@ seriously.
   median of one. Rejected because it leaves two places able to disagree about who
   a player is — the exact defect the slice-1 review had already had to fix once
   in the picker's `COALESCE`.
+- **A new ADR for player-attribute overrides (rejected, 2026-08-04).** Would have
+  left this document's text exact. Rejected for spreading the meaning of
+  `manual_players` over two documents a reader of that table would have to find
+  both of, with nothing general to hang it on while #50 rules every other player
+  attribute out of scope.
+- **Route a typed birthday through a match save, to keep decision 3's invariant
+  verbatim (rejected, 2026-08-04).** Kills #45's whole point: fixing a vendor
+  player's birthday would mean materialising a match you had no reason to touch.
+  Dropping the invariant outright was rejected for the opposite reason — it
+  re-opens the orphan hole for minted ids that this ADR exists to close.
+- **Make the loader a `COALESCE` with the vendor first (rejected, 2026-08-04).**
+  Would limit the register to filling gaps. Rejected because it reverses today's
+  behaviour for created players and contradicts decision 4's "the register is
+  authoritative".
 - **Write the register on the "create" click (rejected).** Simpler write path,
   and the id is real the instant it exists. Rejected for the orphan rows: after a
   year the register stops meaning "everyone I created" and starts meaning

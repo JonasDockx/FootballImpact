@@ -464,6 +464,35 @@ is identified by his id and never by his name, so a name later corrected does
 not make him a different man, and the hand-typed name is authoritative wherever
 one is shown. He rates exactly like any other player: nothing in a replay
 distinguishes him, because player identity reaches the engine through lineups
-alone (see [ADR 0012](docs/adr/0012-manually-created-players.md)).
+alone (see [ADR 0012](docs/adr/0012-manually-created-players.md)). He is not the
+only occupant of the *Register* he is kept in — a fully-named vendor player with
+a *Typed birthday* has a row there too, and is nobody's manual player.
 _Avoid_: fake player, synthetic player — he is a real footballer with a missing
 record, not an invention
+
+**Register**:
+The sidecar's one table of hand-typed facts about *people* rather than matches —
+`manual_players`, where every *Manual player* is recorded and where a *Typed
+birthday* lands. It is authoritative wherever it holds something: a name in it
+beats the vendor's and a date in it beats the vendor's, for a created and a
+vendor player alike, and the loader reads it after the snapshot for exactly that
+reason. Silence is not an assertion, though — a row with no name says nothing
+about the man's name — so it overrules field by field, unlike a *Sidecar* match,
+which replaces wholesale.
+_Avoid_: override table, player overrides — it is one table of facts, and only
+some of them override anything
+
+**Typed birthday**:
+A date of birth somebody looked up and entered by hand, because the vendor has
+none. It lives in the *Register* under the player's own id, so nothing is minted
+and no career is split, and it is charged like any other date: the *Ageing curve*
+reads it inside the replay, in place of the population-average penalty an unknown
+date earns (see [ADR 0012](docs/adr/0012-manually-created-players.md), amended
+2026-08-04). The men who lack one are worked through **ranked by career minutes**,
+which is what makes stopping partway a decision rather than a surrender — the
+head is 28 men past 5,000 minutes and the tail is 52,000 nobody will touch.
+The screen that ranks them is a list of *players with a fact missing*, and so is
+not a repair worklist and carries no *Worklist tier*: a man can top it and appear
+in the worklist nowhere, because he is missing from no match.
+_Avoid_: DOB override, birthday patch — it is a fact filling a hole, and it is
+typed, never fetched (#50 rules scraping out of scope)
