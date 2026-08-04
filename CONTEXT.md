@@ -284,7 +284,8 @@ history, which is the one staleness a separate build step risks. It draws what
 the replay charged rather than a second opinion about it: the stored *Peak
 Impact* less the *Ageing curve* at each date, over the run's own record of who
 is a *Goalkeeper*, with both the curve and the tag coming from the run instead
-of being re-derived in the query. One gap remains and is named in the code — it
+of being re-derived in the query, and it says where he was playing by cutting the
+line into *Tenure* bands. One gap remains and is named in the code — it
 reads dates of birth from the vendor snapshot alone, where the replay lets the
 sidecar register overrule them — and it changes no drawn point while the curve
 is pinned flat. Since the *Match log* it is a page **plus a folder of shards
@@ -292,6 +293,21 @@ beside it**, built by the same step and travelling with it; the page alone still
 opens and draws, and says what is missing.
 _Avoid_: the chart, the site — the chart is what the viewer draws, and the
 viewer is no longer one file
+
+**Tenure**:
+A maximal run of *consecutive* matches a player was rated in at one club — where
+he was playing, as a stretch of his career rather than a contract. Read off the
+lineups the run already used, so a loan is a tenure like any other and a return
+is a second tenure at the first club; nothing is merged and nothing is smoothed,
+because a one-match tenure is nearly always a real thing (a January move, a cup
+tie for the parent club) and a merge rule would assert what the record does not
+say. A national-team cap is not a tenure and does not interrupt one: a country
+is not a club. It is what the *Viewer* draws as the shaded club bands under a
+career chart, where the bands **tile** — one opens at his first recorded match
+for a club and runs until the next opens — so a boundary is a first appearance
+and never a transfer date, which this project does not hold.
+_Avoid_: spell — the glossary already spends that word warning it off *Stint*;
+and contract, since a tenure says where he played, not who held his registration
 
 **Match log**:
 The per-match record under a career chart: for every match the run rated a

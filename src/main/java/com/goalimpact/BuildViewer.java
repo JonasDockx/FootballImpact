@@ -36,8 +36,8 @@ public final class BuildViewer {
             ViewerWriter.write(DataFiles.RESULTS, DataFiles.SNAPSHOT, DataFiles.VIEWER);
 
         System.out.printf(Locale.US,
-            "Viewer: %,d players, %,d monthly points, %.1f MB -> %s%n",
-            page.players(), page.points(), page.bytes() / 1e6,
+            "Viewer: %,d players, %,d monthly points, %,d club bands, %.1f MB -> %s%n",
+            page.players(), page.points(), page.bands(), page.bytes() / 1e6,
             DataFiles.VIEWER.toAbsolutePath());
 
         LedgerWriter.Result log =

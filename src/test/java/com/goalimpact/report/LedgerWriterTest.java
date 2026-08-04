@@ -205,6 +205,32 @@ class LedgerWriterTest {
         }
     }
 
+    // #23 moved "which club did he play for" into ResultsFile, so the chart's
+    // bands and the log's club column are cut from one answer. Held across the
+    // two writers because that is where it could drift: a page saying he joined
+    // in August over a log whose first row for that club is in January is worse
+    // than either surface being wrong alone.
+    @Test
+    void theClubTheChartBandsAgreesWithTheClubEveryLogRowNames() throws Exception {
+        Path html = dir.resolve("viewer.html");
+        ViewerWriter.write(results, snapshot, html);
+        LedgerWriter.write(results, snapshot, ledger);
+
+        JsonObject drawn = drawnPlayer(html, 1);
+        JsonArray sm = drawn.getAsJsonArray("sm");
+        JsonArray sc = drawn.getAsJsonArray("sc");
+        assertEquals(1, sm.size(), "he never left Cagliari");
+        assertEquals(drawn.getAsJsonArray("ms").get(0).getAsInt(), sm.get(0).getAsInt(),
+            "the band opens where the line does");
+
+        String banded = pageClubs(html).get(sc.get(0).getAsInt()).getAsString();
+        JsonObject logged = player(1);
+        JsonArray clubs = shard(1).getAsJsonArray("clubs");
+        for (JsonElement ref : logged.getAsJsonArray("c")) {
+            assertEquals(banded, clubs.get(ref.getAsInt()).getAsString());
+        }
+    }
+
     // ---- gate arm 4: the row count is rating_history's ------------------
     // For the eligible population, which is ResultsFile's - minutes alone. A
     // name is what decides whether the page can DRAW a man, never whether the
@@ -398,6 +424,15 @@ class LedgerWriterTest {
         return JsonParser.parseString(js.substring(from, to)).getAsJsonObject();
     }
 
+    // The page's band dictionary, which is one for the whole page where a
+    // shard's is one per shard.
+    private static JsonArray pageClubs(Path html) throws IOException {
+        String page = Files.readString(html, StandardCharsets.UTF_8);
+        int from = page.indexOf(ViewerWriter.CLUBS_PREFIX) + ViewerWriter.CLUBS_PREFIX.length();
+        int to = page.indexOf(ViewerWriter.CLUBS_SUFFIX, from);
+        return JsonParser.parseString(page.substring(from, to)).getAsJsonArray();
+    }
+
     private static JsonObject drawnPlayer(Path html, long id) throws IOException {
         String page = Files.readString(html, StandardCharsets.UTF_8);
         int from = page.indexOf(ViewerWriter.DATA_PREFIX) + ViewerWriter.DATA_PREFIX.length();
@@ -482,11 +517,13 @@ class LedgerWriterTest {
              Statement s = c.createStatement()) {
             s.execute("CREATE TABLE clubs (club_id BIGINT, name VARCHAR)");
             s.execute("INSERT INTO clubs VALUES (7, 'Cagliari'), (8, 'Internazionale')");
-            s.execute("CREATE TABLE competitions (competition_id VARCHAR, name VARCHAR)");
-            s.execute("INSERT INTO competitions VALUES ('IT1', 'Serie A')");
+            s.execute("CREATE TABLE competitions (competition_id VARCHAR, name VARCHAR,"
+                + " type VARCHAR)");
+            s.execute("INSERT INTO competitions VALUES ('IT1', 'Serie A', 'domestic_league')");
             s.execute("CREATE TABLE games (game_id VARCHAR, competition_id VARCHAR, date DATE,"
                 + " home_club_id INTEGER, away_club_id INTEGER,"
-                + " home_club_goals INTEGER, away_club_goals INTEGER)");
+                + " home_club_goals INTEGER, away_club_goals INTEGER,"
+                + " home_club_name VARCHAR, away_club_name VARCHAR)");
             s.execute("CREATE TABLE game_lineups (game_lineups_id VARCHAR, date DATE,"
                 + " game_id INTEGER, player_id INTEGER, club_id INTEGER, player_name VARCHAR)");
             s.execute("CREATE TABLE players ("
@@ -496,7 +533,7 @@ class LedgerWriterTest {
                 long game = 100 + i;
                 LocalDate date = LocalDate.of(2023, 4, 1).plusMonths(i);
                 s.execute("INSERT INTO games VALUES ('" + game + "', 'IT1', DATE '" + date
-                    + "', 7, 8, 3, 0)");
+                    + "', 7, 8, 3, 0, 'Cagliari Calcio', 'Inter Milan')");
                 s.execute("INSERT INTO game_lineups VALUES ('g" + game + "a', DATE '" + date
                     + "', " + game + ", 1, 7, 'Nicolò Barella')");
                 s.execute("INSERT INTO game_lineups VALUES ('g" + game + "b', DATE '" + date

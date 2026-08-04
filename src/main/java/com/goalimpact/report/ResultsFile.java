@@ -89,9 +89,10 @@ final class ResultsFile implements AutoCloseable {
         return lastMatchDate;
     }
 
-    // The three temp tables both steps read: dates of birth, career totals, and
-    // the population ADR 0011 admits. Created here so the 1,000-minute
-    // threshold is applied by one query rather than by two that agree today.
+    // The five temp tables both steps read: dates of birth, career totals, the
+    // population ADR 0011 admits, which club a man played for in a match, and
+    // what that club is called. Created here so the 1,000-minute threshold is
+    // applied by one query rather than by two that agree today.
     private static void defineEligible(Statement statement) throws SQLException {
         // The dates of birth the age term is read at. TRY_CAST, matching
         // TransfermarktLoader.birthDates(), so a malformed vendor date is an
@@ -122,6 +123,58 @@ final class ResultsFile implements AutoCloseable {
             CREATE OR REPLACE TEMP TABLE eligible_ids AS
               SELECT player_id FROM total WHERE mins >= %d"""
             .formatted(ImpactIndex.ELIGIBLE_MINUTES));
+
+        // WHICH CLUB HE PLAYED FOR that day, which rating_history does not carry
+        // - the run rates a player, not a club. Both steps need it and they must
+        // not answer it differently: the log prints a club on every row and the
+        // chart draws a Tenure band off the same rows (#23), so two resolutions
+        // that disagree would put a transfer at one date under a chart showing it
+        // at another.
+        //
+        // Only the eligible population's rows, so the 3.18M-row scan is joined
+        // down before it is grouped. any_value because 1,038 ids carry more than
+        // one spelling and a handful more than one club row per fixture (#35);
+        // one is taken, the same resolution the page's names take.
+        statement.execute("""
+            CREATE OR REPLACE TEMP TABLE his_club AS
+              SELECT CAST(gl.game_id AS BIGINT) AS match_id, gl.player_id,
+                     any_value(gl.club_id) AS club_id
+              FROM tm.game_lineups gl
+                   JOIN eligible_ids e ON e.player_id = gl.player_id
+              GROUP BY 1, 2""");
+
+        clubNames(statement);
+    }
+
+    // WHAT A CLUB IS CALLED, from both places the snapshot says so - and the
+    // second one is not optional. tm.clubs is a table of CURRENT SQUADS in the
+    // covered leagues: 796 rows against the 3,144 clubs that appear in lineups,
+    // so a name read from it alone leaves 2,353 clubs anonymous. The fixture
+    // list names 3,058 of them, because a club that played a match is named in
+    // the row for that match whether or not it has a squad page.
+    //
+    // Measured 2026-08-04 on the designated run: reading clubs alone left 3,515
+    // of the 25,970 drawn careers (13.5%) with no club on record at all -
+    // Ferencvaros, Qarabag, every side reached only through a European tie -
+    // which the page would then have had to report as "no club recorded" over a
+    // record that names it perfectly well. Reading both leaves 36 (0.1%).
+    //
+    // Squad name first where both exist, because that is the club's own page and
+    // the fixture list abbreviates. Names, and nothing else: a club_id still
+    // reaches here through his_club or through a fixture, and nothing about a
+    // club is stored, rated or updated (the glossary's Strength).
+    private static void clubNames(Statement statement) throws SQLException {
+        statement.execute("""
+            CREATE OR REPLACE TEMP TABLE club_name AS
+              SELECT club_id, first(name ORDER BY src, name) AS name FROM (
+                SELECT TRY_CAST(club_id AS BIGINT) AS club_id, name, 0 AS src
+                FROM tm.clubs
+                UNION ALL
+                SELECT home_club_id, home_club_name, 1 FROM tm.games
+                UNION ALL
+                SELECT away_club_id, away_club_name, 1 FROM tm.games)
+              WHERE club_id IS NOT NULL AND name IS NOT NULL AND name <> ''
+              GROUP BY club_id""");
     }
 
     // The career tags the run stamped (ADR 0016, #44), demanded rather than

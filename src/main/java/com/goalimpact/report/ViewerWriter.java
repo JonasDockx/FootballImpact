@@ -33,6 +33,10 @@ public final class ViewerWriter {
     public static final String DATA_PREFIX = "window.DATA=";
     public static final String DATA_SUFFIX = ";/*end-data*/";
 
+    // #23's club dictionary, read back the same way for the same reason.
+    public static final String CLUBS_PREFIX = "window.CLUBS=";
+    public static final String CLUBS_SUFFIX = ";/*end-clubs*/";
+
     private static final String TEMPLATE = "/viewer/goalimpact-viewer.html";
 
     // Sampling: one point per calendar month of a career, the last rating the
@@ -41,7 +45,8 @@ public final class ViewerWriter {
     // moves no axis.
     private static final String MONTH = "(year(match_date)*12 + month(match_date) - 1)";
 
-    public record Result(int players, long points, String runId, LocalDate lastMatchDate, long bytes) {
+    public record Result(int players, long points, long bands, String runId,
+                         LocalDate lastMatchDate, long bytes) {
     }
 
     private ViewerWriter() {
@@ -52,8 +57,10 @@ public final class ViewerWriter {
 
         String template = template();
         String data;
+        String clubs;
         int players;
         long points;
+        long bands;
         String runId;
         LocalDate lastMatch;
 
@@ -68,17 +75,21 @@ public final class ViewerWriter {
             build(s);
 
             try (ResultSet rs = s.executeQuery(
-                "SELECT count(*) AS players, coalesce(sum(len(vs)), 0) AS points FROM page")) {
+                "SELECT count(*) AS players, coalesce(sum(len(vs)), 0) AS points,"
+                + " coalesce(sum(len(sm)), 0) AS bands FROM page")) {
                 rs.next();
                 players = rs.getInt("players");
                 points = rs.getLong("points");
+                bands = rs.getLong("bands");
             }
 
             data = json(s);
+            clubs = clubs(s);
         }
 
         String filled = template
             .replace("{{DATA}}", data)
+            .replace("{{CLUBS}}", clubs)
             .replace("{{CONSTANTS}}", constants())
             .replace("{{RUN_ID}}", Json.escape(runId))
             .replace("{{LAST_MATCH_DATE}}", lastMatch.toString())
@@ -86,7 +97,7 @@ public final class ViewerWriter {
 
         byte[] bytes = filled.getBytes(StandardCharsets.UTF_8);
         AtomicWrite.toFile(out, bytes);
-        return new Result(players, points, runId, lastMatch, bytes.length);
+        return new Result(players, points, bands, runId, lastMatch, bytes.length);
     }
 
     // The query the prototype's idx.sql and build.sql worked out (#35), moved
@@ -132,10 +143,35 @@ public final class ViewerWriter {
               SELECT player_id, any_value(player_name) AS name
               FROM tm.game_lineups WHERE player_name IS NOT NULL GROUP BY player_id""");
 
+        // The matches that are somebody's country rather than somebody's club,
+        // named once as a table because two surfaces read the decision and a
+        // predicate written out twice is two chances for the id card's chip and
+        // the band under it to disagree about where a man was that afternoon.
+        //
+        // The competition is what says so, and it has to be: the fixture list
+        // names a national side exactly as it names a club, so club_name resolves
+        // "Argentina" perfectly happily. Reading tm.clubs alone would have
+        // dropped the caps by accident - no national side has a squad page - and
+        // an accident is not a decision.
+        s.execute("""
+            CREATE OR REPLACE TEMP TABLE cap_match AS
+              SELECT TRY_CAST(g.game_id AS BIGINT) AS match_id
+              FROM tm.games g
+                   JOIN tm.competitions comp ON comp.competition_id = g.competition_id
+              WHERE comp.type = 'national_team_competition'
+                AND TRY_CAST(g.game_id AS BIGINT) IS NOT NULL""");
+
+        // The id card's club chip: the last club a lineup put him in, off
+        // ResultsFile's club_name so the chip and the band under the chart call
+        // a club the same thing. Over his whole record rather than the drawn
+        // stretch, which is why it can name a club where the chart under it has
+        // no band - the bands are cut from matches the run RATED.
         s.execute("""
             CREATE OR REPLACE TEMP TABLE last_club AS
               SELECT gl.player_id, any_value(c.name ORDER BY gl.date DESC) AS club
-              FROM tm.game_lineups gl JOIN tm.clubs c ON c.club_id = gl.club_id
+              FROM tm.game_lineups gl
+                   JOIN club_name c ON c.club_id = gl.club_id
+              WHERE TRY_CAST(gl.game_id AS BIGINT) NOT IN (SELECT match_id FROM cap_match)
               GROUP BY gl.player_id""");
 
         // The population the page DRAWS: ResultsFile's eligible_ids - ADR
@@ -176,6 +212,8 @@ public final class ViewerWriter {
               SELECT player_id, list(m ORDER BY m) AS ms, list(v ORDER BY m) AS vs
               FROM monthly GROUP BY player_id""");
 
+        tenures(s);
+
         // dobm is the date of birth on the same absolute month axis, so the age
         // axis is (m - dobm)/12. NULL for the 11.4% with no players row: they
         // get a line and no age axis rather than a wrong one (#36, #40).
@@ -194,9 +232,103 @@ public final class ViewerWriter {
               SELECT e.id, e.name, coalesce(e.club, '') AS club,
                      coalesce(e.position, '') AS pos, e.goalkeeper,
                      e.mins, e.apps, e.y0, e.y1, e.peak, e.latest, s.ms, s.vs,
+                     coalesce(t.sm, []::BIGINT[]) AS sm,
+                     coalesce(t.sc, []::BIGINT[]) AS sc,
                      CASE WHEN e.dob IS NOT NULL
                           THEN year(e.dob)*12 + month(e.dob) - 1 END AS dobm
-              FROM eligible e JOIN series s ON s.player_id = e.id""");
+              FROM eligible e JOIN series s ON s.player_id = e.id
+                   LEFT JOIN player_bands t ON t.player_id = e.id""");
+    }
+
+    // #23's Tenure bands: where the player was, cut from the same rows the match
+    // log prints a club on (ResultsFile's his_club), so a transfer sits at one
+    // date on both surfaces.
+    //
+    // A Tenure is a maximal run of CONSECUTIVE rated matches at one club, and
+    // nothing is smoothed. Measured 2026-08-04 on the designated run: 20.6% of
+    // its 83,069 tenures are one or two matches long, but only 766 of those are
+    // sandwiched between two runs at the same club - so the short ones are
+    // overwhelmingly real (a January move, a cup tie for the parent club during
+    // a loan), and a merge rule would be the page asserting something the record
+    // does not say. Loans need no case of their own for the same reason: a band
+    // says where he PLAYED, not who held his registration, so a loan is a tenure
+    // like any other and a return is a second tenure at the first club.
+    private static void tenures(Statement s) throws SQLException {
+        // Only matches with a NAMED club open or close a tenure, and a
+        // national-team cap never does (cap_match above) - a country is not a
+        // club, and a cap mid-season would otherwise cut a club run into three.
+        //
+        // Through his_club rather than straight off the lineups, so the club a
+        // band names for a match is the same one the match log prints on that
+        // row: a handful of fixtures carry more than one lineup row for a player
+        // and the choice between them is made once, in ResultsFile.
+        s.execute("""
+            CREATE OR REPLACE TEMP TABLE club_match AS
+              SELECT c.player_id, c.match_id, c.match_date, cl.name AS club,
+                     row_number() OVER (
+                         PARTITION BY c.player_id ORDER BY c.match_date, c.match_id) AS rn
+              FROM career c
+                   JOIN eligible e ON e.id = c.player_id
+                   JOIN his_club hc
+                        ON hc.player_id = c.player_id AND hc.match_id = c.match_id
+                   JOIN club_name cl ON cl.club_id = hc.club_id
+              WHERE c.match_id NOT IN (SELECT match_id FROM cap_match)""");
+
+        // The gaps-and-islands grouping: rn less the row number within one
+        // club is constant exactly along a contiguous run at that club.
+        // Tenures are measured over the WHOLE career, not the drawn stretch,
+        // because the club a man was at when the chart opens is nearly always
+        // one he joined before the 1,000th minute.
+        s.execute("""
+            CREATE OR REPLACE TEMP TABLE tenure AS
+              SELECT player_id, club, min(rn) AS ord,
+                     min(%1$s) AS m0, max(%1$s) AS m1
+              FROM (SELECT *, rn - row_number() OVER (
+                        PARTITION BY player_id, club ORDER BY rn) AS run
+                    FROM club_match)
+              GROUP BY player_id, club, run""".formatted(MONTH));
+
+        s.execute("""
+            CREATE OR REPLACE TEMP TABLE drawn_window AS
+              SELECT player_id, min(m) AS m0, max(m) AS m1 FROM monthly GROUP BY player_id""");
+
+        // Bands TILE the drawn stretch: a band runs from its own first rated
+        // match to the next band's, and the last runs to the end of the line.
+        // A gap of months where he played nobody is therefore absorbed into the
+        // band before it, which is the honest reading - an injured man has not
+        // left his club - and it means the boundary a reader sees is always "his
+        // first recorded match for the new club" rather than a transfer date this
+        // project does not hold.
+        //
+        // Clipped at the chart's own first month, which can push two tenures onto
+        // the same starting month; the later one wins, because it is the club he
+        // was at when the line begins. Ordered by career position rather than by
+        // month for that reason - two tenures can share a month, and never a
+        // place in the sequence.
+        s.execute("""
+            CREATE OR REPLACE TEMP TABLE band AS
+              SELECT player_id, club, m FROM (
+                SELECT t.player_id, t.club, t.ord, greatest(t.m0, w.m0) AS m,
+                       lead(greatest(t.m0, w.m0)) OVER (
+                           PARTITION BY t.player_id ORDER BY t.ord) AS next_m
+                FROM tenure t JOIN drawn_window w USING (player_id)
+                WHERE t.m1 >= w.m0 AND t.m0 <= w.m1)
+              WHERE next_m IS NULL OR next_m > m""");
+
+        // Named once for the page and referenced by index, for LedgerWriter's
+        // reason: 1,879 club names repeat across 62,733 bands, and the repetition
+        // costs more than the dictionary. One dictionary for the whole page,
+        // where a shard needs its own, because the page is loaded whole.
+        s.execute("""
+            CREATE OR REPLACE TEMP TABLE club_ref AS
+              SELECT club, row_number() OVER (ORDER BY club) - 1 AS ci
+              FROM (SELECT DISTINCT club FROM band)""");
+
+        s.execute("""
+            CREATE OR REPLACE TEMP TABLE player_bands AS
+              SELECT b.player_id, list(b.m ORDER BY b.m) AS sm,
+                     list(r.ci ORDER BY b.m) AS sc
+              FROM band b JOIN club_ref r USING (club) GROUP BY b.player_id""");
     }
 
     // One JSON object per row, streamed into an array rather than collected
@@ -211,6 +343,19 @@ public final class ViewerWriter {
             }
         }
         return rows.toString();
+    }
+
+    // The band dictionary, in index order - so CLUBS[sc[i]] is the club, and the
+    // order is the one club_ref numbered rather than whatever the page happens to
+    // read back.
+    private static String clubs(Statement s) throws SQLException {
+        StringJoiner names = new StringJoiner(",", "[", "]");
+        try (ResultSet rs = s.executeQuery("SELECT club FROM club_ref ORDER BY ci")) {
+            while (rs.next()) {
+                names.add('"' + Json.escape(rs.getString("club")) + '"');
+            }
+        }
+        return names.toString();
     }
 
     // Every pinned number the chart draws with, handed to the page rather than

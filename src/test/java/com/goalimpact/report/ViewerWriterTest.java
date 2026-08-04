@@ -6,6 +6,7 @@ import com.goalimpact.engine.PlayerTally;
 import com.goalimpact.model.Player;
 import com.goalimpact.model.Team;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -27,6 +28,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -188,6 +190,115 @@ class ViewerWriterTest {
         }
     }
 
+    // #23: where he was playing, on the same month axis the line is drawn on.
+    // Two bands here, and both of the rules that put them there: the first is
+    // CLIPPED to where the chart starts (his Cagliari run opened eleven months
+    // before the 1,000th minute), and the second opens at his first recorded
+    // match for the new club.
+    @Test
+    void cutsTheCareerIntoClubBandsOnTheChartsOwnMonthAxis() throws Exception {
+        ViewerWriter.Result result = ViewerWriter.write(results, snapshot, page);
+
+        JsonObject player = data(page).get(0).getAsJsonObject();
+        JsonArray sm = player.getAsJsonArray("sm");
+        JsonArray sc = player.getAsJsonArray("sc");
+        JsonArray clubs = clubs(page);
+
+        assertEquals(2, sm.size(), "one band a club, in career order");
+        assertEquals(2, result.bands());
+        assertEquals(2024 * 12 + 2, sm.get(0).getAsInt(), "clipped to the first drawn month");
+        assertEquals(2024 * 12 + 3, sm.get(1).getAsInt(), "his first match for the new club");
+        assertEquals("Cagliari", clubs.get(sc.get(0).getAsInt()).getAsString());
+        assertEquals("Internazionale", clubs.get(sc.get(1).getAsInt()).getAsString());
+    }
+
+    // A cap is not a move: the country is not a club, and a band cut at every
+    // international window would say a player left his club nine times a season.
+    // He is capped in the middle of the Cagliari run here, and the run stays one
+    // band - which is only visible because the band before the cap and the band
+    // after it would otherwise both be Cagliari.
+    //
+    // The competition is what excludes it, and it has to be: the fixture list
+    // names a national side as readily as a club, so 'Italy' is a perfectly
+    // available name here and is still not a band.
+    @Test
+    void aNationalTeamMatchOpensNoBandAndDoesNotCutTheRunAroundIt() throws Exception {
+        ViewerWriter.write(results, snapshot, page);
+
+        JsonObject player = data(page).get(0).getAsJsonObject();
+        assertEquals(2, player.getAsJsonArray("sm").size(), "the cap cuts nothing");
+        for (JsonElement name : clubs(page)) {
+            assertNotEquals("Italy", name.getAsString(), "a country is never a band");
+        }
+        assertEquals("Internazionale", player.get("club").getAsString(),
+            "nor the club on his id card");
+    }
+
+    // A club is named from the fixture list where it has no squad page, which is
+    // most of them: tm.clubs holds 796 rows against the 3,144 clubs that appear
+    // in lineups, and reading it alone left 3,515 of 25,970 drawn careers with no
+    // club at all. Where both name a club the squad page wins - the fixture list
+    // abbreviates.
+    @Test
+    void namesAClubFromTheFixtureListWhereItHasNoSquadPage() throws Exception {
+        ViewerWriter.write(results, snapshot, page);
+        JsonArray sc = data(page).get(0).getAsJsonObject().getAsJsonArray("sc");
+        assertEquals("Cagliari", clubs(page).get(sc.get(0).getAsInt()).getAsString(),
+            "the squad page's name, not the fixture list's 'Cagliari Calcio'");
+
+        try (Connection c = DriverManager.getConnection("jdbc:duckdb:" + snapshot);
+             Statement s = c.createStatement()) {
+            s.execute("DELETE FROM clubs WHERE club_id = 8");
+        }
+
+        ViewerWriter.write(results, snapshot, page);
+
+        JsonObject player = data(page).get(0).getAsJsonObject();
+        assertEquals(2, player.getAsJsonArray("sm").size(), "still banded");
+        assertEquals("Inter Milan", clubs(page)
+            .get(player.getAsJsonArray("sc").get(1).getAsInt()).getAsString());
+    }
+
+    // A player nothing in the snapshot places gets a line and no bands, rather
+    // than a band claiming a club he may never have played for. His name comes
+    // from a lineup, so one is left behind for the cap: he is drawn, he is
+    // named, and the only club anything says he played for is a country.
+    @Test
+    void aCareerWithNoClubOnRecordIsDrawnWithNoBands() throws Exception {
+        try (Connection c = DriverManager.getConnection("jdbc:duckdb:" + snapshot);
+             Statement s = c.createStatement()) {
+            s.execute("DELETE FROM game_lineups WHERE player_id = 1 AND club_id IN (7, 8)");
+        }
+
+        ViewerWriter.Result result = ViewerWriter.write(results, snapshot, page);
+
+        assertEquals(1, result.players(), "he is still drawn");
+        assertEquals(0, result.bands());
+        assertEquals(0, data(page).get(0).getAsJsonObject().getAsJsonArray("sm").size());
+        assertEquals(0, clubs(page).size());
+    }
+
+    // 31 of the run's club names carry an apostrophe or an ampersand - Connah's
+    // Quay Nomads, Brighton & Hove Albion - and the chart serialises its geometry
+    // into a single-quoted HTML attribute the hover handler parses back. One
+    // unescaped apostrophe truncates that attribute and takes the crosshair down
+    // with it, so the page has to hand the name over intact and escape it where
+    // it is written, never the other way round.
+    @Test
+    void carriesAClubNameWithAnApostropheThroughToThePage() throws Exception {
+        try (Connection c = DriverManager.getConnection("jdbc:duckdb:" + snapshot);
+             Statement s = c.createStatement()) {
+            s.execute("UPDATE clubs SET name = 'Connah''s Quay & Shotton' WHERE club_id = 8");
+        }
+
+        ViewerWriter.write(results, snapshot, page);
+
+        JsonObject player = data(page).get(0).getAsJsonObject();
+        int last = player.getAsJsonArray("sc").get(1).getAsInt();
+        assertEquals("Connah's Quay & Shotton", clubs(page).get(last).getAsString(),
+            "the name reaches the page exactly as the snapshot spells it");
+    }
+
     // #46: the page states the last match date and the run id, and deliberately
     // not the build time - a build clock reads 'today' over a March history.
     @Test
@@ -267,13 +378,23 @@ class ViewerWriterTest {
         return Math.round(d * 10) / 10.0;
     }
 
+    // #23's band dictionary, read back through the writer's own two markers for
+    // the reason the data block is.
+    private static JsonArray clubs(Path page) throws Exception {
+        return block(page, ViewerWriter.CLUBS_PREFIX, ViewerWriter.CLUBS_SUFFIX);
+    }
+
     private static JsonArray data(Path page) throws Exception {
+        return block(page, ViewerWriter.DATA_PREFIX, ViewerWriter.DATA_SUFFIX);
+    }
+
+    private static JsonArray block(Path page, String prefix, String suffix) throws Exception {
         String html = Files.readString(page, StandardCharsets.UTF_8);
-        int from = html.indexOf(ViewerWriter.DATA_PREFIX);
-        assertTrue(from >= 0, "the page carries its data");
-        from += ViewerWriter.DATA_PREFIX.length();
-        int to = html.indexOf(ViewerWriter.DATA_SUFFIX, from);
-        assertTrue(to > from, "the data block is closed");
+        int from = html.indexOf(prefix);
+        assertTrue(from >= 0, "the page carries " + prefix);
+        from += prefix.length();
+        int to = html.indexOf(suffix, from);
+        assertTrue(to > from, prefix + " is closed");
         return JsonParser.parseString(html.substring(from, to)).getAsJsonArray();
     }
 
@@ -319,17 +440,48 @@ class ViewerWriterTest {
         PlayerCareerWriter.write(results, "TEST-RUN-k1.00", careers);
     }
 
+    // Player 1's fourteen matches, 100..113, one a month from April 2023. He
+    // plays twelve for Cagliari, is capped by his country in the seventh - which
+    // must open no band and must not cut the Cagliari run in two (#23) - and
+    // moves to Internazionale for the thirteenth. The fourteenth is in no lineup
+    // at all, so the band before it has to run on.
     private static void writeSnapshot(Path snapshot) throws SQLException {
         try (Connection c = DriverManager.getConnection("jdbc:duckdb:" + snapshot);
              Statement s = c.createStatement()) {
             s.execute("CREATE TABLE clubs (club_id BIGINT, name VARCHAR)");
             s.execute("INSERT INTO clubs VALUES (7, 'Cagliari'), (8, 'Internazionale')");
-            s.execute("CREATE TABLE game_lineups ("
+            s.execute("CREATE TABLE competitions (competition_id VARCHAR, name VARCHAR,"
+                + " type VARCHAR)");
+            s.execute("INSERT INTO competitions VALUES ('IT1', 'Serie A', 'domestic_league'),"
+                + " ('EURO', 'uefa-euro', 'national_team_competition')");
+            // home_club_name / away_club_name are the second name source, and
+            // the wide one: clubs holds current squads only (796 rows against
+            // 3,144 clubs in lineups), where a fixture names whoever played it.
+            // Match 100 is against a club with no squad row, so the fixture list
+            // is the only thing that can name it.
+            s.execute("CREATE TABLE games (game_id VARCHAR, competition_id VARCHAR,"
+                + " home_club_id INTEGER, away_club_id INTEGER,"
+                + " home_club_name VARCHAR, away_club_name VARCHAR)");
+            s.execute("CREATE TABLE game_lineups (game_id INTEGER, "
                 + "player_id BIGINT, club_id BIGINT, date DATE, player_name VARCHAR)");
+            for (int i = 0; i < 14; i++) {
+                long game = 100 + i;
+                LocalDate date = LocalDate.of(2023, 4, 1).plusMonths(i);
+                // The seventh is the cap; 9 is Italy, which is in no lineup's
+                // clubs table, exactly as the vendor ships national sides.
+                long club = i == 6 ? 9 : i < 12 ? 7 : 8;
+                s.execute("INSERT INTO games VALUES ('" + game + "', '"
+                    + (i == 6 ? "EURO" : "IT1") + "', " + club + ", 11, '"
+                    + (i == 6 ? "Italy" : i < 12 ? "Cagliari Calcio" : "Inter Milan")
+                    + "', 'Reggiana 1919')");
+                if (i == 13) {
+                    continue;
+                }
+                s.execute("INSERT INTO game_lineups VALUES (" + game + ", 1, " + club
+                    + ", DATE '" + date + "', 'Nicolò Barella')");
+            }
             s.execute("INSERT INTO game_lineups VALUES "
-                + "(1, 7, DATE '2023-04-01', 'Nicolò Barella'), "
-                + "(1, 8, DATE '2024-05-20', 'Nicolò Barella'), "
-                + "(2, 7, DATE '2023-04-01', 'A Reserve')");
+                + "(100, 2, 7, DATE '2023-04-01', 'A Reserve')");
             s.execute("CREATE TABLE players ("
                 + "player_id BIGINT, position VARCHAR, date_of_birth TIMESTAMP)");
             s.execute("INSERT INTO players VALUES (2, 'Defender', TIMESTAMP '1999-01-05')");

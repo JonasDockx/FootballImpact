@@ -334,6 +334,81 @@ reasoning is on
 the glossary's *Burn-in* records why this cutoff and
 [ADR 0010](0010-scoring-window.md)'s differ on purpose.
 
+## The club bands, and where a second tint could go (#23, 2026-08-04)
+
+The chart plots a level over time and says nothing about *where* the player was,
+so a dip that coincides with a transfer reads as unexplained. The line is now cut
+into **Tenure** bands — maximal runs of consecutive rated matches at one club.
+
+**Nothing is smoothed, and that is a measurement rather than a preference.** Over
+the designated run the naive rule — a contiguous run of matches at one club, no
+merging — gives **83,069 tenures over 25,951 careers**, a median of **3** per
+player and a maximum of **14**. **17,144 (20.6%)** are one or two matches long,
+and the fear is that those are interleaving noise; they are not. Only **766** of
+them sit between two runs at the *same* club — **0.9%** of all tenures — so the
+short ones are overwhelmingly real: a January move, a cup tie for the parent club
+during a loan. A merge rule would have spent its time deleting those to fix a
+problem that barely exists, and would have been the page asserting something the
+record does not say. Loans need no case of their own for the same reason — a band
+says where he *played*, so a loan is a tenure and a return is a second tenure at
+the first club.
+
+**A cap is not a move.** 201 national-team matches are rated, 4,375 player-rows,
+and a band cut at every international window would say a player left his club
+nine times a season. The exclusion is written as a test on the competition's
+type, deliberately, because the fixture list names a national side exactly as it
+names a club: reading `tm.clubs` alone would have dropped the caps *by accident*,
+since no national side has a squad page, and an accident is not a decision.
+
+**Bands tile, so there is no gap to explain.** A band opens at the player's first
+recorded match for a club and runs until the next one opens; the last runs to the
+end of the line. A boundary is therefore **a first appearance, not a transfer
+date** — this project holds no transfer dates — and a stretch where he played
+nobody is absorbed into the band before it, which is the honest reading of an
+injured man who has not left his club.
+
+**The club name needed a second source, and the number is why.** `tm.clubs` is a
+table of *current squads in the covered leagues*: **796 rows against the 3,144
+clubs that appear in lineups**. Reading it alone left **3,515 of the 25,970 drawn
+careers (13.5%)** with no club on record at all — Ferencváros, Qarabağ, every side
+reached only through a European tie — which the page would then have reported as
+"no club recorded" over a record that names it perfectly well. The fixture list
+names **3,058** of those clubs, because a club that played a match is named in
+the row for that match. Resolved once in `ResultsFile`, squad name first, and
+used by the chart, the id card and the match log alike — so **#24's log and the
+id-card chip changed too**, which is deliberate: three surfaces reading two
+different answers to "what is this club called" is the failure the shared table
+exists to stop, and "club unknown" over a record that names it is not a better
+answer for being the older one. **36 careers (0.1%)** now carry no band, against
+3,515 before. **62,733** bands are drawn over **1,879** named clubs — fewer than
+the 83,069 tenures because a band is a tenure *clipped to the drawn stretch*, and
+tenures that ended before the 1,000th minute are not drawn — and the page grew
+from 12.0 MB to 13.2 MB.
+
+**The reserved background channel is spent on a strip, not on the whole plot.**
+#48 recorded that this ticket owns the chart's background *along the time axis*
+and declined to shade the burn-in there. What the plot's background actually
+holds now is #47's rank zones — an **ordered** ramp of eight tints — and a second
+tint deep enough to name a club by colour would have destroyed the ordering the
+ramp is for. So the channel is spent three ways instead: a flat white **wash** on
+alternate bands, which adds the same amount to every zone and leaves the ramp's
+order intact; a **rule** at each move, from the top of the plot through the
+ribbon, because *tie a rating change to a move* is what the ticket asked for and
+a tint alone does not do it; and a **ribbon** under the plot floor carrying the
+club's name, where there is room to read one. A name is never carried by colour —
+the two ribbon fills alternate to separate neighbours and mean nothing alone,
+exactly as a zone's tint never carries a rank alone. A band too narrow for its
+name keeps its wash and its rule and loses the label, #47's rule for a crowded
+rung, and the hover readout names the club at any month regardless.
+
+**Full strength through the burn-in**, under the rule #48 set: fade what the model
+computed, leave alone what is simply true. Where he was playing is not something
+the model computed, so there is nothing about it to disown.
+
+**No ADR of its own**, on #47's and #48's ground: it lives in the viewer and in
+one query, changes in an afternoon, re-rates nothing and moves no number the
+model produces — all 607,016 drawn points are unchanged.
+
 ## Considered options
 
 - **Value divided by exposure, per 90 (rejected — designed, built, and killed
@@ -416,6 +491,19 @@ the glossary's *Burn-in* records why this cutoff and
   (rejected — #48).** It makes his page a different *kind* of page, so two charts
   can no longer be compared by eye, and missing zones read as "we have no ruler
   for this era". We have the ruler; it is the line that is soft.
+- **Merging a short club run into its neighbours (rejected — #23).** The obvious
+  smoothing, and the measurement removed the case for it: only 766 of 83,069
+  tenures are a one- or two-match run sandwiched between two runs at the same
+  club, so a merge rule would spend its time deleting real short tenures to fix a
+  problem that barely exists.
+- **A club band as a full-plot background tint (rejected — #23, and it is what
+  #48 reserved).** #47's rank zones now fill the plot with an *ordered* ramp of
+  eight tints, and a vertical tint deep enough to name a club by colour would
+  have destroyed the ordering the ramp exists for. The channel survives as a flat
+  wash that lifts every zone equally; the naming moved to a ribbon under the plot.
+- **Banding the country as well as the club (rejected — #23).** A cap is a match
+  he played, not a place he was; the band answers "where was he", and cutting it
+  at every international window would report nine departures a season.
 - **Drop each player's first ~2,000 minutes before reading him (deferred to an
   off-by-default knob).** The model rates an unseen player 0, which here means
   *exactly average* rather than *unknown*, so a genuinely good newcomer banks

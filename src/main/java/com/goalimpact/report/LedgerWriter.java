@@ -153,20 +153,12 @@ public final class LedgerWriter {
               FROM tm.games g
               WHERE TRY_CAST(g.game_id AS BIGINT) IS NOT NULL""");
 
-        // WHICH CLUB HE PLAYED FOR that day, which rating_history does not
-        // carry - the run rates a player, not a club. Only the eligible
-        // population's rows, so the 3.18M-row scan is joined down before it is
-        // grouped. any_value because 1,038 ids carry more than one spelling and
-        // a handful more than one club row per fixture (#35); one is taken, the
-        // same resolution the page's names take.
-        s.execute("""
-            CREATE OR REPLACE TEMP TABLE his_club AS
-              SELECT CAST(gl.game_id AS BIGINT) AS match_id, gl.player_id,
-                     any_value(gl.club_id) AS club_id
-              FROM tm.game_lineups gl
-                   JOIN eligible_ids e ON e.player_id = gl.player_id
-              GROUP BY 1, 2""");
-
+        // his_club - which club he played for that day - is ResultsFile's, not
+        // this writer's, since #23: the chart's Tenure bands are cut from the
+        // same rows this log prints a club on, and two resolutions of "which
+        // club" would put a transfer at one date under a chart showing it at
+        // another.
+        //
         // The result reads from HIS side, always: "3-0" is what he won by, not
         // what the fixture list says. No home/away marker is claimed - the
         // glossary's Home side entry is explicit that the vendor's label is
@@ -233,8 +225,8 @@ public final class LedgerWriter {
                    LEFT JOIN born b ON b.player_id = h.player_id
                    LEFT JOIN side sd
                           ON sd.match_id = h.match_id AND sd.player_id = h.player_id
-                   LEFT JOIN tm.clubs mine ON mine.club_id = sd.club_id
-                   LEFT JOIN tm.clubs theirs ON theirs.club_id = sd.opp_id
+                   LEFT JOIN club_name mine ON mine.club_id = sd.club_id
+                   LEFT JOIN club_name theirs ON theirs.club_id = sd.opp_id
                    LEFT JOIN tm.competitions comp
                           ON comp.competition_id = sd.competition_id"""
             // competitions.name is the vendor's SLUG - "eredivisie",

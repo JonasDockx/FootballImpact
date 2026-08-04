@@ -5,11 +5,12 @@
   filled copy to FootballData/goalimpact-viewer.html (#46). Only the copy is
   generated - never edit the copy.
 
-  Five placeholders, all substituted by ViewerWriter. Named without their
+  Six placeholders, all substituted by ViewerWriter. Named without their
   braces here on purpose - substitution is a plain textual replace of every
   occurrence, so a placeholder written out in this comment would be filled too,
   and the page would carry the whole population twice.
     DATA              the eligible population, careers sampled monthly
+    CLUBS             every club named by a Tenure band, in index order (#23)
     CONSTANTS         ADR 0011's scale and centre, #47's rank ladder,
                       #48's burn-in boundary
     RUN_ID            the run the numbers came from
@@ -112,6 +113,7 @@
 <div id="app"></div>
 
 <script>window.DATA={{DATA}};/*end-data*/</script>
+<script>window.CLUBS={{CLUBS}};/*end-clubs*/</script>
 <script>window.PINNED={{CONSTANTS}};/*end-constants*/</script>
 <script>
 // ---------------------------------------------------------------- the run
@@ -122,10 +124,15 @@
 const RUN = { id: "{{RUN_ID}}", lastMatch: "{{LAST_MATCH_DATE}}", players: "{{PLAYER_COUNT}}" };
 
 // ---------------------------------------------------------------- data prep
-// rows: {id,name,club,pos,goalkeeper,mins,apps,y0,y1,peak,latest,ms,vs,dobm}
+// rows: {id,name,club,pos,goalkeeper,mins,apps,y0,y1,peak,latest,ms,vs,sm,sc,dobm}
 // ms = absolute month indices (year*12 + month-1); vs = the Impact index at the
 // end of that month, which is P - D(age that day) rescaled (ADR 0016). dobm is
 // the date of birth on the same axis, or null.
+//
+// sm/sc are #23's Tenure bands, on that same month axis: sm[i] is the month a
+// band opens and CLUBS[sc[i]] is the club it names. They TILE - band i runs to
+// where band i+1 opens, and the last runs to the end of the line - so there is
+// no closing month to ship and no gap to explain.
 //
 // pos and goalkeeper answer different questions and the page never merges
 // them. pos is the VENDOR's position and is the only source for the outfield
@@ -135,6 +142,7 @@ const RUN = { id: "{{RUN_ID}}", lastMatch: "{{LAST_MATCH_DATE}}", players: "{{PL
 // vendor lists in goal who never started there in a usable match was rated as a
 // field player, and that is a fact about the run rather than a blemish.
 const ALL = window.DATA;
+const CLUBS = window.CLUBS;
 const P = window.PINNED;
 // 12.5% of distinct names carry accents (#35), so both sides are folded:
 // typing "Nicolo Barella" must find "Nicolò Barella".
@@ -185,8 +193,16 @@ const PEAK_LINE = false;
 // The ceiling stays: nobody in the population exceeds it.
 function geometry(p, h) {
   const hasAge = p.dobm != null;
-  const W = 980, H = h, L = 46, R = 92, T = hasAge ? 32 : 16, B = 26;
   const m0 = p.ms[0], m1 = p.ms[p.ms.length - 1];
+  // Bands arrive as an opening month and a club index; the closing month is the
+  // next band's opening, which is what "they tile" means. Worked out once, here,
+  // because the drawing and the hover readout both need it and a second copy
+  // would drift the first time a band was clipped differently.
+  const sp = p.sm.map((m, i) => ({
+    m, to: i + 1 < p.sm.length ? p.sm[i + 1] : m1, club: CLUBS[p.sc[i]]
+  }));
+  const RIB = sp.length ? RIBBON : 0;
+  const W = 980, H = h + RIB, L = 46, R = 92, T = hasAge ? 32 : 16, B = 26 + RIB;
   const hi = 215;
   let lo = 70;
   if (p.low < lo) {
@@ -196,8 +212,19 @@ function geometry(p, h) {
     lo = Math.floor((p.low - 6) / 10) * 10;
     if (p.low >= 0) lo = Math.max(0, lo);
   }
-  return { W, H, L, R, T, B, m0, m1, lo, hi, dobm: p.dobm, ms: p.ms, vs: p.vs };
+  return { W, H, L, R, T, B, RIB, m0, m1, lo, hi, dobm: p.dobm, ms: p.ms, vs: p.vs, sp };
 }
+
+// The club he was at in a given month: the last band opened at or before it.
+// Null before the first band, which is a real state - a career whose opening
+// months are all matches no lineup names has a line and no band under it.
+const clubAt = (sp, m) => {
+  let at = null;
+  for (const s of sp) {
+    if (s.m <= m) at = s.club; else break;
+  }
+  return at;
+};
 
 const scaleX = G => m => G.L + (m - G.m0) / Math.max(1, G.m1 - G.m0) * (G.W - G.L - G.R);
 const scaleY = G => v => G.T
@@ -223,6 +250,37 @@ const zoneEdges = hi => [P.CENTRE, ...[...P.TICKS].reverse().map(t => t.index), 
 // is empty.
 const ZONE_FILL = ['#141716', '#16201c', '#172420', '#172823',
                    '#172b25', '#182e27', '#18312a', '#18342c'];
+
+// #23's club bands, in three channels and deliberately not in the zones' own.
+// ADR 0011 reserved the chart's background ALONG THE TIME AXIS for them, and
+// #47's rank zones then filled the same pixels with an ordered ramp - so a
+// second tint deep enough to name a club by colour would have destroyed the
+// ordering the ramp exists for. Instead:
+//
+//   the WASH   alternate bands lifted by one flat white veil, which adds the
+//              same amount to every zone and so leaves the ramp's order intact;
+//   the RULE   a line at each move, from the top of the plot through the
+//              ribbon, because "tie a rating change to a move" is what the
+//              ticket asked for and a tint alone does not do it;
+//   the RIBBON a strip under the plot floor carrying the club's NAME, where
+//              there is room to read one and nothing to read it against.
+//
+// Names are never carried by colour: the two ribbon fills alternate to separate
+// neighbours and mean nothing on their own, exactly as the zone ramp's tint
+// never carries a rank alone.
+const BAND_WASH = 0.024;
+const BAND_RULE = '#4d566c';
+const BAND_FILL = ['#1b2029', '#232936'];
+
+// A name is drawn where it fits and nowhere else: 11px runs about 6.1px a
+// character. A band too narrow keeps its wash and its rule and loses its label,
+// which is #47's rule for a crowded rung - the band is the fact, the name is the
+// reading - and the hover readout names the club at any month regardless.
+function bandLabel(name, w) {
+  const room = Math.floor((w - 8) / 6.1);
+  if (room >= name.length) return name;
+  return room >= 6 ? name.slice(0, room - 1) + '…' : null;
+}
 
 // The burn-in fade (#48). At the start of a run every rating is still near its
 // seed, so the population has not spread out: the mean is 100 by construction
@@ -255,6 +313,21 @@ const ZONE_FILL = ['#141716', '#16201c', '#172420', '#172823',
 // ruler moved" - fading the ruler would say we are unsure what good means.
 const FADE_ID = 'burnin';
 
+// The ribbon #23's club names are written in, under the plot floor and above the
+// year labels. It costs the CHART height rather than the plot's: h is what the
+// line gets either way, and a player with no club on record gets no ribbon and
+// no hole where one would have been.
+const RIBBON = 22;
+
+// Club names are the vendor's and 31 of them carry an apostrophe or an
+// ampersand - Connah's Quay Nomads, Brighton & Hove Albion - so they cannot go
+// into markup raw. Two escapes because they are two jobs: `esc` for a text node,
+// and `attr` for the single-quoted data-geom attribute the hover handler parses
+// back, where one unescaped apostrophe truncates the attribute and takes the
+// whole crosshair down with it.
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const attr = s => String(s).replace(/&/g, '&amp;').replace(/'/g, '&#39;');
+
 // Said once, read twice: the chart's label names the pale stretch and the hover
 // readout repeats it over a number. They are the same claim, so they are the
 // same string - two spellings of it would drift the first time either was
@@ -272,7 +345,7 @@ function fadePaint(x) {
 
 function chart(p, h = 340) {
   const geom = geometry(p, h);
-  const { W, H, L, R, T, B, m0, m1, lo, hi } = geom;
+  const { W, H, L, R, T, B, RIB, m0, m1, lo, hi, sp } = geom;
   const hasAge = p.dobm != null;
   const dropped = lo < 70;
   const x = scaleX(geom), y = scaleY(geom);
@@ -297,6 +370,15 @@ function chart(p, h = 340) {
     g += `<rect x="${L}" y="${y(top)}" width="${W - L - R}"`
        + ` height="${(y(bottom) - y(top)).toFixed(1)}" fill="${ZONE_FILL[i]}"/>`;
   }
+
+  // #23's wash, laid straight over the zones and under everything else: one
+  // flat veil on alternate club bands, so every zone under it gains the same
+  // amount and the ramp's ordering survives being tinted a second time.
+  sp.forEach((s, i) => {
+    if (i % 2 === 0) return;
+    g += `<rect x="${x(s.m).toFixed(1)}" y="${T}" width="${(x(s.to) - x(s.m)).toFixed(1)}"`
+       + ` height="${H - T - B}" fill="#ffffff" opacity="${BAND_WASH}"/>`;
+  });
 
   // The population average - the one number the whole index is defined
   // against (ADR 0011), and the one thing a rank cannot say. Drawn brighter
@@ -376,10 +458,35 @@ function chart(p, h = 340) {
     g += `<text x="${L - 6}" y="${T - 8}" fill="#525b70" font-size="10" text-anchor="end">age</text>`;
   }
 
+  // The ribbon and the move rules, drawn last of the background so a rule sits
+  // over the year gridlines it would otherwise be lost among. Full strength
+  // through the burn-in like the zones and the axes (#48): where he was playing
+  // is not something the model computed, so there is nothing about it to
+  // disown - only the LINE was unreliable in 2013, never the transfer.
+  if (RIB) {
+    const ry = H - B + 6, rh = 16;
+    sp.forEach((s, i) => {
+      const x0 = x(s.m), w = x(s.to) - x0;
+      g += `<rect x="${x0.toFixed(1)}" y="${ry}" width="${w.toFixed(1)}" height="${rh}"`
+         + ` fill="${BAND_FILL[i % 2]}"/>`;
+      // No rule before the first band: it opens where the line does, so there
+      // is no move there to mark - only the start of the drawn career.
+      if (i) {
+        g += `<line x1="${x0.toFixed(1)}" x2="${x0.toFixed(1)}" y1="${T}" y2="${ry + rh}"`
+           + ` stroke="${BAND_RULE}"/>`;
+      }
+      const label = bandLabel(s.club, w);
+      if (label) {
+        g += `<text x="${(x0 + w / 2).toFixed(1)}" y="${ry + 11.5}" fill="#9aa4b8"`
+           + ` font-size="11" text-anchor="middle">${esc(label)}</text>`;
+      }
+    });
+  }
+
   const d = p.ms.map((m, i) =>
     (i ? 'L' : 'M') + x(m).toFixed(1) + ' ' + y(p.vs[i]).toFixed(1)).join(' ');
 
-  return `<div class="chartwrap" data-geom='${JSON.stringify(geom)}'>
+  return `<div class="chartwrap" data-geom='${attr(JSON.stringify(geom))}'>
     <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
       ${fading ? fadePaint(x) : ''}
       <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="#12151c"/>
@@ -416,6 +523,14 @@ function chart(p, h = 340) {
        reaches <b>${p.low.toFixed(1)}</b>. ${BELOW_FLOOR.toLocaleString()} of
        ${ALL.length.toLocaleString()} eligible players (${share(BELOW_FLOOR)}) go below 70
        at some point, and nothing is drawn flat against the floor.</div>` : '')
+  // Fourth instance of #36's pattern: draw the normal chart, and say the one
+  // true thing it cannot show. No lineup the snapshot holds names a club for
+  // any match he played that the chart draws - most often because the matches
+  // were rated off a Derived lineup - so there is no band to draw and its
+  // absence would otherwise read as "he never moved".
+  + (sp.length ? '' : `<div class="notebar">No club is recorded for any of the matches
+       drawn here, so this career carries no club bands. The line is unaffected — the run
+       rates a player, and knowing which club he was at has never been part of it.</div>`)
   + (hasAge ? '' : `<div class="notebar">No date of birth in the snapshot — no age axis.
        The shaded bands are flat, so this career is judged against exactly the same
        zones as everybody else.${PEAK_LINE ? ` The estimated peak uses the
@@ -501,10 +616,14 @@ function wireHover(root) {
     // right answer when we have only a differently-stretched wrong one - the
     // early model had genuinely seen less football, so the reading is noisier
     // as well as squashed.
+    // The club at that month, which is what makes a narrow band readable: the
+    // ribbon drops a name it has no room for, and the readout always has one.
+    const club = clubAt(G.sp, mm);
     tip.innerHTML = `<b>${v.toFixed(1)}</b><span class="dim">Impact</span>
       <span class="sep"></span>${monthLabel(mm)}
       ${age == null ? '<span class="sep"></span><span class="dim">age unknown</span>'
                     : `<span class="sep"></span>age ${age.toFixed(1)}`}
+      ${club ? `<span class="sep"></span>${esc(club)}` : ''}
       ${mm < P.BURNIN_BOUNDARY
           ? `<span class="sep"></span><span class="dim">${SETTLING}</span>` : ''}`;
     tip.style.display = 'block';
@@ -768,7 +887,7 @@ function positionChip(p) {
 function idcard(p) {
   return `<div class="idcard">
     <h2>${p.name}</h2>
-    <span class="chip">${p.club || 'club unknown'}</span>
+    <span class="chip">${p.club ? esc(p.club) : 'club unknown'}</span>
     <span class="chip">${positionChip(p)}</span>
     <span class="chip">${p.y0}–${p.y1}</span>
     <span class="chip">${p.mins.toLocaleString()} min · ${p.apps} matches</span>
@@ -831,7 +950,7 @@ function apply() {
   $('#list').innerHTML = rows.slice(0, SHOWN).map((p, i) =>
     `<div class="item ${p === cur ? 'sel' : ''}" data-i="${i}">
       <div class="rk">${i + 1}</div>
-      <div>${p.name}<div class="dim" style="font-size:12px">${p.club || '—'} · ${p.y0}–${p.y1}</div></div>
+      <div>${p.name}<div class="dim" style="font-size:12px">${p.club ? esc(p.club) : '—'} · ${p.y0}–${p.y1}</div></div>
       <div class="pk">${p.peak ?? '—'}</div></div>`).join('')
     + (rows.length > SHOWN
         ? `<div class="dim" style="padding:12px">…${(rows.length - SHOWN).toLocaleString()}
@@ -861,7 +980,12 @@ function show(p) {
     + chart(p)
     + `<p class="dim" style="font-size:12px">Peak Impact — the projected peak the
          model re-estimates at every update — is not built yet (#41), so no second
-         line is drawn. Nothing here is a stand-in for it.</p>`
+         line is drawn. Nothing here is a stand-in for it.
+         ${p.sm.length ? `The strip under the chart is where he was playing: a band opens at
+         his first recorded match for a club and runs until the next one opens, so a
+         boundary is a first appearance rather than a transfer date, and a loan is a band
+         like any other. National-team matches open no band. Clubs the snapshot cannot name
+         leave the band before them running on.` : ''}</p>`
     + `<div class="log" id="logpanel"><h3>Match log</h3>
          <div class="dim">Loading his matches…</div></div>`
     + `<div class="foot">Run <code>${RUN.id}</code> · matches through
