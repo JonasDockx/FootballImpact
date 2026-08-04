@@ -230,6 +230,110 @@ links, **0 broken**, exact); every drawn chart point equal to its row's level to
 1 dp (**607,016 points, 0 mismatched**); row count equal to `rating_history`'s
 for the eligible population (**2,185,765**).
 
+## The burn-in fade, and the boundary it ends at (#48, 2026-08-04)
+
+This ADR pins a ruler that never re-centres, on the argument that a career must
+be read with a ruler that does not change length. The ruler is honest; the
+*line* is not, for the first few years of a run. At the start of a replay every
+rating is still near its seed, so the population has not spread out yet — and
+since the shaded zones are **sigma multiples**, the compression and the ruler
+are made of the same quantity. Measured on the designated run over #47's active
+pool, the standard deviation of the index reads **15.9 in 2013, 17.9 in 2014,
+19.2 in 2016 and 20.5 by 2026**. The mean is 100 by construction throughout, so
+everyone sits nearer 100 than they should, and a career read there against the
+pinned zones looks mid-table when it was not.
+
+**Both lines are drawn and faded, never withheld.** A sub-1,000-minute rating
+has no signal to draw and this ADR does not draw it; a 2013 rating is a real
+measurement that is merely *squashed*, and the ordering within those years is
+informative even where the level is not. So the two lines strengthen linearly
+from a pale start to full strength at a labelled vertical boundary. Shading the
+stretch was rejected on a collision: #23 owns the chart's background along the
+time axis for club spells, and a second tint in that channel could not be told
+from the first. Only one line is drawn today — `PEAK_LINE` is still `false`
+because `D` is pinned flat, so #41's dashed line would sit on top of the thick
+one — and the page says "the line" rather than "both lines" for exactly as long
+as that is true.
+
+**The rule is: fade what the model computed, leave alone what is simply true.**
+The zones, the rank rungs, the 100 line, the club bands and both axes stay at
+full strength — the honest statement is *this line is unreliable here*, not *the
+ruler moved*. One ramp serves both lines, because ADR 0016 makes them one
+quantity: the engine stores the peak and the drawn line is that peak less an
+ageing penalty, so compressing one compresses the other by exactly as much.
+Their gap is the pinned curve, which was never compressed, and fading both
+equally is what keeps it readable through the burn-in.
+
+**The floor is load-bearing.** A fade approaching invisible is truncation in
+disguise, and truncation is what was rejected. At **35%** the shape, the peak and
+a transfer dip stay traceable; what stops being legible is exactly the claim
+being disowned — where the career sat against a given zone.
+
+**The boundary is a pinned, dated constant, and this is the ticket's one piece of
+real work.** `BurnIn` holds it beside `ImpactIndex`'s scale and `RankLadder`'s
+eleven numbers. The recipe: walk the run month by month; over **#47's existing
+active pool** — past 1,000 career minutes, having played within the trailing
+twelve months — take the standard deviation of the Impact index; the boundary is
+the first month within **5%** of its settled value. The spread rather than a
+Top-100 threshold, because the zones *are* sigma multiples; #47's pool rather
+than a second one, so the boundary and the ladder are measured over the same
+people; 5% because the spread never truly stops moving, and a 2% wobble in sigma
+moves a zone edge by under half a point.
+
+Measured 2026-08-04 on the designated run — 85,050 matches, 2012-07-09 through
+2026-07-06 — the boundary is **2017-04**, where the spread reads 19.674 against
+a settled 20.539. 2017-03 reads 19.481 and misses. The active pool there is
+7,078. Re-measured at [ADR 0013](0013-spine-width.md)'s pass three with the
+zones, the ladder and the curve: it is the same query as the zones', over the
+same pool.
+
+**Never derived live**, which is the point rather than an omission: a viewer that
+worked the boundary out at build time would shift it every time an unattended
+refresh run added a few matches, and yesterday's chart would disagree with
+today's with nobody having decided anything. The recipe is backward-looking by
+construction — asking when the spread reached its settled value needs the settled
+value — which is *why* the pinned answer is the right shape.
+
+**Hovering carries a caveat, and the number is neither suppressed nor
+rescaled.** A fade does nothing to a number: `154.2` looks equally certain in
+pale ink, and the reader hovering has just moved from *roughly where was he* to
+*exactly where was he*. So the readout reads `154.2 · model still settling`
+inside the boundary. Suppressing it reads as missing data when nothing is
+missing. Rescaling it was rejected as an alternative to the whole ticket: it
+would break #46's one-contract rule by showing one number where the results file
+holds another, it needs ~80 pinned monthly spread values re-measured at every
+widening, and correcting the *level* does not make an early rating as good as a
+late one — the model had genuinely seen less football, so the reading is noisier
+as well as squashed. Marking says *less certain here*; rescaling would say *here
+is the right answer*, and there is no right answer to offer, only a
+differently-stretched wrong one.
+
+**A career ending before the boundary gets a sentence instead.** A fade works by
+contrast, and his chart is pale end to end with nothing solid beside it; the
+boundary label sits past his retirement, off the right of his chart, so it is
+never drawn. The page says in words that his career falls entirely inside the
+settling period and reads low against the zones. Dropping his zones and rungs
+was rejected — it would make his page a different *kind* of page, and missing
+zones read as "we have no ruler for this era", which is untrue. This is the third
+instance of a pattern set twice: #36 draws the careers with no date of birth
+normally and prints "no date of birth — no age axis", #40 adds the clause about
+their two lines running a fixed distance apart. Draw the normal chart, and say
+the one true thing it cannot show by itself. After ADR 0013's widening this
+sentence appears on many pages — those pages exist *because* of the widening.
+
+**No ADR of its own, and it is not staged inert.** The fade, the floor, the ramp
+and the label all live in the viewer and change in an afternoon without re-rating
+anything, which is the ground #47 declined an ADR on too. Nothing here enters the
+replay — no rating moves, no prediction changes, the results file is untouched —
+so there is no gate an inert stage could demonstrate. Accepted knowingly: the
+boundary moves when the spine widens and charts look different either side of it,
+which is already true of the zones, the ladder and the curve, and #43 settled
+that a dated constant behaving this way is normal rather than a defect. Full
+reasoning is on
+[#48](https://github.com/JonasDockx/FootballImpact/issues/48#issuecomment-5162812907);
+the glossary's *Burn-in* records why this cutoff and
+[ADR 0010](0010-scoring-window.md)'s differ on purpose.
+
 ## Considered options
 
 - **Value divided by exposure, per 90 (rejected — designed, built, and killed
@@ -277,6 +381,41 @@ for the eligible population (**2,185,765**).
 - **Per-match rows to a plain CSV (rejected).** No new dependency, but leaves
   ADR 0009's three-file design half-built and turns every later question into a
   script rather than a query.
+- **Rescale the early years to be comparable, instead of marking them
+  (rejected — #48, and it is an alternative to the fade rather than a detail of
+  it).** A corrected number would leave nothing to mark. Three reasons against.
+  It breaks #46's rule that the page and the results file are one contract: the
+  chart would show one number and the file another, with the difference invented
+  at build time. It needs ~80 pinned monthly spread values, re-measured at every
+  widening. And correcting the *level* does not make an early rating as good as a
+  late one — the model had genuinely seen less football, so the reading is
+  noisier as well as squashed, and rescaling would hide that by making it look
+  settled. A display-only recalibration remains live as a candidate shape for #9;
+  if it is ever wanted here it is a fresh ticket, not a detail of this one.
+- **Not drawing the line at all through the burn-in (rejected — #48).** The
+  1,000-minute floor above stays, because a career under it has no signal. This
+  is a different case: a 2013 rating is a real measurement that is merely
+  squashed, and the ordering within those years is informative even where the
+  level is not. A fade approaching invisible would be this rejected option
+  arriving by the back door, which is why the 35% floor is a decision rather
+  than a taste.
+- **Shading the burn-in stretch as a background tint (rejected — #48).** #23
+  claims the chart's background along the time axis for club spells, and a second
+  tint in that channel could not be told from the first.
+- **Deriving the boundary from the run, or computing it at build time
+  (rejected — #48, #46's fence, #47's rule).** An unattended refresh run adds a
+  few matches, the number shifts, and yesterday's chart disagrees with today's
+  with nobody having decided anything. Pinned, with the recipe recorded beside
+  it, exactly as `h` works.
+- **A ramp tracking the measured spread month by month (rejected — #48).** More
+  faithful — the spread climbs fast then flattens, so the first year lies most —
+  but it costs ~80 pinned monthly values, re-measured at every widening, to buy
+  fidelity *below human perception*: nobody reads a line's opacity as a number.
+  The fade's whole payload is "trust this less".
+- **Dropping the zones and rungs for a career that ends inside the burn-in
+  (rejected — #48).** It makes his page a different *kind* of page, so two charts
+  can no longer be compared by eye, and missing zones read as "we have no ruler
+  for this era". We have the ruler; it is the line that is soft.
 - **Drop each player's first ~2,000 minutes before reading him (deferred to an
   off-by-default knob).** The model rates an unseen player 0, which here means
   *exactly average* rather than *unknown*, so a genuinely good newcomer banks

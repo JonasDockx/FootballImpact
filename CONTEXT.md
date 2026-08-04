@@ -233,7 +233,8 @@ mid-table when it was not.
 scoring window stops at two years ([ADR 0010](docs/adr/0010-scoring-window.md))
 because it protects a *number* from being tuned on the model discovering its own
 population, and two seasons suffices for that. The career chart fades its lines
-for about four years (item 48) because it protects a *person* from misreading a
+up to a pinned boundary — **2017-04** on the designated run, nearly five years in
+(item 48) — because it protects a *person* from misreading a
 career against a fixed ruler, and a person keeps being misled long after the
 log-loss has stopped caring. Neither date is a bug in the other.
 _Avoid_: warm-up — [ADR 0009](docs/adr/0009-transfermarkt-as-the-rating-spine.md)

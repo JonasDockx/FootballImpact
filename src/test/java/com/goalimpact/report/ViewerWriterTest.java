@@ -233,6 +233,28 @@ class ViewerWriterTest {
         assertEquals(1, count(html, ViewerWriter.DATA_SUFFIX), "one data block");
     }
 
+    // #48's boundary reaches the page from Java, on the axis the chart draws
+    // careers on. An absolute month is easy to hand over in the wrong units -
+    // a year, a month-of-year, an epoch offset - and every one of them would
+    // put the vertical line somewhere plausible and wrong.
+    @Test
+    void carriesTheBurnInBoundaryOnTheSameMonthAxisAsTheCareers() throws Exception {
+        ViewerWriter.write(results, snapshot, page);
+        String html = Files.readString(page, StandardCharsets.UTF_8);
+
+        assertTrue(html.contains("\"BURNIN_BOUNDARY\":" + BurnIn.BOUNDARY_MONTH),
+            "the boundary, as an absolute month");
+        assertTrue(html.contains("\"BURNIN_FROM\":" + BurnIn.FROM_MONTH), "where the ramp starts");
+        assertTrue(html.contains("\"BURNIN_FLOOR\":"), "the legibility floor");
+
+        // The fixture's career is sampled onto that same axis, so the two are
+        // comparable numbers rather than two conventions that happen to agree.
+        // It starts in March 2024 rather than at his first match, because that
+        // is where his twelfth 90 minutes carry him past the threshold.
+        JsonArray ms = data(page).get(0).getAsJsonObject().getAsJsonArray("ms");
+        assertEquals(2024 * 12 + 2, ms.get(0).getAsInt(), "on the page's own month axis");
+    }
+
     private static int count(String haystack, String needle) {
         int n = 0;
         for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + 1)) {

@@ -231,6 +231,15 @@ public final class ViewerWriter {
             + ",\"RANK_POOL\":" + RankLadder.POOL
             + ",\"RANK_MEASURED\":\"" + Json.escape(RankLadder.MEASURED) + "\""
             + ",\"RANK_MATCHES_THROUGH\":\"" + Json.escape(RankLadder.MATCHES_THROUGH) + "\""
+            // #48's burn-in ramp: where it starts, where it ends, and how pale
+            // it is allowed to get. Pinned in Java like everything above it -
+            // the page never works a boundary out for itself (#46's fence).
+            + ",\"BURNIN_FROM\":" + BurnIn.FROM_MONTH
+            + ",\"BURNIN_BOUNDARY\":" + BurnIn.BOUNDARY_MONTH
+            + ",\"BURNIN_LABEL\":\"" + Json.escape(BurnIn.BOUNDARY) + "\""
+            + ",\"BURNIN_FLOOR\":" + number(BurnIn.OPACITY_FLOOR)
+            + ",\"BURNIN_MEASURED\":\"" + Json.escape(BurnIn.MEASURED) + "\""
+            + ",\"BURNIN_POOL\":" + BurnIn.POOL_AT_BOUNDARY
             // Where the match log is and how it is cut up (#24). The page picks
             // a shard with id % LEDGER_SHARDS, so this is the same decision
             // LedgerWriter made when it wrote them and must not be a second

@@ -10,7 +10,8 @@
   occurrence, so a placeholder written out in this comment would be filled too,
   and the page would carry the whole population twice.
     DATA              the eligible population, careers sampled monthly
-    CONSTANTS         ADR 0011's scale and centre, #47's rank ladder
+    CONSTANTS         ADR 0011's scale and centre, #47's rank ladder,
+                      #48's burn-in boundary
     RUN_ID            the run the numbers came from
     LAST_MATCH_DATE   the last match in that run - NOT a build clock (#46)
     PLAYER_COUNT      how many players are drawn
@@ -165,7 +166,11 @@ const yearOf = m => Math.floor(m / 12);
 // curve, and a stand-in is not something this page ships. When ADR 0016 stage 2
 // fits the curve on the wide spine, the second series arrives beside vs and this
 // flag turns the line, the "estimated now" figure and #40's no-date-of-birth
-// clause on together.
+// clause on together. When it does, that path takes the SAME stroke as the thick
+// one - url(#FADE_ID), never an opacity of its own - because #48 fades both
+// lines on one ramp: their gap is the ageing penalty, a pinned curve the model
+// never learned and never compressed, and fading them differently would be a lie
+// about how they are computed.
 const PEAK_LINE = false;
 
 // ---------------------------------------------------------------- the chart
@@ -219,12 +224,66 @@ const zoneEdges = hi => [P.CENTRE, ...[...P.TICKS].reverse().map(t => t.index), 
 const ZONE_FILL = ['#141716', '#16201c', '#172420', '#172823',
                    '#172b25', '#182e27', '#18312a', '#18342c'];
 
+// The burn-in fade (#48). At the start of a run every rating is still near its
+// seed, so the population has not spread out: the mean is 100 by construction
+// and it is the SPREAD that is short, which matters here because the shaded
+// zones are sigma multiples. Through the opening years the ruler is about a
+// tenth too wide and every career reads mid-table when it was not.
+//
+// So the line is drawn and faded, never withheld: a 2013 rating is a real
+// measurement that is merely squashed, and the ordering within those years is
+// informative even where the level is not. Truncation was rejected outright,
+// and a fade that approached invisible would be truncation in disguise - hence
+// P.BURNIN_FLOOR, which is a decision and not a taste.
+//
+// A GRADIENT rather than per-segment opacity, and rather than a tinted
+// background: #23 already claims the chart's background along the time axis for
+// club spells, and a second tint in the same channel could not be told from it.
+// One ramp, anchored in USER SPACE at the run's opening month and the pinned
+// boundary - so the opacity at a date is the same on every player's chart, and a
+// career that starts halfway up the ramp starts halfway up it rather than at the
+// floor. Beyond the boundary the gradient pads at full strength by itself.
+//
+// One ramp for BOTH lines, which is why this is one paint referenced by id
+// rather than an opacity per path: #41's dashed peak is the same quantity seen
+// the other way round, so compressing one compresses the other by exactly as
+// much. Their gap is the ageing penalty - a pinned curve the model never learned
+// and never compressed - and fading both equally is what keeps it readable.
+//
+// What does NOT fade: the shaded zones, the rank rungs, the average line and
+// both axes. The honest statement is "the line is unreliable here", not "the
+// ruler moved" - fading the ruler would say we are unsure what good means.
+const FADE_ID = 'burnin';
+
+// Said once, read twice: the chart's label names the pale stretch and the hover
+// readout repeats it over a number. They are the same claim, so they are the
+// same string - two spellings of it would drift the first time either was
+// reworded, and a caption disagreeing with a tooltip about what is wrong with a
+// number is worse than either alone.
+const SETTLING = 'model still settling';
+
+function fadePaint(x) {
+  return `<defs><linearGradient id="${FADE_ID}" gradientUnits="userSpaceOnUse"
+      x1="${x(P.BURNIN_FROM).toFixed(1)}" y1="0" x2="${x(P.BURNIN_BOUNDARY).toFixed(1)}" y2="0">
+    <stop offset="0" style="stop-color:var(--accent);stop-opacity:${P.BURNIN_FLOOR}"/>
+    <stop offset="1" style="stop-color:var(--accent);stop-opacity:1"/>
+  </linearGradient></defs>`;
+}
+
 function chart(p, h = 340) {
   const geom = geometry(p, h);
   const { W, H, L, R, T, B, m0, m1, lo, hi } = geom;
   const hasAge = p.dobm != null;
   const dropped = lo < 70;
   const x = scaleX(geom), y = scaleY(geom);
+  // Three states, and they are different pages rather than degrees of one: a
+  // career that spans the boundary carries the fade AND the labelled line; one
+  // that starts after it carries neither; one that ENDS before it carries a
+  // fade with nothing solid beside it to be read against, so it gets a sentence
+  // instead (see below).
+  const fading = m0 < P.BURNIN_BOUNDARY;
+  const boundaryInView = P.BURNIN_BOUNDARY > m0 && P.BURNIN_BOUNDARY < m1;
+  const endsInsideBurnIn = m1 <= P.BURNIN_BOUNDARY;
 
   let g = '';
   // The bands, shaded. The zones are the rank ladder's own steps, so the
@@ -283,6 +342,27 @@ function chart(p, h = 340) {
        + `<text x="${x(m)}" y="${H - 8}" fill="#6d768c" font-size="11" text-anchor="middle">${yr}</text>`;
   }
 
+  // The boundary itself, drawn once and at full strength: it is an annotation
+  // about the model, not a thing the model computed. The label carries the
+  // reason, so the fade beside it is not left as a mystery - the fade works
+  // where the eye already is, and the label explains it once.
+  //
+  // It takes whichever side of the line has room, and says a different true
+  // thing on each rather than pointing the same words the wrong way: a chart
+  // that begins just before the boundary has no room on the left for a caption
+  // about the left.
+  if (boundaryInView) {
+    const bx = x(P.BURNIN_BOUNDARY);
+    g += `<line x1="${bx.toFixed(1)}" x2="${bx.toFixed(1)}" y1="${T}" y2="${H - B}"`
+       + ` stroke="#5b6478" stroke-dasharray="4 3"/>`;
+    // Both sides name the pale stretch rather than only the line, so the reason
+    // survives either placement; the arrow is dropped on the right, where it
+    // would point away from the thing it is about.
+    g += bx - L > 170
+      ? `<text x="${(bx - 7).toFixed(1)}" y="${T + 13}" fill="#7b849a" font-size="11" text-anchor="end">◂ ${SETTLING}</text>`
+      : `<text x="${(bx + 7).toFixed(1)}" y="${T + 13}" fill="#7b849a" font-size="11">${SETTLING} to the left</text>`;
+  }
+
   // Age along the top, calendar years along the bottom (#37): the same line
   // read two ways, a birthday tick and a new-year tick.
   if (hasAge) {
@@ -301,9 +381,11 @@ function chart(p, h = 340) {
 
   return `<div class="chartwrap" data-geom='${JSON.stringify(geom)}'>
     <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+      ${fading ? fadePaint(x) : ''}
       <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="#12151c"/>
       ${g}
-      <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+      <path d="${d}" fill="none" stroke="${fading ? `url(#${FADE_ID})` : 'var(--accent)'}"
+            stroke-width="2.2"/>
       <g class="cursor" style="display:none">
         <line class="cx" y1="${T}" y2="${H - B}" stroke="#6d768c" stroke-dasharray="3 3"/>
         <circle class="cdot" r="4.5" fill="var(--accent)" stroke="#0f1115" stroke-width="2"/>
@@ -311,6 +393,25 @@ function chart(p, h = 340) {
     </svg>
     <div class="tip"></div>
   </div>`
+  // A fade works by CONTRAST, and this career has none: it is pale from end to
+  // end with no solid stretch beside it, so the fade collapses into house style.
+  // The boundary label cannot rescue him either - it sits past his retirement,
+  // off the right of his chart, so it is never drawn. He is the reader most at
+  // risk of reading a squashed career as a modest one, so the page says in words
+  // what the chart cannot show by itself.
+  //
+  // Third instance of a pattern set twice already: #36 draws the careers with no
+  // date of birth normally and prints "no date of birth — no age axis"; #40 adds
+  // a clause saying their two lines run a fixed distance apart. Draw the normal
+  // chart, and say the one true thing it cannot say. Dropping his bands and
+  // rungs was rejected: it would make his page a different KIND of page, and
+  // missing bands read as "we have no ruler for this era", which is untrue. We
+  // have the ruler; it is the line that is soft.
+  + (endsInsideBurnIn ? `<div class="notebar">This career ends before <b>${P.BURNIN_LABEL}</b>, so it
+       falls entirely inside the model's settling period — the whole line is drawn faded and
+       there is no full-strength stretch beside it for comparison. The population had not
+       spread out yet, so this career reads low against the zones. The shape of the line, and
+       where it rises and falls, are unaffected.</div>` : '')
   + (dropped ? `<div class="notebar">Floor dropped from 70 to <b>${lo}</b> — this career
        reaches <b>${p.low.toFixed(1)}</b>. ${BELOW_FLOOR.toLocaleString()} of
        ${ALL.length.toLocaleString()} eligible players (${share(BELOW_FLOOR)}) go below 70
@@ -391,10 +492,21 @@ function wireHover(root) {
     cx.setAttribute('x1', px(mm)); cx.setAttribute('x2', px(mm));
     dot.setAttribute('cx', px(mm)); dot.setAttribute('cy', py(v));
     const age = G.dobm == null ? null : (mm - G.dobm) / 12;
+    // A fade does nothing to a NUMBER (#48): 154.2 looks equally certain in pale
+    // ink, and somebody hovering has just moved from "roughly where was he" to
+    // "exactly where was he" - the most exposed reader on the page. So the
+    // caveat rides with the readout inside the boundary. The number itself is
+    // never suppressed and never rescaled: withholding it reads as missing data
+    // when nothing is missing, and a corrected number would claim we have the
+    // right answer when we have only a differently-stretched wrong one - the
+    // early model had genuinely seen less football, so the reading is noisier
+    // as well as squashed.
     tip.innerHTML = `<b>${v.toFixed(1)}</b><span class="dim">Impact</span>
       <span class="sep"></span>${monthLabel(mm)}
       ${age == null ? '<span class="sep"></span><span class="dim">age unknown</span>'
-                    : `<span class="sep"></span>age ${age.toFixed(1)}`}`;
+                    : `<span class="sep"></span>age ${age.toFixed(1)}`}
+      ${mm < P.BURNIN_BOUNDARY
+          ? `<span class="sep"></span><span class="dim">${SETTLING}</span>` : ''}`;
     tip.style.display = 'block';
     tip.style.left = Math.min(Math.max(px(mm) / G.W * r.width, 60), r.width - 60) + 'px';
     tip.style.top = (py(v) / G.H * r.height - 44) + 'px';
@@ -758,7 +870,10 @@ function show(p) {
          ${P.ELIGIBLE_MINUTES.toLocaleString()} career minutes. Rank ticks measured
          ${P.RANK_MEASURED} over matches through ${P.RANK_MATCHES_THROUGH}, active
          pool ${P.RANK_POOL.toLocaleString()}; they are a pinned reading aid, not a
-         live ranking.</div>`;
+         live ranking. The line is drawn faded before <b>${P.BURNIN_LABEL}</b>, where the
+         population had not spread out yet and every career reads nearer the average than it
+         was; that boundary is pinned too, measured ${P.BURNIN_MEASURED} over an active pool
+         of ${P.BURNIN_POOL.toLocaleString()}.</div>`;
   wireHover($('#main'));
   renderLog(p, $('#main'));
 }
