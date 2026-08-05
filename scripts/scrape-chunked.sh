@@ -37,6 +37,34 @@
 # exits cleanly; re-running resumes. Ctrl-C also works and costs at most the
 # in-flight chunk, but the flag is the tidier of the two because it never
 # discards work already fetched. Remove the file before resuming.
+#
+# THE CIRCUIT BREAKER (2026-08-05). A sitting can be worth abandoning, and until
+# now nothing could decide that. Pass 2's season 2023 averaged 4.06s per page
+# against 1.9s for seasons 2022, 2024 and 2025, logged 527 `503`s against 5 and
+# 18, and walked its chunk time from ~280s to ~1900s. It ran all night at 8
+# requests a minute for a result a later sitting would have got in a fifth of the
+# time. Only four chunks FAILED outright, so a failure count alone would barely
+# have noticed - the run was degrading, not breaking, which is why the breaker
+# watches page latency and 5xx rate and not just rc.
+#
+# On 2026-08-05 a twenty-page probe from this laptop and from an unrelated
+# datacenter IP, twenty-six seconds apart, returned means of 16.71s and 16.02s -
+# a 4% difference across two continents (scripts/latency-probe.sh). The slowness
+# is Transfermarkt's and is shared by every client, so the remedy is not to go
+# slower, not to change egress and not to change HTTP client. It is to notice and
+# come back later. That is all this does.
+#
+# It writes its reason INTO the STOP file rather than just touching it, so the
+# log says why the sitting ended. Every existing `[ -f $STOP ]` test still works,
+# a hand-made `touch ~/spine/STOP` still works, and spine-start.ps1 clears it on
+# the next start - so the breaker ends a sitting without ever blocking a resume.
+#
+#   BREAKER=0             disable entirely
+#   BREAKER_FAILS=3       consecutive hard chunk failures before tripping
+#   BREAKER_5XX_PCT=10    5xx-per-record percentage over one chunk ...
+#   BREAKER_5XX_MIN=20    ... ignored on chunks smaller than this, too few to judge
+#   BREAKER_SLOW_S=6      avg page seconds (healthy is ~1.9) ...
+#   BREAKER_SLOW_N=3      ... sustained over this many consecutive chunks
 set -uo pipefail
 
 ASSET=${1:?asset, e.g. game_lineups}
@@ -78,6 +106,25 @@ echo "=== $ASSET $SEASON: $TOTAL chunks of $CHUNK, started $(date -Is) ===" >> "
 
 STOP="$HOME/spine/STOP"
 
+BREAKER=${BREAKER:-1}
+BREAKER_FAILS=${BREAKER_FAILS:-3}
+BREAKER_5XX_PCT=${BREAKER_5XX_PCT:-10}
+BREAKER_5XX_MIN=${BREAKER_5XX_MIN:-20}
+BREAKER_SLOW_S=${BREAKER_SLOW_S:-6}
+BREAKER_SLOW_N=${BREAKER_SLOW_N:-3}
+consec_fail=0
+consec_slow=0
+
+# Ends the sitting: records why, in the log and in the STOP file, then exits 3 -
+# the same code a requested stop uses, which backfill.sh already unwinds cleanly.
+trip() {
+  echo "=== CIRCUIT BREAKER: $1 ===" | tee -a "$LOG" >&2
+  echo "=== halting at $2, $done_count/$TOTAL done. Nothing is lost; re-run to resume. ===" \
+    | tee -a "$LOG" >&2
+  echo "circuit breaker $(date -Is): $1" > "$STOP"
+  exit 3
+}
+
 done_count=0
 for chunk in "$DIR"/chunk_*.json; do
   base=$(basename "$chunk" .json)
@@ -94,6 +141,9 @@ for chunk in "$DIR"/chunk_*.json; do
     exit 3
   fi
   echo "--- $base ($(date '+%H:%M:%S')) ---" >> "$LOG"
+  # Remember where the log ends, so the breaker can read back exactly this
+  # chunk's own crawler output and nothing from the chunks before it.
+  log_mark=$(wc -c < "$LOG")
   poetry run tfmkt "$ASSET" -s "$SEASON" -p "$chunk" 2>>"$LOG" \
     | grep '^{' | gzip > "$out.part"
   # The crawler's own exit status decides, not the size of the output. Two
@@ -115,6 +165,50 @@ for chunk in "$DIR"/chunk_*.json; do
   else
     rm -f "$out.part"
     echo "--- $base FAILED rc=$rc after $n records - left for retry ---" >> "$LOG"
+  fi
+
+  [ "$BREAKER" = "1" ] || continue
+
+  # This chunk's slice of the log, and the two health numbers in it. The crawler
+  # reports its own average page latency, which is the right measure to compare
+  # against the pinned 1.9s baseline: it is per-request and so does not care that
+  # a `games` chunk is one competition while a `game_lineups` chunk is 100 games.
+  chunk_log=$(tail -c "+$((log_mark + 1))" "$LOG" 2>/dev/null)
+  n5xx=$(printf '%s' "$chunk_log" | grep -c 'status code: 5')
+  avg=$(printf '%s' "$chunk_log" \
+    | grep -oE 'request_avg_finished_duration . [0-9.]+s' | tail -1 | grep -oE '[0-9.]+')
+
+  if [ "$rc" -eq 0 ]; then
+    consec_fail=0
+  else
+    consec_fail=$((consec_fail + 1))
+    [ "$consec_fail" -ge "$BREAKER_FAILS" ] \
+      && trip "$consec_fail consecutive chunk failures" "$base"
+  fi
+
+  # Rate, not count: 527 5xx across a season means nothing without a denominator.
+  # But a rate needs a sample. A `games` chunk is ONE competition and some yield
+  # a handful of fixtures, so on a 5-record chunk a single blip reads as 20% and
+  # would end the night over nothing. Below BREAKER_5XX_MIN records the rate is
+  # not evidence and is not consulted - which also disposes of the divide-by-zero
+  # on a legitimately empty chunk (AFCN, ARG1 before 2024).
+  if [ "${n:-0}" -ge "$BREAKER_5XX_MIN" ] && [ "$n5xx" -gt 0 ]; then
+    pct=$((n5xx * 100 / n))
+    if [ "$pct" -ge "$BREAKER_5XX_PCT" ]; then
+      trip "$n5xx 5xx responses over $n records (${pct}%, limit ${BREAKER_5XX_PCT}%)" "$base"
+    fi
+  fi
+
+  # Sustained, never a single chunk: latency here is wildly variable even when
+  # healthy - the probe saw 0.21s and 55.9s in the same twenty requests - so one
+  # slow chunk is noise and only a run of them is a degraded sitting.
+  if [ -n "$avg" ] && awk "BEGIN{exit !($avg >= $BREAKER_SLOW_S)}"; then
+    consec_slow=$((consec_slow + 1))
+    echo "--- $base: avg page ${avg}s (healthy ~1.9s), slow chunk $consec_slow/$BREAKER_SLOW_N ---" >> "$LOG"
+    [ "$consec_slow" -ge "$BREAKER_SLOW_N" ] \
+      && trip "$consec_slow consecutive chunks averaging >=${BREAKER_SLOW_S}s per page (last ${avg}s, healthy ~1.9s)" "$base"
+  else
+    consec_slow=0
   fi
 done
 

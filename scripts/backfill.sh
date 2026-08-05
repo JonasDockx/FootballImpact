@@ -72,9 +72,17 @@ mkdir -p "$(dirname "$LOG")"
 
 say() { echo "$*" | tee -a "$LOG"; }
 
+# Why the sitting ended. A hand-made `touch ~/spine/STOP` leaves the file empty
+# and this prints nothing extra; the circuit breaker writes its reason into it
+# (see scrape-chunked.sh), and that reason is the whole point of the breaker -
+# a run that halts without saying why is the stall this project has already been
+# fooled by three times.
+why_stopped() { [ -s "$STOP" ] && say "    reason: $(cat "$STOP")"; }
+
 say "=== backfill [$TAG]: seasons $FIRST..$LAST from $(basename "$COMPS"), started $(date -Is) ==="
 if [ -f "$STOP" ]; then
   say "!!! $STOP exists - remove it before starting, or nothing will run"
+  why_stopped
   exit 1
 fi
 
@@ -95,7 +103,7 @@ for SEASON in $(seq "$FIRST" -1 "$LAST"); do
   say "--- season $SEASON: games ($(date -Is))"
   "$HERE/scrape-chunked.sh" games "$SEASON" "$COMPS" 1 "$TAG"
   rc=$?
-  [ "$rc" -eq 3 ] && { say "=== stopped on request during games $SEASON ==="; exit 3; }
+  [ "$rc" -eq 3 ] && { say "=== stopped during games $SEASON ==="; why_stopped; exit 3; }
   [ "$rc" -ne 0 ] && { say "!!! games $SEASON incomplete (rc=$rc) - re-run to resume"; exit "$rc"; }
 
   GAMES="$HOME/spine/scrapes/games_$SEASON-$TAG.jsonl.gz"
@@ -109,7 +117,7 @@ for SEASON in $(seq "$FIRST" -1 "$LAST"); do
   say "--- season $SEASON: game_lineups, $ngames pages ($(date -Is))"
   "$HERE/scrape-chunked.sh" game_lineups "$SEASON" "$GAMES" 100 "$TAG"
   rc=$?
-  [ "$rc" -eq 3 ] && { say "=== stopped on request during game_lineups $SEASON ==="; exit 3; }
+  [ "$rc" -eq 3 ] && { say "=== stopped during game_lineups $SEASON ==="; why_stopped; exit 3; }
   [ "$rc" -ne 0 ] && { say "!!! game_lineups $SEASON incomplete (rc=$rc) - re-run to resume"; exit "$rc"; }
 
   # Merge per season, not once at the end. The scrape is already durable in the
