@@ -8,3 +8,6 @@ INGESTION-HANDOVER.md
 STAGE3-CHEATSHEET.md
 target/
 .scratch/migration/
+
+# scripts/ gained importable Python with gi_adaptive.py (ADR 0017)
+__pycache__/

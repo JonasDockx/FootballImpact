@@ -59,6 +59,21 @@
 # a hand-made `touch ~/spine/STOP` still works, and spine-start.ps1 clears it on
 # the next start - so the breaker ends a sitting without ever blocking a resume.
 #
+# INTERACTION WITH THE ADAPTIVE GOVERNOR (ADR 0017, 2026-08-06). The scrape no
+# longer runs at a fixed one page at a time; concurrency climbs to eight and
+# collapses to one on the first 5xx. That means SOME 5xx are now expected - they
+# are how the governor finds the ceiling - and the 10% trip below had to be
+# re-checked rather than assumed. Simulated against an origin refusing everything
+# above four in flight, steady-state probing costs 2.4%. The two mechanisms do
+# not fight, and the breaker still means what it meant: not "an error happened"
+# but "this whole sitting is not worth continuing".
+#
+# BREAKER_SLOW_S is the number to re-read first if sittings start ending early.
+# It measures per-page wall time, which can inflate under concurrency when the
+# far end is contended, so 6s is a slightly stricter test than it was when every
+# page was fetched alone. Left at 6 because an origin in trouble is still exactly
+# what it was chosen to detect.
+#
 #   BREAKER=0             disable entirely
 #   BREAKER_FAILS=3       consecutive hard chunk failures before tripping
 #   BREAKER_5XX_PCT=10    5xx-per-record percentage over one chunk ...
@@ -78,8 +93,11 @@ cd "$HOME/spine/transfermarkt-datasets"
 export PATH="$HOME/.local/bin:$PATH"
 GI=/mnt/c/Users/dockx/Documents/Programmeren/GoalImpact/scripts
 
-python3 "$GI/throttle-scraper.py" --check > /dev/null \
-  || { echo "THROTTLE NOT APPLIED - refusing to scrape"; exit 1; }
+# Printed rather than silenced, to stderr and so into the log: what limits were
+# in force is part of the record of a scrape, and after ADR 0017 it is no longer
+# a constant that can be assumed from the date.
+python3 "$GI/throttle-scraper.py" --check >&2 \
+  || { echo "ACQUISITION LIMITS NOT APPLIED - refusing to scrape" >&2; exit 1; }
 
 # Checked here rather than trusted, because its absence is INVISIBLE: without it
 # every cup and every tournament returns 0 fixtures, 0 failed requests, and a

@@ -49,7 +49,7 @@ echo
 # show nothing for minutes at a time - which is exactly the fake stall that
 # STAGE3-CHEATSHEET.md warns about, and it would be self-inflicted.
 tail -n0 -F "$LOG" 2>/dev/null \
-  | grep --line-buffered -aE 'status code: [0-9]+|^--- chunk_|CIRCUIT BREAKER|^=== |Crawled [0-9]+/[0-9]+|request_avg_finished_duration|Failed to connect' \
+  | grep --line-buffered -aE 'status code: [0-9]+|^--- chunk_|CIRCUIT BREAKER|^=== |Crawled [0-9]+/[0-9]+|request_avg_finished_duration|Failed to connect|gi\.adaptive' \
   | while IFS= read -r line; do
       now=$(date '+%H:%M:%S')
       # Strip the ANSI colouring Crawlee emits; it survives the pipe and turns
@@ -59,6 +59,15 @@ tail -n0 -F "$LOG" 2>/dev/null \
       case "$clean" in
         *"CIRCUIT BREAKER"*)
           printf '%s  ** %s\n' "$now" "$(printf '%s' "$clean" | sed 's/^=== //; s/ ===$//')" ;;
+
+        *"gi.adaptive:"*)
+          # The governor's own decisions (ADR 0017). Worth surfacing unfiltered:
+          # they are rare by construction - at most seven ramp lines between
+          # backoffs - and they are the only place the current concurrency is
+          # visible at all. A run that sits at "-> 2/8" all night is telling you
+          # the site is refusing roughly every twentieth page.
+          printf '%s  %s\n' "$now" \
+            "$(printf '%s' "$clean" | sed 's/.*gi\.adaptive: //')" ;;
 
         *"status code: "*)
           code=$(printf '%s' "$clean" | grep -oE 'status code: [0-9]+' | grep -oE '[0-9]+')

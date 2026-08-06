@@ -405,7 +405,20 @@ output shape is identical by construction, which was this ADR's premise for
 choosing the vendor — but two commitments now bind every refresh, including item
 27's weekly job.
 
-**1. Politeness is a pinned constraint, not a courtesy.** Transfermarkt's
+**1. Politeness is a pinned constraint, not a courtesy.**
+
+> **The rate below is superseded (2026-08-06) by
+> [ADR 0017](./0017-adaptive-acquisition-rate.md).** Acquisition is now adaptive:
+> one to eight pages in flight, under a ceiling of one page per 0.25 seconds,
+> collapsing to one on the first 5xx, 429 or 403. Read the numbers in this
+> paragraph as history. Everything else here stands — *where* the patch lives and
+> why, the user-agent decision below, and standing rule 2 — and ADR 0017 changes
+> none of it. The reason the loosening was possible at all is that the "one
+> request per second" written here was never the binding constraint: at a
+> concurrency of one the achieved rate is 1/latency, about 32 pages a minute
+> against this cap of 60, so the cap was never once reached.
+
+Transfermarkt's
 robots.txt disallows bots. Acquisition runs at **one request per second, with a
 concurrency of one**, and the throttle lives as a patch checked into `scripts/`
 (`throttle-scraper.py`) rather than as a local edit to the vendor clone, so the
